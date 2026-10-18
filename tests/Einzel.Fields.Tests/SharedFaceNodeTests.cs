@@ -179,9 +179,13 @@ public sealed class SharedFaceNodeTests(ITestOutputHelper output)
             Tolerance: 1e-9);
 
         var channel = Assert.Single(GeometryBuilder3D.SolveChannels(geometry));
-        var cuts = channel.Mask.Cuts!;
 
-        Assert.False(channel.Mask.IsFixed(8, 8, 10));
+        // A channel carries its mask's counts and not the mask, so the mask is built again
+        // here - the same declaration on the same grid, so the same mask.
+        var mask = GeometryBuilder3D.BuildMask(geometry, GeometryBuilder3D.BuildGrid(geometry));
+        var cuts = mask.Cuts!;
+
+        Assert.False(mask.IsFixed(8, 8, 10));
         Assert.Equal(CutLinks3D.MinimumFraction, cuts.Fraction(8, 8, 10, Arm3D.Up, out var up));
         Assert.Equal(CutLinks3D.MinimumFraction, cuts.Fraction(8, 8, 10, Arm3D.Down, out var down));
         Assert.Equal(-100.0, up);

@@ -897,7 +897,7 @@ public static class Program
 
             Console.Out.WriteLine(string.Create(
                 invariant,
-                $"field {element.Index}  {element.Type,-14} {size,-12} {element.Seconds,8:F2} s  {element.MemoryMiB,7:F1} MiB"));
+                $"field {element.Index}  {element.Type,-14} {size,-12} {element.Seconds,8:F2} s  {EstimateCommand.MemorySize(element.MemoryMiB),11}"));
         }
 
         if (outcome.Study is { } study)
@@ -915,7 +915,7 @@ public static class Program
         }
 
         Console.Out.WriteLine(string.Create(
-            invariant, $"total         {EstimateCommand.Duration(outcome.Seconds)}, peak {outcome.MemoryMiB:F1} MiB"));
+            invariant, $"total         {EstimateCommand.Duration(outcome.Seconds)}, peak {EstimateCommand.MemorySize(outcome.MemoryMiB)}"));
 
         Console.Out.WriteLine();
         Console.Out.WriteLine($"basis: {outcome.Basis}");

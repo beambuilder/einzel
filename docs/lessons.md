@@ -5088,6 +5088,64 @@ name which device.** Every slot parameter now says whether it is the prototype's
 released instrument's, and the prototype is one override away rather than lost.
 
 
+
+## A memory figure written from a list of fields, and the geometry it left out
+
+`einzel estimate` billed every solve 48 bytes a node, from a comment naming what the solver
+allocates: potential, right-hand side, residual, "and the correction and restriction buffers
+down the V-cycle hierarchy". Nothing measured it, and it was a fifth of what a volume solve
+holds. Sampling the live set through real builds - a full collection forced from a second
+thread every few milliseconds, keeping the largest - gives **240 bytes a node** on the Galerkin
+hierarchy, 142 on the rediscretized one, and 143 to 150 for a plane solve.
+
+**The fields the comment listed are 24 of the 240.** The largest terms are the geometry: a
+conductor mask (9 bytes a node) and six cut-link arms of two doubles each (96), allocated in
+full although about 4 per cent of the arms are cut. The Galerkin hierarchy then stores the fine
+operator as eight doubles a node and forms its first coarse level from it with three scratch
+arrays over the fine grid - 64, 20 and 27 more, all live at once at the peak. **A list of what
+a solver allocates, written by someone thinking about the numerics, lists the numerics.** The
+Astral at a 1 mm cell was billed 3.1 GiB and needs 15.3.
+
+Two checks said the live set was the right quantity. Under a hard heap limit the Astral at 4 mm
+completed at 279 MiB and ran out at 275, against a sampled live peak of 259 - so the collector
+gives back its garbage when it must, and the live set plus a few per cent is the floor. And
+with memory to spare the same build's heap reached 390 bytes a node, because the collector
+frees large arrays lazily. **What has to fit is the live set; what a process shows is higher
+and depends on the machine**, so the estimate states the first and says the second is higher.
+
+The statement now lives beside the arrays (`SolveMemoryModel`), one named term per array, and
+a test measures a real build against it as a slope between two meshes, so the runtime's fixed
+cost cancels. The band is 0.90 to 1.02: tight above, because an estimate that runs under is
+discovered by the run failing, and one extra field is 3.3 per cent - a mutation adding one
+fails both volume tests.
+
+
+## A method run once keeps every temporary it ever made
+
+A driven volume geometry is solved one basis channel at a time, and each channel should keep
+only its potential. The linear ion trap, two channels, measured **353.7 bytes a node** at its
+peak against 248. The first cause was ordinary: the loop kept each finished channel's mask in
+the record it returned, 105 bytes a node, to report two integers. Replacing the mask with its
+counts took it to **344.7** - nine bytes, which is the mask's own flags and values, and not the
+96 of cut links hanging off it.
+
+The cut links were held by **a temporary with no name**. The record was built as
+`new ChannelSolve(index, mask.FixedCount, mask.Cuts?.CutCount ?? 0, ...)`, and the null check
+puts `mask.Cuts` into a stack slot. A method called once runs as first-tier JIT code, and
+first-tier code reports every such slot live until it is reused or the method returns - so the
+previous channel's cut links stayed reachable through the whole of the next channel's solve.
+Moving the loop body into a method of its own, so the slot dies with the frame, gave **248.2**
+against 248 predicted.
+
+Three things generalise. **Setting a local to null does not reach it**, because the reference
+is not in the local. **A test in Debug sees it and a benchmark in a hot loop does not**: the
+channel loop runs twice, never tiers up, and behaves in production exactly as it does
+unoptimized - which is the regime to measure a one-shot build in. And the fix is structural
+rather than clever: **when a loop body allocates something large that must not outlive the
+iteration, give the body a frame of its own.** The test for it compares a two-channel build
+with the same geometry undriven; putting the inline loop back makes the second channel cost
+102.8 bytes a node against a limit of 30.
+
 ## A node on a face two conductors share is decided by rounding, and no refinement ladder can see it
 
 `astral-3d`'s foil is sixteen slices at sixteen potentials, sharing a face every 28.125 mm,
@@ -5158,3 +5216,48 @@ not from the account of the incident**: the account said nodes because nodes are
 talks about a mesh, and the mechanism was "the mesh samples the geometry, and a sample landed
 on a discontinuity of the boundary data" - which names nodes *and* arms. And when a
 recorded number is quoted as evidence, find out what it counted.
+
+## A cost measured on a branch describes the branch, and garbage is not time
+
+SPEC.md recorded that building a volume mask allocated **61 kB a node** on the C-trap and 4.2
+kB on the linear ion trap, against the 105 the mask keeps, beside builds of 95 s and about 200
+s that made the mask look like the thing to fix. Every one of those numbers was true of where
+it was measured and of nothing else. The branch predated the bounding-box cull, which asks each
+electrode only about the nodes near it, and on `main` the same masks allocated 5,470 and 260
+bytes a node. The 200 s build was timed under a live-set sampler forcing a full collection
+from a second thread every few milliseconds; without it the build takes 13 to 15 s.
+
+**Before acting on a recorded cost, re-measure it on the code you are about to change.** A
+number carries the conditions it was taken under - a branch, a build, an instrument attached
+to the process - and none of them travels with it into a status page.
+
+The second half is the one that would have survived re-measuring. With the garbage removed the
+C-trap's mask fell by a third to a half and the linear ion trap's did not move: a revolve
+entry test made about thirty objects per call and several times as many interface calls
+through iterators, a prism entry test one list beside a 29-edge polygon. The prism's gen0 count fell from 42 to 2
+and the clock did not notice. **Allocation is evidence of cost, not a measurement of it**;
+what decides whether removing it pays is what else the call does, and the only way to know is
+to time it - which is why the regression test holds the allocation and the documentation
+holds the time.
+
+## A measurement that can only read low makes a difference that can read either way
+
+`SolveMemoryTests` sampled each build's live set by forcing a full collection every 2 ms and
+keeping the largest, which can only under-read the peak - and then compared builds by their
+*difference*, a slope between two meshes or one channel against two. A difference of two
+under-readings is not an under-reading: it reads high when the smaller build's peak is missed
+and low when the larger one's is. It passed on a sixteen-core workstation and failed on both
+four-core CI runners in Release, where a build is eight times faster than in Debug and 2 ms is
+a timer tick of about 15 on Windows: the smallest build finished in about 10 ms.
+
+**The flakiness was hiding a wrong number.** With the sampler made dense - waiting only as
+long as the last collection took - and each build measured three times, every reading became
+stable, and the plane statement then failed every time: 153.3 stated, 132.7 measured, because
+it counted coarse levels that do not exist at the instant of its peak. The sparse sampler had
+read 143 for the same slope, inside the band, because the error in the difference happened to
+point the same way as the error in the statement. **A test that only passes when its
+measurement is noisy is not a passing test**; before loosening a band that a faster machine
+breaks, make the measurement deterministic and see what it says. And choose the statistic for
+the errors the measurement now has, not the ones it used to have: the largest of three was
+right while samples could only miss, and wrong once they were dense enough to catch an instant
+the statement does not count - the middle of three is robust to a lone outlier either way.

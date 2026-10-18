@@ -1072,6 +1072,21 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
 
   **A measurement mistake worth keeping:** an end-to-end check timed a scan at 50.6 s against 31.0 s minutes earlier, which reads as the estimate being badly wrong. The full test suite was running in parallel. **A wall-clock comparison on a loaded machine measures the load**, and the estimate is the one number in this project most likely to be validated that way.
 
+- **The estimate's memory figure was a fifth of the truth, and measuring it found a driven solve holding every channel's geometry.** `einzel estimate` billed 48 bytes a node for every solve, from a comment listing three fields and some restriction buffers. Sampling the live set through real builds - a forced full collection from a second thread every few milliseconds - gives **240 bytes a node on the Galerkin hierarchy, 141.7 on the rediscretized one, 143.25 on a plane** (first stated as 153; see the review entry below), and the fields are 24 of the 240: the conductor mask and six cut-link arms of two doubles each are 105 before a field exists, and the Galerkin build stores the fine operator (64) and forms its first coarse level with scratch over the fine grid. **The Astral at a 1 mm cell was billed 3.1 GiB and needs 15.3.**
+
+  | | predicted | measured, bytes a node |
+  | --- | --- | --- |
+  | Astral, 1.12 M and 8.68 M nodes (Galerkin) | 240.0 | 241.3, 240.9 |
+  | segmented quadrupole, 1.09 M and 4.28 M (rediscretized) | 141.7 | 141.9, 141.8 |
+  | linear ion trap, two channels | 248.9 | **353.7** before, **248.7** after |
+  | diffusive run, per density node | - | 263, where 16 was billed |
+
+  **The live set is what has to fit**, checked two ways: under a hard heap limit the Astral at 4 mm completed at 279 MiB and failed at 275 against a live 259, while unconstrained its heap reached 1.6x that, because the collector frees large arrays lazily. The statement lives beside the arrays (`SolveMemoryModel`), the hierarchy is asked of the solver (`PoissonSolver3D.UsesGalerkin`) rather than decided twice, and `SolveMemoryTests` pins it as a slope between two meshes - band 0.90 to 1.02, which one extra field fails.
+
+  **Two channels held 353.7 where 248 was right, for two reasons in turn.** The channel loop kept each finished channel's mask in the record it returned, to report two integers. Removing that took it to 344.7, and the remaining 96 was the previous channel's cut links held by **a temporary with no name**: `mask.Cuts?.CutCount` puts `mask.Cuts` in a stack slot, and a method run once executes as first-tier JIT code, which keeps every such slot reachable until it is reused. **When a loop body allocates something large that must not outlive the iteration, give the body a frame of its own.** Both in `docs/lessons.md`.
+
+  **The 64 M-node limit is the wrong kind of rule for memory**: at 240 bytes a node it is 14.3 GiB, ten times what `ScalarField3D`'s message says, and memory is a property of the machine while validation is a property of the document. What the code cannot index is about 358 M nodes (`node * 6` in an `int`). Recorded in `docs/cli.md` and not changed here, because the limit lived on the then-unmerged `fix/grid-too-large-is-a-refusal` branch; that has since landed as `VolumeMesh.MaximumNodes` (#48) and the restating is still to do.
+
 
 - **A box may be tilted, and the Astral's convergence is the reason.** Every three-dimensional primitive is axis-aligned, which builds the devices §1's table asks for and cannot express one thing: a plate deliberately **not** parallel to another. An asymmetric-track analyser's two mirrors converge by a couple of hundred microns over a third of a metre, and that convergence is the **mechanism** rather than a tolerance — it is what makes the drift decelerate and reverse. Without it the model validates, solves, converges, and produces a drift that never reverses.
 
@@ -2329,6 +2344,72 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
   them, so a refused mesh cannot hide behind an earlier mistake), `Grid3D.NodeCount` wrapped
   negative past 2^63 and slipped the guard (now saturates), and the estimate's mesh note used
   its own copy of the rounding rule. `docs/lessons.md`, `docs/cli.md`.
+
+- **Mask assembly, timed: a fifth of a build on curved geometry, and the garbage was only some
+  of that.** Measuring a volume solve's memory recorded a mask allocating **61 kB a node** on
+  the C-trap's revolved rods, 4.2 kB on the linear ion trap's prisms and 289 bytes on the
+  Astral, against the 105 it keeps, and builds of 95 s and 200 s that made the mask look
+  dominant. **All of that was the branch it was measured on**: it predates the bounding-box
+  cull, and the 200 s was under a live-set sampler forcing full collections every few
+  milliseconds. On `main` the masks allocate 5,470, 260 and 105 bytes a node, and the builds
+  take 16 s and 13 to 15 s.
+
+  | | mask | build | mask's share | B/node | gen0 |
+  | --- | --- | --- | --- | --- | --- |
+  | `c-trap` 0.5 mm, before | 2.7-3.5 s | 16.1-16.3 s | 19-22% | 5,470 | 694 |
+  | after | **1.6-2.3 s** | **14.1-14.3 s** | **12-16%** | **105.1** | 1-4 |
+  | `linear-ion-trap-3d` 0.5 mm, before | 1.0-1.5 s, two channels | 13.2-14.6 s | 14-22% | 259.5 | 41-43 |
+  | after | 1.0-1.5 s | 12.6-15.2 s | 16-18% | **105.2** | 1-3 |
+  | `astral-3d` 4 mm | 0.15-0.30 s | 7.3-8.1 s | 2-4% | 105.3 | 1-2 |
+  | `segmented-quadrupole` 0.5 mm | 0.07-0.23 s | 4.6-5.0 s | 2-5% | 105.2 | 1-2 |
+
+  The garbage was two entry tests: the prism and revolve `FirstEntry` each built a
+  `List<double>` per call, and the revolve took each profile edge's roots from an iterator and
+  its cap angles from a new array. They now gather crossings into 1 KiB on the stack, or an
+  array borrowed from the shared pool for an outline too long for it, and take roots through
+  out parameters - **bit-identical masks** on all four templates, every fixed flag, value, cut
+  fraction and cut potential at every level, each electrode at its own potential so a swapped
+  winner would show. **It bought time on the revolve and none on the prism**: thirty objects
+  and many interface calls a call against one list over a 29-edge polygon, so the prism's
+  polygon was always its cost and its gen0 count fell from 42 to 2 without the clock noticing.
+  What remains is **84-97% cut links**, not rasterization, so the next lever is how many exact
+  entry tests that pass asks for. `MaskAllocationTests` holds every primitive's entry and
+  distance tests to zero bytes and a mask to what it keeps; restoring the old entry tests fails
+  both (12,588 bytes a node, 192 MB a sweep), and so does making only the borrowed-array path
+  allocate. Merging `main` into the memory branch to measure this also carried a conflict
+  worth knowing: the shared-face check read each channel's mask, which the memory work had
+  stopped keeping, so it is now asked of the first channel inside its own frame.
+  `docs/numerics.md`, "What building the mask costs".
+
+- **The memory tests passed on a workstation and failed on CI, and the sampler was the reason
+  — which hid a plane statement 7 percent high.** `SolveMemoryTests` sampled the live set by
+  forcing a full collection every 2 ms, which on Windows is a timer tick of about 15, and
+  differenced the peaks of two builds, so a missed peak read either way. On the four-core CI
+  runners in Release, where a build is eight times faster than in Debug, three tests failed:
+  0.776 and 1.143 of the statement, and a second channel costing 90.5 bytes a node against a
+  limit of 30. Sampling as densely as the collections allow - waiting only as long as the last
+  collection took - and measuring each build three times made every reading stable, and then
+  the plane failed *consistently*: **153.3 stated, 132.7 measured**. The plane's peak is the
+  instant the first coarse level copies its cut links, and the statement had added every deeper
+  level and that level's residual, which do not exist yet at that instant. Derived from what is
+  alive then, **143.25**; measured on four shipped plane templates, 143.3 to 143.9. The
+  workstation had passed the wrong number because the slope's error happened to cancel it.
+  Keeping the *largest* of the three readings then failed once on the Linux runner, 7 bytes a
+  node over in the Galerkin build - about one grid-sized array, seen once more in WSL and never
+  on demand, consistent with catching an instant when a new array exists beside the one it
+  replaces. The test keeps the middle reading: that discards a lone outlier either way, and an
+  array a build really keeps is in all three.
+
+  **Three more from the review of the same pull request, all real.** The driven plane build kept
+  its first channel's mask for the shared-face check after the loop - 73 bytes a node through
+  every later solve; each channel now solves in a frame of its own, and a test that restores the
+  old loop reads exactly 73.0. The first coarse level was charged as an eighth of the fine grid,
+  and a grid keeps one node more than half on each axis: the Astral's real first level makes it
+  241.8 against 241.3 measured where an eighth said 240.0, and 32769 by 5 by 5 is 251.9. And a
+  diffusive mixture was charged its working set once: each species holds its own - measured,
+  the second and third added 247.6 and 248.3 to one species' 248.5 - so a three-species run was
+  billed a third of it. The estimate's comparison with this machine also lived inside the
+  solved-field explanation, so a diffusive run through analytic fields was never compared at all.
 
 Adding a travelling-wave guide or a multipole should need only one more file — axisymmetry, repeats and RF all exist now. If it needs a change below `Einzel.Library`, LIB-1 says the abstraction is wrong — believe it.
 

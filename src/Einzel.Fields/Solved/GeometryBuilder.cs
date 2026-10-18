@@ -630,11 +630,17 @@ public static class GeometryBuilder
 
     /// <summary>One basis channel of a solve, with the evidence that solve produced.</summary>
     /// <param name="Index">Which channel, in the order the decomposition found them.</param>
-    /// <param name="Mask">The finest-level mask, for the node and cut counts.</param>
+    /// <param name="FixedNodes">How many finest-level nodes the channel's mask held fixed.</param>
+    /// <param name="CutLinks">How many stencil arms a conductor surface cut.</param>
     /// <param name="Potential">The solved potential.</param>
     /// <param name="Report">How the solve went.</param>
+    /// <remarks>
+    /// The mask's two counts rather than the mask, for the reason the three-dimensional
+    /// record gives: a list of these built channel by channel kept every earlier channel's
+    /// mask and cut links alive through every later solve, to report two integers.
+    /// </remarks>
     public sealed record ChannelSolve(
-        int Index, DirichletMask Mask, ScalarField2D Potential, SolveReport Report);
+        int Index, int FixedNodes, int CutLinks, ScalarField2D Potential, SolveReport Report);
 
     /// <summary>Solves a geometry channel by channel, and hands back the diagnostics.</summary>
     /// <param name="solve">The compiled solve.</param>
@@ -662,28 +668,78 @@ public static class GeometryBuilder
         ArgumentNullException.ThrowIfNull(solve);
 
         var grid = BuildGrid(solve);
-        var solves = new List<ChannelSolve>();
-        var index = 0;
+        var patterns = Patterns(solve);
+        var solves = new List<ChannelSolve>(patterns.Count);
         IReadOnlyList<Core.Results.ValidityWarning>? warnings = null;
 
-        foreach (var pattern in Patterns(solve))
+        for (var index = 0; index < patterns.Count; index++)
         {
-            var mask = BuildMask(solve, grid, e => pattern.GetValueOrDefault(e.Name, 0.0));
-
-            var (potential, report) = PoissonSolver2D.Solve(
-                mask,
-                solve.Tolerance,
-                maximumCycles: 400,
-                coarsen: coarse => BuildMask(solve, coarse, e => pattern.GetValueOrDefault(e.Name, 0.0)));
+            var channel = SolvePattern(solve, grid, patterns[index], askMesh: index == 0);
 
             // Every channel carries the same finding, because every channel solves on the
             // same mesh round the same conductors; einzel solve reports it once per element.
-            warnings ??= SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid, mask));
+            warnings ??= channel.MeshWarnings;
 
-            solves.Add(new ChannelSolve(index++, mask, potential, report with { Warnings = warnings }));
+            solves.Add(new ChannelSolve(
+                index, channel.FixedNodes, channel.CutLinks, channel.Potential, channel.Report with { Warnings = warnings ?? [] }));
         }
 
         return solves;
+    }
+
+    /// <summary>Solves one channel's pattern, and lets go of everything but its potential.</summary>
+    /// <param name="solve">The declared geometry.</param>
+    /// <param name="grid">The finest grid.</param>
+    /// <param name="pattern">What each electrode holds in this channel; zero where it is absent.</param>
+    /// <param name="askMesh">Whether to ask, while the mask is in hand, where the mesh samples a shared face.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>A method of its own so that the mask dies with its frame</b>, which is the volume
+    /// builder's lesson met in the plane. A channel loop written inline kept the first
+    /// channel's mask for the shared-face check after the loop - 73 bytes a node, through
+    /// every later channel's solve - and a method run once executes as first-tier JIT code,
+    /// which keeps every temporary reachable until its slot is reused, so even a mask the loop
+    /// no longer named could outlive its channel. Asked here, the shared-face question needs
+    /// no mask afterwards: every channel solves on the same mesh round the same conductors,
+    /// so the first channel's answer is every channel's.
+    /// </para>
+    /// </remarks>
+    private static (ScalarField2D Potential, SolveReport Report, int FixedNodes, int CutLinks,
+        IReadOnlyList<Core.Results.ValidityWarning>? MeshWarnings) SolvePattern(
+        CompiledSolvedField solve, Grid2D grid, Dictionary<string, double> pattern, bool askMesh)
+    {
+        double Weight(CompiledElectrode e) => pattern.GetValueOrDefault(e.Name, 0.0);
+
+        var mask = BuildMask(solve, grid, Weight);
+
+        var (potential, report) = PoissonSolver2D.Solve(
+            mask,
+            solve.Tolerance,
+            maximumCycles: 400,
+            coarsen: coarse => BuildMask(solve, coarse, Weight));
+
+        var warnings = askMesh ? SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid, mask)) : null;
+
+        return (potential, report, mask.FixedCount, mask.Cuts?.CutCount ?? 0, warnings);
+    }
+
+    /// <summary>What building a declared geometry will hold in memory, worked out without building it.</summary>
+    /// <param name="solve">The declared geometry.</param>
+    /// <returns>The node and channel counts and the bytes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
+    /// <remarks>
+    /// The channels come from the same decomposition <see cref="Build"/> makes, so the count
+    /// this uses and the solves that run cannot disagree. A plane build solves them one at a
+    /// time and keeps each potential, and no channel's mask outlives its solve.
+    /// </remarks>
+    public static SolveMemory Memory(CompiledSolvedField solve)
+    {
+        ArgumentNullException.ThrowIfNull(solve);
+
+        var grid = BuildGrid(solve);
+
+        return SolveMemoryModel.For(
+            grid.NodeCount, Math.Max(1, Patterns(solve).Count), SolveMemoryModel.PlanePeak, galerkin: false);
     }
 
     /// <summary>The relative potentials of each independent channel.</summary>
@@ -809,23 +865,20 @@ public static class GeometryBuilder
         var harmonics = new List<IReadOnlyList<WeightTerm>>(groups.Count);
 
         SolveReport worst = new(true, 0, 0.0, 0.0, 0.0);
-        DirichletMask? firstMask = null;
+        IReadOnlyList<Core.Results.ValidityWarning>? meshWarnings = null;
 
-        foreach (var group in groups)
+        for (var index = 0; index < groups.Count; index++)
         {
+            var group = groups[index];
+
             // The channel's relative potentials, and zero on every electrode it
             // does not reach. The scale was taken out during normalisation and put
-            // back on the weight, so this solve is in units of that weight.
-            var pattern = group.Pattern;
+            // back on the weight, so this solve is in units of that weight. Solved in a
+            // frame of its own, which lets go of the mask - see SolvePattern.
+            var (potential, report, _, _, warnings) =
+                SolvePattern(solve, grid, group.Pattern, askMesh: index == 0);
 
-            var mask = BuildMask(solve, grid, e => pattern.GetValueOrDefault(e.Name, 0.0));
-            firstMask ??= mask;
-
-            var (potential, report) = PoissonSolver2D.Solve(
-                mask,
-                solve.Tolerance,
-                maximumCycles: 400,
-                coarsen: coarse => BuildMask(solve, coarse, e => pattern.GetValueOrDefault(e.Name, 0.0)));
+            meshWarnings ??= warnings;
 
             IElectrostaticField basis = new SolvedField2D(
                 potential,
@@ -854,8 +907,13 @@ public static class GeometryBuilder
         }
 
         // Once per geometry rather than per channel: which nodes sit on a shared face is a
-        // property of the mesh and the conductors, and every channel solves on both.
-        worst = worst with { Warnings = SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid, firstMask)) };
+        // property of the mesh and the conductors, and every channel solves on both. Asked of
+        // the first channel while its mask was in hand; a geometry with no channel is asked
+        // node by node, as it always was.
+        worst = worst with
+        {
+            Warnings = meshWarnings ?? SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid)),
+        };
 
         if (solve.Stages.Count == 0)
         {

@@ -520,6 +520,72 @@ what a cubic through a step does. Measured at 101.8 V of 100 applied, in a shell
 one cell thick where an ion is about to be absorbed anyway. The maximum principle
 is therefore a statement about nodes, and is checked there.
 
+### What building the mask costs, and how much of it was garbage
+
+Measuring a volume solve's memory found mask assembly allocating far more than the mask
+keeps: **61 kB a node on the C-trap's revolved rods, 4.2 kB on the linear ion trap's
+prisms and 289 bytes on the Astral**, against the 105 the mask holds (`SolveMemoryModel`).
+That was transient garbage, so it could not move the peak. What it cost in time was not
+known, and a build of the linear ion trap had taken about 200 s against 95 s for the C-trap,
+which looked as though the mask might dominate.
+
+**Both of those were measured on code that no longer exists.** They came from a branch that
+predates the bounding-box cull, which asks each electrode only about the nodes near it; with
+the cull the same masks allocate **5,470 bytes a node, 260 and 105**. And the linear ion
+trap's build was timed under a live-set sampler that forced a full collection from a second
+thread every few milliseconds. On today's code, with no sampler, the two builds take 13 to
+15 s and 16 s.
+
+Measured in Release with nothing else running on the machine, timing the mask apart from the
+real build (`SolveChannels`: every channel's mask and solve, plus the shared-face check):
+
+| | nodes | channels | mask | build | mask's share | allocated by the mask | gen0 in the build |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `c-trap`, 0.5 mm (revolve) | 1.08 M | 1 | 2.7-3.5 s | 16.1-16.3 s | **19-22%** | 5,470 B/node | 694-697 |
+| ...entry tests rewritten | | | **1.6-2.3 s** | **14.1-14.3 s** | **12-16%** | **105.1** | 1-4 |
+| `linear-ion-trap-3d`, 0.5 mm (prism) | 1.09 M | 2 | 1.0-1.5 s each | 13.2-14.6 s | 14-22% | 259.5 | 41-43 |
+| ...entry tests rewritten | | | 1.0-1.5 s each | 12.6-15.2 s | 16-18% | **105.2** | 1-3 |
+| `astral-3d`, 4 mm (box) | 1.12 M | 1 | 0.15-0.30 s | 7.3-8.1 s | 2-4% | 105.3 | 1-2 |
+| `segmented-quadrupole`, 0.5 mm (cylinder) | 1.09 M | 1 | 0.07-0.23 s | 4.6-5.0 s | 2-5% | 105.2 | 1-2 |
+
+A range covers every run: seven to nine of the mask per row, across the harness's modes, and
+two of the build. The first mask in a process is usually the slowest, since it pays for
+compiling and for the operating system handing over 110 MB of fresh pages - the segmented
+quadrupole's took 221 ms and the next 73 - and a command-line build is always a first run.
+The Astral and the segmented quadrupole have neither prisms nor revolves, so their rows are
+the same code before and after.
+
+**On boxes and cylinders the mask is a few percent of a build; on the curved and polygonal
+templates it is a sixth to a fifth.** The garbage was in two entry tests. The prism and
+revolve `FirstEntry` each gathered their crossings in a new `List<double>`, and the revolve
+took each profile edge's quadratic roots from an iterator - an enumerator object per sloping
+edge, of 27 edges a profile - and its two cap angles from a new array. They now gather into 1 KiB on the
+stack, or into an array borrowed from the shared pool for an outline too long for that (more
+than 62 revolved vertices or 126 extruded), and take roots through out parameters. The masks
+are **the same bits**: every fixed flag, value, cut fraction and cut potential, at the finest
+level and at every coarse level beneath it, with each electrode held at its own distinct
+potential so that a swapped winner would show, hashed before and after on all four templates.
+
+**Removing the garbage bought time on the revolve and none on the prism**, which is the part
+worth knowing. A revolve entry test made about thirty objects a call, and several times as
+many interface calls through the iterators; a prism entry test made one list over a 29-edge
+polygon, and the polygon is the cost. So the C-trap's mask fell by a third to a half and its
+build by 12 percent, while the linear ion trap's moved by less than its run-to-run spread, its
+gen0 count falling from about 42 to 2 without the clock noticing.
+
+**What is left is the cut-link pass, not rasterization.** Building the fine mask with the
+coarse levels' builder - the same rasterization, no cut links - splits it:
+
+| | mask | rasterize | cut links |
+| --- | --- | --- | --- |
+| `c-trap`, before | 3.1-3.3 s | 0.11 s | **96-97%** |
+| `c-trap`, after | 1.6-2.0 s | 0.11 s | **93-95%** |
+| `linear-ion-trap-3d`, after | 1.0-1.5 s | 0.15-0.16 s | **84-90%** |
+
+So the next lever on a curved template is the number of exact entry tests the cut pass asks
+for, not anything they allocate. `MaskAllocationTests` holds the entry tests to zero bytes and
+a mask to what it keeps.
+
 ## Landing on a switch
 
 A sequencer switches state at known times, and a Runge-Kutta step that spans one

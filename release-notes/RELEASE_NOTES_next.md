@@ -53,6 +53,20 @@ become a feature release without being renamed twice.
   structure is one solve per basis channel, and each was labeled only `field 0`, so the RF
   funnel's two channels looked like one solve printed twice. Each is now labeled
   `field 0 channel 0`, `field 0 channel 1`, matching the `channel` field in `--json`.
+- **`einzel estimate`'s memory figure was a fifth of the truth.** It billed every solve 48
+  bytes a node; a volume solve holds about 240 on the Galerkin multigrid hierarchy, 142 on the
+  rediscretized one and 143 on a plane, measured against real builds. `astral-3d` at a 1 mm
+  cell was quoted 3.1 GiB and needs 15.3. The estimate now counts basis channels, charges a
+  diffusive mixture once per species, adds what earlier elements keep, says what its figure
+  counted, and says so when the peak is more than half of what the process may use on this
+  machine - whether or not anything in the model is solved.
+- **A driven solve held finished channels' geometry** while solving the next: 353.7 bytes a
+  node for two volume channels where 248.7 is what they need, and the driven plane build kept
+  its first channel's mask, 73 bytes a node, through every later channel.
+- **Building a volume solve's conductor mask allocated per stencil arm** on revolved and
+  extruded electrodes: 5.5 kB a node on `c-trap`, 260 bytes on `linear-ion-trap-3d`, against
+  the 105 the mask keeps. It now allocates only what it keeps, and the masks are bit-identical.
+  `c-trap`'s build at 0.5 mm takes 14 s where it took 16; `linear-ion-trap-3d`'s is unchanged.
 
 ## Known limits
 

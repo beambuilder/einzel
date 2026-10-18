@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace Einzel.Core.Model;
 
 /// <summary>The shapes a three-dimensional electrode can take.</summary>
@@ -578,72 +580,7 @@ public sealed record CompiledElectrode3D
             }
 
             case Electrode3DShape.Prism:
-            {
-                // The outline is not convex in general, so the segment may enter and leave
-                // its cross-section more than once. Every crossing of an outline edge is
-                // found in closed form; between consecutive crossings the segment is wholly
-                // inside or wholly outside the outline, decided at the midpoint; the first
-                // inside interval that also lies within the axial slab is the entry.
-                var (fromAlong, fromA, fromB) = Resolve(fromX, fromY, fromZ);
-                var (toAlong, toA, toB) = Resolve(toX, toY, toZ);
-
-                if (!Slab(fromAlong, toAlong, Lower, Upper, out var axialLow, out var axialHigh))
-                {
-                    return null;
-                }
-
-                var crossings = new List<double> { 0.0, 1.0 };
-                var da = toA - fromA;
-                var db = toB - fromB;
-                var count = Vertices.Count;
-                for (int i = 0, j = count - 1; i < count; j = i++)
-                {
-                    var (ax, ay) = Vertices[j];
-                    var (bx, by) = Vertices[i];
-                    var ex = bx - ax;
-                    var ey = by - ay;
-                    var denominator = (da * ey) - (db * ex);
-                    if (denominator == 0.0)
-                    {
-                        continue;
-                    }
-
-                    var qx = ax - fromA;
-                    var qy = ay - fromB;
-                    var t = ((qx * ey) - (qy * ex)) / denominator;
-                    var u = ((qx * db) - (qy * da)) / denominator;
-                    if (t > 0.0 && t < 1.0 && u >= 0.0 && u <= 1.0)
-                    {
-                        crossings.Add(t);
-                    }
-                }
-
-                crossings.Sort();
-                for (var k = 0; k + 1 < crossings.Count; k++)
-                {
-                    var start = crossings[k];
-                    var end = crossings[k + 1];
-                    if (end <= start)
-                    {
-                        continue;
-                    }
-
-                    var middle = 0.5 * (start + end);
-                    if (!PolygonContains(fromA + (da * middle), fromB + (db * middle)))
-                    {
-                        continue;
-                    }
-
-                    var entry = Math.Max(start, axialLow);
-                    var exit = Math.Min(end, axialHigh);
-                    if (entry <= exit && exit >= 0.0 && entry <= 1.0)
-                    {
-                        return Math.Max(entry, 0.0);
-                    }
-                }
-
-                return null;
-            }
+                return PrismEntry(fromX, fromY, fromZ, toX, toY, toZ);
 
             case Electrode3DShape.Revolve:
                 return RevolveEntry(fromX, fromY, fromZ, toX, toY, toZ);
@@ -818,6 +755,127 @@ public sealed record CompiledElectrode3D
 
     private bool PolygonContains(double a, double b) => PolygonDistance(a, b) <= 0.0;
 
+    /// <summary>
+    /// How many crossings an entry test holds on the stack before it borrows an array: 1 KiB,
+    /// which is a revolved outline of 62 vertices or an extruded one of 126.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An entry test is asked once per stencil arm near the metal, so it must allocate
+    /// nothing.</b> The prism and revolve tests each gathered their crossings in a new
+    /// <c>List&lt;double&gt;</c>, and the revolve test took each edge's roots from an iterator
+    /// and its two cap angles from a new array - so building a mask allocated 5.5 kB a node on
+    /// the C-trap's revolved rods and 260 bytes on the linear ion trap's prisms, against the
+    /// 105 the mask keeps. Before the bounding-box cull asked each electrode only about the
+    /// nodes near it, those figures were 61 kB and 4.2 kB.
+    /// </para>
+    /// <para>
+    /// An outline too long for the stack borrows from the shared pool, which reuses one array
+    /// per thread rather than allocating per call, so the test allocates nothing whatever the
+    /// vertex count. <c>MaskAllocationTests</c> holds both paths to zero.
+    /// </para>
+    /// </remarks>
+    private const int CrossingsOnStack = 128;
+
+    /// <summary>Where a segment first enters an extruded outline, as a fraction of it.</summary>
+    /// <remarks>
+    /// The outline is not convex in general, so the segment may enter and leave its
+    /// cross-section more than once. Every crossing of an outline edge is found in closed
+    /// form; between consecutive crossings the segment is wholly inside or wholly outside the
+    /// outline, decided at the midpoint; the first inside interval that also lies within the
+    /// axial slab is the entry.
+    /// </remarks>
+    private double? PrismEntry(
+        double fromX, double fromY, double fromZ, double toX, double toY, double toZ)
+    {
+        var (fromAlong, fromA, fromB) = Resolve(fromX, fromY, fromZ);
+        var (toAlong, toA, toB) = Resolve(toX, toY, toZ);
+
+        if (!Slab(fromAlong, toAlong, Lower, Upper, out var axialLow, out var axialHigh))
+        {
+            return null;
+        }
+
+        // The two ends, and at most one crossing an edge.
+        var capacity = Vertices.Count + 2;
+
+        if (capacity <= CrossingsOnStack)
+        {
+            return PrismEntry(
+                stackalloc double[CrossingsOnStack], fromA, fromB, toA - fromA, toB - fromB, axialLow, axialHigh);
+        }
+
+        var borrowed = ArrayPool<double>.Shared.Rent(capacity);
+
+        try
+        {
+            return PrismEntry(borrowed, fromA, fromB, toA - fromA, toB - fromB, axialLow, axialHigh);
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(borrowed);
+        }
+    }
+
+    /// <summary>The prism entry test over its outline, gathering crossings in the space given.</summary>
+    private double? PrismEntry(
+        Span<double> crossings, double fromA, double fromB, double da, double db, double axialLow, double axialHigh)
+    {
+        var found = 0;
+        crossings[found++] = 0.0;
+        crossings[found++] = 1.0;
+
+        var count = Vertices.Count;
+        for (int i = 0, j = count - 1; i < count; j = i++)
+        {
+            var (ax, ay) = Vertices[j];
+            var (bx, by) = Vertices[i];
+            var ex = bx - ax;
+            var ey = by - ay;
+            var denominator = (da * ey) - (db * ex);
+            if (denominator == 0.0)
+            {
+                continue;
+            }
+
+            var qx = ax - fromA;
+            var qy = ay - fromB;
+            var t = ((qx * ey) - (qy * ex)) / denominator;
+            var u = ((qx * db) - (qy * da)) / denominator;
+            if (t > 0.0 && t < 1.0 && u >= 0.0 && u <= 1.0)
+            {
+                crossings[found++] = t;
+            }
+        }
+
+        crossings = crossings[..found];
+        crossings.Sort();
+        for (var k = 0; k + 1 < crossings.Length; k++)
+        {
+            var start = crossings[k];
+            var end = crossings[k + 1];
+            if (end <= start)
+            {
+                continue;
+            }
+
+            var middle = 0.5 * (start + end);
+            if (!PolygonContains(fromA + (da * middle), fromB + (db * middle)))
+            {
+                continue;
+            }
+
+            var entry = Math.Max(start, axialLow);
+            var exit = Math.Min(end, axialHigh);
+            if (entry <= exit && exit >= 0.0 && entry <= 1.0)
+            {
+                return Math.Max(entry, 0.0);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>A point inside a revolved outline: its profile's middle, halfway round.</summary>
     private (double X, double Y, double Z) RevolveCenter()
     {
@@ -960,6 +1018,30 @@ public sealed record CompiledElectrode3D
     private double? RevolveEntry(
         double fromX, double fromY, double fromZ, double toX, double toY, double toZ)
     {
+        // The two ends, at most two roots an edge, and the two caps. See CrossingsOnStack.
+        var capacity = (2 * Vertices.Count) + 4;
+
+        if (capacity <= CrossingsOnStack)
+        {
+            return RevolveEntry(stackalloc double[CrossingsOnStack], fromX, fromY, fromZ, toX, toY, toZ);
+        }
+
+        var borrowed = ArrayPool<double>.Shared.Rent(capacity);
+
+        try
+        {
+            return RevolveEntry(borrowed, fromX, fromY, fromZ, toX, toY, toZ);
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(borrowed);
+        }
+    }
+
+    /// <summary>The revolve entry test, gathering crossings in the space given.</summary>
+    private double? RevolveEntry(
+        Span<double> crossings, double fromX, double fromY, double fromZ, double toX, double toY, double toZ)
+    {
         var (fromAlong, fromA, fromB) = Resolve(fromX, fromY, fromZ);
         var (toAlong, toA, toB) = Resolve(toX, toY, toZ);
 
@@ -967,7 +1049,9 @@ public sealed record CompiledElectrode3D
         var dA = toA - fromA;
         var dB = toB - fromB;
 
-        var crossings = new List<double> { 0.0, 1.0 };
+        var found = 0;
+        crossings[found++] = 0.0;
+        crossings[found++] = 1.0;
 
         var count = Vertices.Count;
 
@@ -1004,7 +1088,7 @@ public sealed record CompiledElectrode3D
 
                 if (flat > 0.0 && flat < 1.0)
                 {
-                    crossings.Add(flat);
+                    crossings[found++] = flat;
                 }
 
                 continue;
@@ -1017,29 +1101,29 @@ public sealed record CompiledElectrode3D
             var g0 = r0 + (slope * (fromAlong - h0));
             var g1 = slope * dAlong;
 
-            foreach (var root in Roots(
+            var roots = Roots(
                 (dA * dA) + (dB * dB) - (g1 * g1),
                 2.0 * ((fromA * dA) + (fromB * dB) - (g0 * g1)),
-                (fromA * fromA) + (fromB * fromB) - (g0 * g0)))
+                (fromA * fromA) + (fromB * fromB) - (g0 * g0),
+                out var first,
+                out var second);
+
+            if (roots > 0 && OnEdge(first, g0, g1, fromAlong, dAlong, h0, dh))
             {
-                if (root <= 0.0 || root >= 1.0 || g0 + (g1 * root) < 0.0)
-                {
-                    continue;
-                }
+                crossings[found++] = first;
+            }
 
-                var fraction = (fromAlong + (dAlong * root) - h0) / dh;
-
-                if (fraction >= 0.0 && fraction <= 1.0)
-                {
-                    crossings.Add(root);
-                }
+            if (roots > 1 && OnEdge(second, g0, g1, fromAlong, dAlong, h0, dh))
+            {
+                crossings[found++] = second;
             }
         }
 
         if (!SweepsFully)
         {
-            foreach (var cap in (double[])[FromHalfTurns, ToHalfTurns])
+            for (var side = 0; side < 2; side++)
             {
+                var cap = side == 0 ? FromHalfTurns : ToHalfTurns;
                 var c = double.CosPi(cap);
                 var s = double.SinPi(cap);
 
@@ -1055,14 +1139,15 @@ public sealed record CompiledElectrode3D
 
                 if (crossing > 0.0 && crossing < 1.0)
                 {
-                    crossings.Add(crossing);
+                    crossings[found++] = crossing;
                 }
             }
         }
 
+        crossings = crossings[..found];
         crossings.Sort();
 
-        for (var k = 0; k + 1 < crossings.Count; k++)
+        for (var k = 0; k + 1 < crossings.Length; k++)
         {
             var start = crossings[k];
             var end = crossings[k + 1];
@@ -1086,29 +1171,59 @@ public sealed record CompiledElectrode3D
         return null;
     }
 
-    /// <summary>The real roots of a quadratic, which may be linear when its leading term is not there.</summary>
-    private static IEnumerable<double> Roots(double a, double b, double c)
+    /// <summary>
+    /// Whether a root of an edge's quadratic is a crossing: inside the segment, on the swept
+    /// side of the axis rather than the cone's mirror image, and within the edge's own span.
+    /// </summary>
+    private static bool OnEdge(double root, double g0, double g1, double fromAlong, double dAlong, double h0, double dh)
     {
+        if (root <= 0.0 || root >= 1.0 || g0 + (g1 * root) < 0.0)
+        {
+            return false;
+        }
+
+        var fraction = (fromAlong + (dAlong * root) - h0) / dh;
+
+        return fraction >= 0.0 && fraction <= 1.0;
+    }
+
+    /// <summary>The real roots of a quadratic, which may be linear when its leading term is not there.</summary>
+    /// <returns>
+    /// How many roots there are: none, one in <paramref name="first"/>, or two in the order the
+    /// quadratic formula gives them, minus before plus.
+    /// </returns>
+    /// <remarks>
+    /// Out parameters rather than an iterator, which allocated an enumerator for every sloping
+    /// edge of every profile on every arm a mask asked about. See <see cref="CrossingsOnStack"/>.
+    /// </remarks>
+    private static int Roots(double a, double b, double c, out double first, out double second)
+    {
+        first = 0.0;
+        second = 0.0;
+
         if (a == 0.0)
         {
             if (b != 0.0)
             {
-                yield return -c / b;
+                first = -c / b;
+                return 1;
             }
 
-            yield break;
+            return 0;
         }
 
         var discriminant = (b * b) - (4.0 * a * c);
 
         if (discriminant < 0.0)
         {
-            yield break;
+            return 0;
         }
 
         var root = Math.Sqrt(discriminant);
 
-        yield return (-b - root) / (2.0 * a);
-        yield return (-b + root) / (2.0 * a);
+        first = (-b - root) / (2.0 * a);
+        second = (-b + root) / (2.0 * a);
+
+        return 2;
     }
 }
