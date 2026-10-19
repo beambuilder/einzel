@@ -2594,6 +2594,39 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
 
   **The same line had a second victim.** One electrode tapping one generator twice - at one phase, or at two phases of a sinusoid, which resolve into the same in-phase and quadrature supplies - wrote one entry twice, and 100 V and 50 V flew *exactly* as 50 V alone. Contributions now add, which is bit-identical wherever an electrode reaches a supply once. Eighteen tests in three files (`ElectrodeNameTests`, `ElectrodeNameValidationTests`, `DriveChannelIdentityTests`); fifteen fail on the unfixed code, the other three are controls, and each of six mutations of the fix fails its own tests. `docs/lessons.md`, "A default every instance shares cannot be a key".
 
+- **An empty environment is not a sandbox, and on Windows it was not one Python could start
+  in.** The sandbox gave its child no environment at all (`Environment.Clear()`), so no
+  credential, proxy setting or `PYTHONPATH` could reach it - and on an ordinary Windows desktop
+  every extension died before its first line: "Fatal Python error: _Py_HashRandomization_Init:
+  failed to get random numbers to initialize Python". CPython seeds its hash randomisation from
+  the operating system's random source at start-up, and up to 3.10 it reaches that source through
+  CryptoAPI (`CryptAcquireContext`), which does not work in a process with no `SYSTEMROOT`. On a
+  machine where `py.exe` resolves to 3.9.13 that is **ten tests red on `main`**: all six of
+  `SubprocessRunnerTests` and four in `Einzel.Cli.Tests` (`ExtensionSurfaceTests` x3,
+  `AStudyDrivenByAnExtensionRecordsWhichPythonRanIt`), and `einzel ext register` followed by
+  `einzel ext test` fails on every project.
+
+  **Measured before changing anything**, with the sandbox's own `-I -B`: 3.9.13 dies with an
+  empty environment and starts with `SYSTEMROOT` alone; with `WINDIR` alone, `TEMP` and `TMP`
+  alone, or `PATHEXT` alone it still dies, so none of the three is kept; 3.11.5 starts with
+  nothing at all, because 3.11 moved `os.urandom` to `BCryptGenRandom`
+  (`Python/bootstrap_hash.c` on the 3.10 and 3.11 branches). **That is also why CI was green**:
+  the `windows-2025` runner's default Python is 3.12.10, and all six extension tests passed there
+  on every run. A test that needs the machine's Python is a test of the machine's Python, and the
+  suite had been checking the one version that does not care.
+
+  The child now keeps `SYSTEMROOT` on Windows - the path of the Windows directory, not a
+  credential, a proxy setting or an import path - and nothing anywhere else; Linux and macOS are
+  unchanged. `SubprocessRunner.ChildEnvironment` builds the list and is tested directly, both
+  branches on both runners, against a parent carrying the variable as Windows spells it
+  (`SystemRoot`), the three rejected candidates, `PATH`, `PYTHONPATH`, a proxy with a password
+  and a cloud secret; `TheChildInheritsNoEnvironment` now asserts the list the child saw rather
+  than only the absence of one planted secret. Mutation-checked: dropping `SYSTEMROOT` from the
+  list fails the unit test and the same ten end-to-end tests; adding `WINDIR` fails the unit test
+  and the end-to-end list. `docs/extensions.md` carries the per-platform list; SPEC.md EXT-3's
+  evidence no longer says "zero inherited environment". After: 1,644 tests, 0 failures, on a
+  Windows desktop with Python 3.9.
+
 Adding a travelling-wave guide or a multipole should need only one more file — axisymmetry, repeats and RF all exist now. If it needs a change below `Einzel.Library`, LIB-1 says the abstraction is wrong — believe it.
 
 Two findings from Stage 1 that bear on the spec:

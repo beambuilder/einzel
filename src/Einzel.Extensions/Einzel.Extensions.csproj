@@ -16,4 +16,8 @@
     <ProjectReference Include="..\Einzel.Core\Einzel.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Einzel.Extensions.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -125,6 +125,14 @@ become a feature release without being renamed twice.
 - **`einzel solve` reported the planar mirror pair without its boards.** A static geometry's
   edge-profile electrodes were solved at zero; the peak it printed was the cap's, so it looked
   right. Runs were never affected.
+- **Extensions could not start on a Windows machine whose Python is 3.10 or older.** The
+  sandbox started the interpreter with no environment at all, and CPython up to 3.10 reaches
+  the random source it seeds hash randomisation from through CryptoAPI, which fails without
+  `SYSTEMROOT`: every extension died with "Fatal Python error: _Py_HashRandomization_Init"
+  before its first line, and `einzel ext test` failed on every project. The child now keeps
+  `SYSTEMROOT` on Windows - the path of the Windows directory, and nothing else - and nothing
+  anywhere else. CI never saw it because the Windows runner's Python is 3.12, which uses
+  `BCryptGenRandom` and starts with an empty environment.
 
 ## Known limits
 

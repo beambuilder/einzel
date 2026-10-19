@@ -101,6 +101,67 @@ public sealed class SubprocessRunner
         return null;
     }
 
+    /// <summary>
+    /// What a sandboxed child is started with, built from the parent's environment.
+    /// </summary>
+    /// <param name="parent">The parent's environment.</param>
+    /// <param name="windows">Whether the child runs on Windows.</param>
+    /// <returns>
+    /// On Windows, <c>SYSTEMROOT</c> as the parent spells it, when the parent has it, and
+    /// nothing else. Elsewhere, nothing at all.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The scrub was a bare <c>Clear()</c>, and on an ordinary Windows desktop that killed
+    /// every extension before its first line: "Fatal Python error:
+    /// _Py_HashRandomization_Init: failed to get random numbers to initialize Python".
+    /// CPython seeds its hash randomisation from the operating system's random source at
+    /// start-up, and up to 3.10 it reaches that source through CryptoAPI
+    /// (<c>CryptAcquireContext</c>), which does not work in a process whose environment
+    /// has no <c>SYSTEMROOT</c>. Measured with the sandbox's own <c>-I -B</c>: with an
+    /// empty environment 3.9.13 dies and 3.11.5 does not (3.11 moved to
+    /// <c>BCryptGenRandom</c>); with <c>SYSTEMROOT</c> alone 3.9.13 starts; with
+    /// <c>WINDIR</c> alone, <c>TEMP</c> and <c>TMP</c> alone, or <c>PATHEXT</c> alone it
+    /// still dies. So <c>SYSTEMROOT</c> is kept and the three others are not. CI never saw
+    /// the failure because the Windows runner's Python is 3.12.
+    /// </para>
+    /// <para>
+    /// What is kept is the path of the Windows directory. It is not a credential, a proxy
+    /// setting or an import path, and Python's own <c>subprocess</c> documentation asks for
+    /// the same thing from the other side: an environment handed to a Windows child must
+    /// include a valid <c>SystemRoot</c>. Linux and macOS keep nothing, which is what the
+    /// Linux runner measures on every run.
+    /// </para>
+    /// </remarks>
+    internal static Dictionary<string, string> ChildEnvironment(
+        IDictionary<string, string?> parent, bool windows)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+
+        var child = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!windows)
+        {
+            return child;
+        }
+
+        foreach (var (name, value) in parent)
+        {
+            // By name and not by key lookup, so the answer does not depend on which
+            // comparer the parent dictionary was built with. Windows spells it SystemRoot.
+            if (KeptOnWindows.Contains(name, StringComparer.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(value))
+            {
+                child[name] = value;
+            }
+        }
+
+        return child;
+    }
+
+    /// <summary>The variables a Windows child keeps: one, and the reason is on <see cref="ChildEnvironment"/>.</summary>
+    private static readonly string[] KeptOnWindows = ["SYSTEMROOT"];
+
     /// <summary>Calls an extension once.</summary>
     /// <param name="manifest">The extension's manifest.</param>
     /// <param name="directory">The folder the manifest lives in.</param>
@@ -151,9 +212,18 @@ public sealed class SubprocessRunner
         start.ArgumentList.Add(Path.GetFullPath(entry));
         start.ArgumentList.Add(manifest.Function);
 
-        // Empty, not inherited. A child that starts with the parent's environment
-        // starts with its credentials, its proxy settings, and its PYTHONPATH.
+        // Scrubbed, not inherited. A child that starts with the parent's environment
+        // starts with its credentials, its proxy settings, and its PYTHONPATH. What it
+        // keeps is what the interpreter cannot start without: SYSTEMROOT on Windows and
+        // nothing anywhere else. ChildEnvironment says why, with the measurement.
+        var kept = ChildEnvironment(start.Environment, OperatingSystem.IsWindows());
+
         start.Environment.Clear();
+
+        foreach (var (name, value) in kept)
+        {
+            start.Environment[name] = value;
+        }
 
         var clock = Stopwatch.StartNew();
 

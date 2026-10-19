@@ -38,8 +38,9 @@ public static class Sandbox
             "stdout is read to a declared byte ceiling and the process killed past it"),
 
         new("no inherited environment", true,
-            "the child starts with an empty environment, so no credential, proxy, or "
-            + "PYTHONPATH reaches it from the parent"),
+            "the child starts with a scrubbed environment - SYSTEMROOT alone on Windows, "
+            + "which CPython needs to start, and nothing elsewhere - so no credential, "
+            + "proxy, or PYTHONPATH reaches it from the parent"),
 
         new("interpreter isolation", true,
             "python -I: user site-packages, PYTHON* variables, and the script's own "

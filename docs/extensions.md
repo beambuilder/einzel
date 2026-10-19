@@ -66,7 +66,7 @@ This is the part to read before running anything agent-authored.
 | --- | --- |
 | Wall-clock timeout, process tree killed | **yes** |
 | Output size ceiling | **yes** |
-| No inherited environment | **yes** |
+| No inherited environment (`SYSTEMROOT` alone on Windows) | **yes** |
 | Interpreter isolation (`python -I`) | **yes** |
 | Scratch working directory, not the project | **yes** |
 | No stdin beyond the payload | **yes** |
@@ -87,7 +87,20 @@ prints the unenforced list on stderr every time.
 
 The environment scrub is worth its own line: a child that starts with the parent's
 environment starts with its credentials, its proxy settings, and its `PYTHONPATH`.
-The child sees **zero** environment variables, which a test asserts.
+The child sees **one** environment variable on Windows, `SYSTEMROOT`, and **none**
+anywhere else, and a test asserts the list rather than a count.
+
+`SYSTEMROOT` is kept because CPython cannot start without it there. It seeds its hash
+randomisation from the operating system's random source before it runs anything, and up
+to 3.10 it reaches that source through CryptoAPI (`CryptAcquireContext`), which does not
+work in a process with no `SYSTEMROOT`: with a bare `Clear()` every extension died before
+its first line with "Fatal Python error: _Py_HashRandomization_Init: failed to get random
+numbers to initialize Python", and `einzel ext test` failed on every project. Measured
+with the sandbox's own `-I -B` flags: 3.9.13 dies with an empty environment and starts
+with `SYSTEMROOT` alone; `WINDIR` alone, `TEMP` and `TMP` alone, and `PATHEXT` alone each
+leave it dead, so none of them is kept; 3.11.5 starts with nothing at all, because 3.11
+moved to `BCryptGenRandom`. The variable is the path of the Windows directory, not a
+credential, a proxy setting or an import path. Linux and macOS keep nothing.
 
 ## Attribution, per GRD-6
 
@@ -146,7 +159,7 @@ for it here would be the platform asserting something only the author knows.
 | Bare interpreter launch, cheapest of five | **45-63 ms** across seven runs |
 | Sandboxed round trip, cheapest of five | **49-61 ms** |
 | The platform's own share | **1.08x to 1.52x** a bare launch, once *below* it |
-| Environment variables the child sees | 0 |
+| Environment variables the child sees | 1 on Windows (`SYSTEMROOT`), 0 elsewhere |
 | Runaway extension killed at a 1200 ms declared timeout | 1276 ms |
 
 **The round trip is process start almost entirely, and that is measured rather than
