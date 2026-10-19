@@ -297,22 +297,128 @@ Astral as the control that has to trip.
   sensitivity field that moves a shared face across a node plane crosses the step at a
   point where every evaluation looked clean. The advice in the warning - a tenth of a
   cell - is about that, not about the tolerance.
-- **A conductor against the domain boundary is not checked.** The same full-size and
-  compact masks that differ on those 180 arms also differ on **454 nodes and 1,406
-  further cut links**, every one on the domain's upper z face, where the grounded boards'
-  ends coincide with it: the last node plane is `origin + 256 * spacing`, which rounds
-  either side of the declared maximum (1.4e-14 mm over it in the compact analyzer, exactly
-  on it at full size). That face is Neumann and the boards are earthed, so both outcomes sit
-  near zero volts, and the flight does not see it: all three full-size runs either side of
-  the step hold those 454 nodes inside the boards - checked - so the step is the foil's arms
-  alone, and the +1e-7 run reproduces the compact analyzer's 784.32 with the boundary in the
-  opposite state, which bounds the boundary's share at about 1e-3 us. On a **Dirichlet**
-  face the grounded
-  boundary is a third conductor at zero, and an electrode flush with it at another
-  potential would be the same coin toss between two values. Not built.
+- **A conductor against a Neumann face is not checked, because it is not a coin between
+  two values.** The same full-size and compact masks that differ on those 180 arms also
+  differ on **454 nodes and 1,406 further cut links**, every one on the domain's upper z
+  face, where the grounded boards' ends coincide with it: the last node plane is
+  `origin + 256 * spacing`, which rounds either side of the declared maximum (1.4e-14 mm
+  over it in the compact analyzer, exactly on it at full size). That face is Neumann and the
+  boards are earthed, so both outcomes sit near zero volts, and the flight does not see it:
+  all three full-size runs either side of the step hold those 454 nodes inside the boards -
+  checked - so the step is the foil's arms alone, and the +1e-7 run reproduces the compact
+  analyzer's 784.32 with the boundary in the opposite state, which bounds the boundary's share
+  at about 1e-3 us. A **Dirichlet** face is a third conductor at zero, and that case is
+  checked - the next section.
 - **An edge profile** has no surface to be near (its signed distance is infinite) and
   takes no part; a profiled board meeting an interior electrode at the edge is decided by
   declaration order, which `ElectrodeOverlap` also leaves aside.
+
+### A grounded face of the domain is a third conductor, and gets the same check
+
+A Dirichlet face is pinned to zero volts node by node, **unless an electrode has already
+claimed the node** - so that a plate can reach the edge and hold it (see "Domain edges").
+An electrode claims a node by containing it: `Contains`, signed distance at most zero,
+against the node's coordinate in a volume, and a `Floor` or `Ceiling` of a quotient for a
+rectangle in the plane. So a node on the face that lies on an electrode's *surface* holds the
+electrode's potential or zero according to the last bit, and that is common by design: every
+ring stack whose rings run out to the outer wall, every tube flush with it, every plate that
+holds an edge.
+
+**Measured first, on a 100 V plate flush with a grounded edge** (`GroundedFaceNodeTests`),
+its face nudged a trillionth of a cell either way:
+
+| | face a trillionth short | face a trillionth past |
+| --- | --- | --- |
+| the edge node | 0 V | 100 V |
+| every free node's solution | identical, to the bit | |
+| potential half a cell off the contact | | **21.875 V** higher |
+| potential three cells away | | identical |
+
+**The solve does not see it, and the field does.** Every neighbour of a flipped node is
+another edge node or inside the plate, so no free node reaches it through an uncut arm. But
+the bicubic stencil of the cells beside the contact reads the edge node, so within about a
+cell of where the plate meets the ground the interpolated potential moves by over a fifth of
+what the plate holds. A volume is the same: the face nodes flip between 0 and 100 V, the free
+nodes agree to the solver's tolerance (1e-9 V, since in 3-D the stopping point moves with the
+fixed values), and the potential half a cell off the rim moves 21.9 V.
+
+**Against a conductor lying outside the domain, the coin decides whether it is in the solve
+at all.** The arm from the free column beside the edge meets it at exactly the far end, which
+the cut links do not record, so the stencil reads the edge node: the plate's potential when
+the node is on the plate, zero when the plate is a trillionth of a cell clear. At the center of
+the test's domain that is **9.61 V against 0**.
+
+**A Neumann face is not a coin between two values**: a node there flips between fixed at the
+plate's potential and free beside it, and left free it solves to **100.0000 V** through a cut
+of vanishing length - an ordinary cut cell. It takes no part.
+
+`NodesOnSharedFaces` in both dimensions now counts these as `BoundaryNodes`, under the same
+code, `mesh.node-on-shared-face`, with its own sentence and its own fix. The rules:
+
+- **Nodes only.** A face node is fixed either way, and the boundary is never a cut target, so
+  no arm can sample it; an arm that reaches a flipped node uncut reads the node's value, which
+  is the node's coin.
+- **The face is where the mesh puts it**, origin plus index times spacing, not the declared
+  bound - which is how the compact analyzer's upper face landed 1.4e-14 mm outside its own
+  domain. The test builds a box from 0.002 to 0.018 m whose last node is an ulp outside it.
+- **"Holds something other than zero" is the overlap checks' reading**, asked of the electrode
+  against itself stripped of its excitation, in every state the instrument has. An earthed
+  conductor against a grounded face is harmless; a driven one at zero DC is not.
+- **An edge carrying an edge profile is not grounded anywhere** - the profile claims every
+  node on it - and takes no part.
+- **A face lying in a mirror plane is not a surface** - a Neumann edge or face, the axis of an
+  axisymmetric solve included - since by symmetry the conductor continues across it. A solid
+  rod is a rectangle from the axis outward and in space the axis is inside it, so where a
+  grounded edge meets a mirror the corner node is asked about a point ten tolerances inside
+  the mirror: a rod whose end is flush with the edge is flagged there, and a rod carried past
+  it is clean, as the warning's advice says it will be.
+
+**The survey: 17 of 44 solved elements trip, all cross-sections** - eleven templates and six
+examples. Ring stacks run out to the grounded outer wall (`ion-funnel`, `pnnl-ion-funnel`,
+`tims-analyzer`, `tims-front-end`, `tims-tandem`, `travelling-wave-guide`), the Paul trap's
+ring truncated at it, the einzel lens's 500 V center tube, the Kingdon wire's two ends, and two
+mirrors (`planar-mirror-pair`, `astral-mirror`) whose end cap is a rectangle **with no
+thickness, lying in the grounded left edge**. What each is worth was measured by moving **only
+the face on the wall** by 1e-7 of the domain's extent each way - the one thing moving the
+domain's face changes relative to the conductor - on the same mesh:
+
+| | fifteen elements | the two mirrors |
+| --- | --- | --- |
+| potential at the contact | 20.9 to 21.9 percent of the applied (2.7 at the Kingdon wire's end) | 97.0 and 99.8 percent |
+| more than three cells from any edge | **identical, to the bit** | 79 and 81 percent |
+| ten cells from any edge | identical | 44 and 46 percent |
+| every figure run - flight time, transmission, confinement, oscillation frequency, on the eleven that fly ions | **identical, to the bit** | transmission 1 against **0** |
+
+So fifteen are harmless: the coin is real and confined to the wall, and no ion goes there. The
+four diffusive templates were compared on the field alone, since their sequences run for minutes
+to hours, and a density held at a fraction of a millimeter from the axis by RF does not reach a
+wall three cells from which nothing moved.
+**For the mirrors it decides whether the mirror has an end cap.** The shipped documents write the
+cap and the domain's edge as one expression, so the arithmetic lands on the side with a cap,
+deterministically - just inside the edge the cap is a cut surface and the flight is the shipped
+one to 6e-8 - but 1e-7 of the extent outside it, the cap is not in the solve and the ion is never
+reflected to the detector. Nothing is changed in the templates here. The funnels' ring corners
+that cross the wall on a line of nodes cannot be cleared without moving geometry, which would
+move published numbers; `SharedFaceCorpusTests` pins the seventeen, so a new one, or one gone,
+fails until it is measured. The fix for the mirrors is bit-identical and waits on its own change:
+a cap meant to *be* the edge is an edge profile.
+
+**Two traps in making the measurement, both worth keeping.**
+
+- **Moving the domain itself moved the mesh.** Interval counts round up to a power of two, and
+  the ion funnel's radius is exactly 64 cells (16 mm at 0.25 mm), so growing it by 1e-7 of the
+  extent made it 128: the first survey reported interior differences of several volts that were
+  a different mesh, not the coin. That is why only the face on the wall moves.
+- **Translating whole conductors instead found a second coin, unrelated to the wall.** The funnel's
+  first and last rings have their inner faces exactly on node rows (12 mm on row 48, 1.5 mm on
+  row 6). A single conductor's face on a node plane is continuous in its *normal* position -
+  the nodes on it flip between fixed and free-with-a-vanishing-arm, which is the same thing -
+  but the arms **lying in that plane**, from free nodes beside the conductor, are cut at its side
+  face when the plane nodes are inside it and graze past to a node a cell away when they are not.
+  Moving ring 23 by 6.4e-6 of a cell turned two cuts at 0.46 and 0.077 of a cell into two uncut
+  arms, moved the nearest free node by 2.5 percent of its channel, and moved the ion's flight
+  time **4.5e-4**. Cut cells make the answer continuous in where one conductor's surface sits
+  **only while its faces are off the node planes**. Not checked; recorded as open.
 
 ## Interior electrodes
 
@@ -417,6 +523,13 @@ It went unnoticed because the interior-electrode coarsening limit stopped these
 geometries before they reached a second level. The solver fell back on plain
 Gauss–Seidel and reported a convergence factor of 0.83 — poor, but not obviously
 a bug. Grounding the edge takes the same case to 9 cycles at 0.039.
+
+Electrodes are rasterized first and are not overwritten, so a plate that reaches
+the edge holds it. **A plate whose face is flush with the edge holds the nodes on
+that face or leaves them grounded on the last bit**, which moves the field beside
+the contact by a fifth of the plate's potential and, for a conductor lying outside
+the domain against it, decides whether it is in the solve at all - see "A grounded
+face of the domain is a third conductor".
 
 A Neumann edge is unchanged: it is a mirror plane, so the ghost node outside it
 equals its reflection inside, which is exact at any spacing and coarsens

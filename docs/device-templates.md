@@ -124,6 +124,17 @@ meaningful: perturb `capToCap` and `midPlane` follows.
 down to coordinates and "move this stripe 50 µm and re-solve" stops being sayable,
 which is the whole point of the tolerance machinery.
 
+**Carry a conductor past a grounded wall rather than stopping it on one.** A
+Dirichlet face of the domain is a conductor at zero volts, and a node on it that lies
+on another conductor's surface holds that conductor's potential or zero according to
+the last bit of the arithmetic (`mesh.node-on-shared-face`; `docs/numerics.md`, "A
+grounded face of the domain is a third conductor"). A ring whose outer face *is* the
+outer wall does exactly that; one whose outer radius runs past the wall does not, as
+long as no face that crosses the wall does so on a line of nodes. A conductor meant
+to *be* the edge - a cap lying in it - is an edge profile. Seventeen shipped solved
+elements break this rule: fifteen are measured harmless, and the two mirrors' end
+caps are not (below).
+
 **Write the description for someone who has never seen the platform.** There are
 no forum posts and no decades of example files to fall back on. Say what the
 device is, what varying each parameter does, and what result to expect. The
@@ -548,6 +559,16 @@ because that is how it is driven — one supply feeding a resistive divider — 
 the ramp given as piecewise-linear breakpoints. Setting `firstStageFraction` to 0
 gives a single-stage mirror; a positive value gives the two-stage Mamyrin
 arrangement.
+
+**The cap is not, and it should be.** It is a rectangle with no thickness lying in
+the grounded left edge, written with the same expression as the edge
+(`-mirrorDepth`), so it holds that edge only because the two agree to the bit. Moved
+1e-7 of the domain's extent outside the edge it is not in the solve at all: the
+potential ten cells in moves by 44 percent of the cap's, and the ion is never
+reflected to the detector. The shipped arithmetic lands on the side with a cap, and
+the engine says so on every solve (`mesh.node-on-shared-face`). `astral-mirror` is
+built the same way. An edge profile at the cap potential is the fix, and it is
+bit-identical; it waits on its own change (SPEC.md, *What to do next*, item 11).
 
 One consequence of solving rather than assuming, worth stating because a design
 that missed it would be designing a mirror it does not have: **the applied stripe

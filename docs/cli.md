@@ -1295,7 +1295,9 @@ milliseconds - a timer tick of about 15 on Windows - and two builds' peaks were 
 so a missed peak read either way; it passed on a sixteen-core workstation and failed on both
 four-core CI runners, where a Release build is fast enough to finish between samples. Sampled
 as densely as the collections allow, and the largest of three builds kept, the shipped plane
-templates read 143.3 to 143.9; a build whose samples all miss the copy reads about 135.
+templates read 143.3 to 143.9; a build whose samples all miss the copy reads about 135, and
+one whose samples see only the fine level - a loaded four-core CI runner did - about 126.6, which
+is why the plane test's lower edge is 0.85 where the volume tests' is 0.90.
 
 **A diffusive mixture is charged once per species.** Every species has its own walker - its
 density, next step and seed, its coefficients, its face operator and, cycle-averaged, its well

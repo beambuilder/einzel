@@ -58,7 +58,8 @@ public sealed record SolveMemory(
 /// plane: quadrupole at 0.26 M and 1.05 M nodes, <b>143.4</b> and <b>143.3</b>; einzel-lens
 /// at 67 k, <b>143.9</b>; tims-analyzer at 33 k, <b>143.9</b> - the largest of three builds,
 /// sampled as densely as the collections allow, because the plane's peak is a transient
-/// lasting a fraction of a millisecond and a build that misses it reads about 135
+/// lasting a fraction of a millisecond: a build that misses it reads about 135, and one whose
+/// samples see only the fine level, as on a loaded four-core runner, about 126.6
 /// </description></item>
 /// </list>
 /// <para>

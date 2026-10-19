@@ -2300,7 +2300,8 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
   **Two limits, stated.** The tolerance flags coincidence, not proximity: a face 2.6e-5 of a cell
   off a node is on a determinate side of the same 0.27% step with no warning, which a geometric
   sweep would cross silently - the fix the warning names is a tenth of a cell. And a conductor flush
-  with a **Dirichlet** domain face is the same coin toss against the grounded boundary, unchecked.
+  with a **Dirichlet** domain face is the same coin toss against the grounded boundary, unchecked
+  (**now checked** - see "The grounded boundary is a conductor" below).
   Mutation-checked five ways: detector disabled (11 of 14 unit tests fail; the three that pass are
   the should-not-warn controls), tolerance zero (the four near-miss tests fail), **arms disabled (the
   three arm tests and the Astral control fail - the nodes-only check, measured)**, base state only
@@ -2410,6 +2411,56 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
   the second and third added 247.6 and 248.3 to one species' 248.5 - so a three-species run was
   billed a third of it. The estimate's comparison with this machine also lived inside the
   solved-field explanation, so a diffusive run through analytic fields was never compared at all.
+
+- **The grounded boundary is a conductor, and seventeen shipped models were not clean after all.**
+  A Dirichlet face pins its nodes to zero unless an electrode claimed them first, and an electrode
+  claims a node by containing it - so a node on the face lying on an electrode's surface holds the
+  electrode's potential or zero on the last bit. **Measured before building**: a 100 V plate flush
+  with a grounded edge, nudged a trillionth of a cell each way, flips the edge node 0 ↔ 100 V and
+  leaves **every free node identical to the bit** - no free node reaches a flipped one through an
+  uncut arm - while the interpolated potential half a cell off the contact moves **21.9 V**, because
+  the bicubic stencil reads the node. Against a conductor lying *outside* the domain the coin
+  decides whether it is in the solve at all (9.61 V at the center against 0). A Neumann face is not
+  a coin between two values - left free, the node solves to 100.0000 V - and takes no part. SPEC.md
+  Amendment 57; `docs/numerics.md`, "A grounded face of the domain is a third conductor".
+
+  `NodesOnSharedFaces` counts these as `BoundaryNodes` under the same code, with their own sentence
+  and fix. **Nodes only** (a face node is fixed either way and the boundary is never a cut target);
+  the face is the mesh's node plane, not the declared bound; "holds something" is `Agrees` against
+  the electrode stripped of its excitation, in every state; an edge carrying an edge profile is not
+  grounded; and a face lying in a mirror plane - the axis of an axisymmetric solve included - is
+  **not a surface**, since the conductor continues across it; without that, a rod carried past the
+  end wall, as the warning advises, still tripped at the corner.
+
+  **Survey: 17 of 44 solved elements trip, all cross-sections** - ring stacks run out to the outer
+  wall, the Paul trap's ring, the einzel lens's center tube, the Kingdon wire's ends, and two
+  mirrors. Moving **only the face on the wall** by 1e-7 of the extent each way, on the same mesh:
+  **fifteen are harmless**, every potential more than three cells from the wall and every figure
+  identical to the bit. **The two mirrors are not**: `planar-mirror-pair`'s and `astral-mirror`'s end
+  cap is a rectangle with no thickness lying in the grounded edge, written as the same expression as
+  the edge, so it exists only because the two agree exactly - 1e-7 of the extent outside, the cap
+  is gone and transmission goes 1 → 0. An edge-profile cap is **verified bit-identical** (masks, cut
+  links, potentials, flight) and clean, and waits on its own change. `SharedFaceCorpusTests` pins the
+  seventeen and still requires zero electrode-pair trips; the einzel-lens figure test now expects
+  exactly this warning.
+
+  **Two traps in measuring it, both in `docs/lessons.md`.** Moving the domain itself doubled the
+  funnel's rows (its radius is exactly 64 cells) and reported interior volts that were a different
+  mesh. And translating whole conductors instead found **a second coin, unrelated to the wall**: a
+  single conductor's face on a node plane - the funnel's first and last rings' inner faces sit on
+  rows 48 and 6 - makes the arms lying in that plane cut at the side face or graze past to a node a
+  cell away on the last bit, worth **4.5e-4** of the funnel's flight time for a 6.4e-6-cell move.
+  Cut cells are continuous in one conductor's position only while its faces are off the node planes.
+  Recorded as open (SPEC.md item 11), not fixed.
+
+  Mutation-checked seven ways. Boundary pass disabled fails the 12 positive tests and none of the
+  controls; profiled edges grounded fails the edge-profile test; earthed conductors counted fails
+  the earthed-plate and stage tests; stages ignored fails the stage test; the mirror lift removed
+  fails the three mirror tests; tolerance zero fails the six that nudge a face or lean on the lift,
+  which is ten tolerances. **Neumann faces treated as grounded first failed nothing** - the mirror
+  rule hides a face flush with a mirror, so both Neumann tests were passing for the wrong reason -
+  and fails both once each also has a face *crossing* the mirror on a line of nodes, which only the
+  Neumann exclusion keeps quiet.
 
 Adding a travelling-wave guide or a multipole should need only one more file — axisymmetry, repeats and RF all exist now. If it needs a change below `Einzel.Library`, LIB-1 says the abstraction is wrong — believe it.
 

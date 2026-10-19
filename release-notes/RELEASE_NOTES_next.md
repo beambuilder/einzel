@@ -16,8 +16,19 @@ become a feature release without being renamed twice.
   stencil arm first meets metal, lies exactly on it, which potential it takes is decided by
   rounding - and no refinement study can see it, because every power-of-two mesh keeps the face
   on a node. The warning names the count, one example and the fix (move the solve domain a tenth
-  of a cell), and reaches `einzel run`, `einzel preview`, every figure and `einzel solve`. Every
-  shipped template and example is clear of it.
+  of a cell), and reaches `einzel run`, `einzel preview`, every figure and `einzel solve`. No
+  shipped template or example puts a node on a face two of its electrodes share.
+- **The same warning when a conductor meets a grounded face of the domain.** A grounded face is a
+  conductor at zero volts, and a node on it that lies on another conductor's surface holds that
+  conductor's potential or zero according to rounding: the solve does not see it, but the field
+  within about a cell of the contact moves by a fifth of the applied potential, and a conductor
+  lying outside the domain against the face is in the solve only by the coin. **Seventeen shipped
+  models now carry it** - ring stacks run out to the outer wall, the einzel lens, the Paul trap,
+  the Kingdon trap and the two mirror cross-sections - and their figures are marked qualified.
+  Fifteen are measured harmless: every figure is identical either side of the coin. In the two
+  mirrors, `planar-mirror-pair` and `astral-mirror`, the end cap is a plate with no thickness
+  lying in the grounded edge and is in the solve only because two expressions agree exactly; the
+  shipped arithmetic lands on the side with a cap.
 - **`einzel solve` reports warnings**, in `--json` and on stderr. It reported residuals and node
   counts and nothing else.
 - **`einzel render still`** draws a model's shaded 3D view to a PNG, headlessly - the same

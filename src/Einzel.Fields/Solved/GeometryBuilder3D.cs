@@ -460,6 +460,11 @@ public static class GeometryBuilder3D
     /// Only the finest grid. The coarse levels exist to accelerate, their Dirichlet values
     /// are not used, and the answer is decided where the cut cells are.
     /// </para>
+    /// <para>
+    /// <b>A grounded face of the domain counts as a conductor at zero volts</b>, and nodes on
+    /// it lying on an electrode's surface are counted apart, as
+    /// <see cref="SharedFaceNodes.BoundaryNodes"/>. A Neumann face is a mirror and takes no part.
+    /// </para>
     /// </remarks>
     public static SharedFaceNodes? NodesOnSharedFaces(
         Geometry3D geometry, Grid3D grid, DirichletMask3D? mask = null)
@@ -616,11 +621,161 @@ public static class GeometryBuilder3D
             }
         }
 
-        return (nodeExample ?? armExample) is { } first
-            ? new SharedFaceNodes(
+        var (boundary, boundaryExample) = NodesOnGroundedFaces(geometry, grid, states, tolerance);
+
+        if ((nodeExample ?? armExample) is { } first)
+        {
+            return new SharedFaceNodes(
                 nodes.Count, arms.Count, first.First, first.Second, first.X, first.Y, first.Z,
                 ExampleIsArm: nodeExample is null)
+            {
+                BoundaryNodes = boundary,
+            };
+        }
+
+        return boundaryExample is { } face
+            ? new SharedFaceNodes(0, 0, face.First, face.Face, face.X, face.Y, face.Z, ExampleIsArm: false)
+            {
+                BoundaryNodes = boundary,
+                ExampleIsBoundary = true,
+            }
             : null;
+    }
+
+    /// <summary>
+    /// Nodes on a grounded face of the domain that lie on the surface of an electrode holding
+    /// something other than zero volts in some state, so that whether the electrode or the face
+    /// claims them is decided by rounding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The grounded boundary is a third conductor at zero volts: <see cref="PinFaces"/> fixes a
+    /// face node to zero unless an electrode has claimed it first, and an electrode claims it by
+    /// <c>Contains</c> - signed distance at most zero - against the node's coordinate, origin plus
+    /// index times spacing, which need not equal the declared domain bound. So a node on the face
+    /// that is on the electrode's surface holds the electrode's potential or zero on the last bit.
+    /// </para>
+    /// <para>
+    /// Nodes only, for the reason the plane gives: a face node is fixed either way and the face
+    /// is never a cut target. "Holds something other than zero" is the overlap check's reading,
+    /// asked of the electrode against itself stripped of its excitation. A Neumann face is a
+    /// mirror and takes no part - <c>astral-3d</c>'s earthed boards end on its Neumann z faces
+    /// and flip between fixed and free at zero volts, which is an ordinary cut cell - and neither
+    /// does a zero-volt electrode against a grounded face, since either answer is zero.
+    /// </para>
+    /// <para>
+    /// <b>A face lying in a mirror plane is not a surface</b>, since by symmetry the conductor
+    /// continues across it: a stripe running the length of a drift between two Neumann faces has
+    /// no ends. So a node where a grounded face meets a Neumann one is asked about a point just
+    /// inside the mirror, which keeps a face crossing the mirror and drops one lying in it.
+    /// </para>
+    /// </remarks>
+    private static (int Count, (string First, string Face, double X, double Y, double Z)? Example) NodesOnGroundedFaces(
+        Geometry3D geometry,
+        Grid3D grid,
+        IReadOnlyList<IReadOnlyList<CompiledElectrode3D>> states,
+        double tolerance)
+    {
+        var electrodes = geometry.Electrodes;
+
+        // The same rule the mask and IsFixedFine apply: six declared faces, or a grounded box.
+        bool Dirichlet(int face) =>
+            geometry.Faces.Count != 6 || geometry.Faces[face] == EdgeCondition.Dirichlet;
+
+        // Ten tolerances into the domain from a mirror face: clear of a face lying in it, and
+        // still on any face crossing it.
+        var lift = 10.0 * tolerance;
+
+        double Asked(int index, int count, int lower, double at) =>
+            at
+            + (index == 0 && !Dirichlet(lower) ? lift : 0.0)
+            - (index == count - 1 && !Dirichlet(lower + 1) ? lift : 0.0);
+
+        // Each grounded face as the plane of nodes it is: which axis it is normal to, which
+        // index along that axis is held.
+        var faces = new List<(string Name, int Axis, int Plane)>(6);
+        string[] names = ["lower x face", "upper x face", "lower y face", "upper y face", "lower z face", "upper z face"];
+        int[] counts = [grid.CountX, grid.CountY, grid.CountZ];
+
+        for (var face = 0; face < 6; face++)
+        {
+            if (Dirichlet(face))
+            {
+                faces.Add((names[face], face / 2, face % 2 == 0 ? 0 : counts[face / 2] - 1));
+            }
+        }
+
+        var found = new HashSet<long>();
+        (string First, string Face, double X, double Y, double Z)? example = null;
+
+        for (var e = 0; e < electrodes.Count; e++)
+        {
+            var index = e;
+
+            if (states.All(state => ElectrodeOverlap3D.Agrees(
+                    state[index], state[index] with { Potential = 0.0, Taps = [] })))
+            {
+                continue;
+            }
+
+            var electrode = electrodes[e];
+            var (minX, minY, minZ, maxX, maxY, maxZ) = electrode.Bounds;
+            double[] min = [minX, minY, minZ];
+            double[] max = [maxX, maxY, maxZ];
+
+            foreach (var (name, axis, plane) in faces)
+            {
+                // The plane of nodes' own coordinate, not the declared bound, since the plane
+                // of nodes is what gets pinned.
+                var across = axis switch
+                {
+                    0 => grid.X(plane),
+                    1 => grid.Y(plane),
+                    _ => grid.Z(plane),
+                };
+
+                if (across < min[axis] - tolerance || across > max[axis] + tolerance)
+                {
+                    continue;
+                }
+
+                var (iLo, iHi) = axis == 0
+                    ? (plane, plane)
+                    : SharedFaceNodes.Range(grid.OriginX, grid.SpacingX, grid.CountX, minX - tolerance, maxX + tolerance);
+                var (jLo, jHi) = axis == 1
+                    ? (plane, plane)
+                    : SharedFaceNodes.Range(grid.OriginY, grid.SpacingY, grid.CountY, minY - tolerance, maxY + tolerance);
+                var (kLo, kHi) = axis == 2
+                    ? (plane, plane)
+                    : SharedFaceNodes.Range(grid.OriginZ, grid.SpacingZ, grid.CountZ, minZ - tolerance, maxZ + tolerance);
+
+                for (var k = kLo; k <= kHi; k++)
+                {
+                    for (var j = jLo; j <= jHi; j++)
+                    {
+                        for (var i = iLo; i <= iHi; i++)
+                        {
+                            var (x, y, z) = (grid.X(i), grid.Y(j), grid.Z(k));
+
+                            var distance = electrode.SignedDistance(
+                                Asked(i, grid.CountX, 0, x), Asked(j, grid.CountY, 2, y), Asked(k, grid.CountZ, 4, z));
+
+                            if (Math.Abs(distance) > tolerance)
+                            {
+                                continue;
+                            }
+
+                            if (found.Add(((((long)k * grid.CountY) + j) * grid.CountX) + i))
+                            {
+                                example ??= (electrode.Name, name, x, y, z);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return (found.Count, example);
     }
 
     /// <summary>
@@ -1151,10 +1306,18 @@ public static class GeometryBuilder3D
     /// Grounds the nodes on every Dirichlet face.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The face node itself, not a ghost one cell outside it. The alternative reading
     /// puts the boundary a cell further out at every level of a multigrid hierarchy,
     /// so the domain grows as it coarsens and the coarse problem is a different one -
     /// which in two dimensions sent a cap plate in a grounded box to 1e50 volts.
+    /// </para>
+    /// <para>
+    /// Only a node no electrode has claimed, so an electrode reaching the face holds it -
+    /// and an electrode whose face is flush with the domain's holds the nodes on it or
+    /// leaves them grounded according to the rounding, which
+    /// <see cref="NodesOnSharedFaces"/> reports.
+    /// </para>
     /// </remarks>
     private static void PinFaces(DirichletMask3D mask, Grid3D grid)
     {

@@ -6,7 +6,7 @@ namespace Einzel.Fields.Solved;
 /// <summary>
 /// Where a mesh samples a face that two conductors share while holding different
 /// excitations - at a node, or where a stencil arm first meets metal - found before a
-/// solve.
+/// solve. A grounded face of the domain counts as a conductor at zero volts.
 /// </summary>
 /// <param name="Nodes">Distinct nodes lying on such a face, over every such pair.</param>
 /// <param name="Arms">
@@ -14,7 +14,10 @@ namespace Einzel.Fields.Solved;
 /// face.
 /// </param>
 /// <param name="First">One of the two conductors at the example.</param>
-/// <param name="Second">The other.</param>
+/// <param name="Second">
+/// The other: a conductor's name, or - when <see cref="ExampleIsBoundary"/> - which grounded
+/// face of the domain, as <c>upper x face</c> or <c>right edge</c>.
+/// </param>
 /// <param name="X">The example's x, in meters: the node, or the point an arm meets the face.</param>
 /// <param name="Y">The example's y, in meters.</param>
 /// <param name="Z">The example's z, in meters, or null for a cross-section.</param>
@@ -47,6 +50,22 @@ namespace Einzel.Fields.Solved;
 /// representable and so moves every coordinate by a rounding and nothing else.
 /// </para>
 /// <para>
+/// <b>The grounded boundary is a third conductor, and gets the same test.</b> A node on a
+/// Dirichlet face of the domain is pinned to zero unless an electrode has already claimed it,
+/// and an electrode claims it by containing it - so a node on such a face that lies on an
+/// electrode's surface holds that electrode's potential or zero according to the rounding.
+/// Plates are meant to reach the edge and hold it, so this is common. Measured on a 100 V plate
+/// flush with a grounded edge: a trillionth of a cell either way flips the edge node between
+/// 0 and 100 V, leaves every free node's solution unchanged (no free node reaches a flipped one
+/// through an uncut arm), and moves the interpolated potential half a cell off the contact by
+/// 21.9 V, because the interpolant reads the node. A conductor lying <em>outside</em> the domain
+/// against the face is in the solve through those nodes alone, so there the coin decides whether
+/// it is in the solve at all. Only nodes are counted: a face node is fixed either way and the
+/// boundary is never a cut target, so no arm can sample it. A Neumann face is a mirror and
+/// does not take part: a node there flips between fixed at the conductor's potential and free
+/// beside it, which is an ordinary cut cell rather than a choice between two values.
+/// </para>
+/// <para>
 /// Qualified rather than a violation: the field is a solution of <em>a</em> geometry within
 /// a cell of the declared one at a handful of places, and how much that matters depends on
 /// where they are. <c>docs/numerics.md</c> records what it was worth on the one shipped
@@ -75,8 +94,20 @@ public sealed record SharedFaceNodes(
     /// </remarks>
     public const double ToleranceFraction = 1e-9;
 
-    /// <summary>Every place counted, nodes and arms together.</summary>
-    public int Count => Nodes + Arms;
+    /// <summary>
+    /// Distinct nodes on a grounded face of the domain lying on the surface of a conductor that
+    /// holds something other than zero volts in some state - counted apart from
+    /// <see cref="Nodes"/>, which lie between two conductors.
+    /// </summary>
+    public int BoundaryNodes { get; init; }
+
+    /// <summary>
+    /// Whether the example is such a node, in which case <see cref="Second"/> names the face.
+    /// </summary>
+    public bool ExampleIsBoundary { get; init; }
+
+    /// <summary>Every place counted, nodes, arms and boundary nodes together.</summary>
+    public int Count => Nodes + Arms + BoundaryNodes;
 
     /// <summary>The finding as a warning, to travel with every result computed through it.</summary>
     /// <returns>A qualified warning naming the counts, one example, and the fix.</returns>
@@ -88,31 +119,89 @@ public sealed record SharedFaceNodes(
             ? string.Create(invariant, $"({X * 1e3:G9}, {Y * 1e3:G9}, {z * 1e3:G9}) mm")
             : string.Create(invariant, $"({X * 1e3:G9}, {Y * 1e3:G9}) mm");
 
-        var nodes = Nodes == 1 ? "1 mesh node lies on" : string.Create(invariant, $"{Nodes} mesh nodes lie on");
-        var arms = Arms == 1
-            ? "1 stencil arm first meets metal on"
-            : string.Create(invariant, $"{Arms} stencil arms first meet metal on");
+        var sentences = new List<string>(4);
 
-        var what = (Nodes, Arms) switch
+        if (Nodes + Arms > 0)
         {
-            ( > 0, > 0) => $"{nodes}, and {arms},",
-            ( > 0, _) => nodes,
-            _ => arms,
+            var nodes = Nodes == 1 ? "1 mesh node lies on" : string.Create(invariant, $"{Nodes} mesh nodes lie on");
+            var arms = Arms == 1
+                ? "1 stencil arm first meets metal on"
+                : string.Create(invariant, $"{Arms} stencil arms first meet metal on");
+
+            var what = (Nodes, Arms) switch
+            {
+                ( > 0, > 0) => $"{nodes}, and {arms},",
+                ( > 0, _) => nodes,
+                _ => arms,
+            };
+
+            var example = ExampleIsBoundary
+                ? string.Empty
+                : ExampleIsArm
+                    ? $" - for example an arm meeting it at {at}, on the face between '{First}' and '{Second}'"
+                    : $" - for example the node at {at}, on the face between '{First}' and '{Second}'";
+
+            sentences.Add($"{what} a face shared by two conductors that hold different excitations{example}.");
+        }
+
+        if (BoundaryNodes > 0)
+        {
+            var boundary = BoundaryNodes == 1
+                ? "1 mesh node on a grounded face of the solve domain lies"
+                : string.Create(invariant, $"{BoundaryNodes} mesh nodes on a grounded face of the solve domain lie");
+
+            var example = ExampleIsBoundary
+                ? $" - for example the node at {at}, where '{First}' meets the grounded {Second}"
+                : string.Empty;
+
+            sentences.Add(
+                $"{boundary} on the surface of a conductor that holds something other than zero volts"
+                + $"{example}. The grounded boundary is a third conductor, at zero volts.");
+        }
+
+        const string Between =
+            "which conductor such a node belongs to (or whether it is left free between two arms of "
+            + "vanishing length, taking a mixture of both potentials), and which conductor such an arm "
+            + "is cut against";
+
+        var decided = (Nodes + Arms > 0, BoundaryNodes > 0) switch
+        {
+            (true, true) => $"{Between}, and whether a node on a grounded face holds the conductor's potential or zero, is",
+            (true, false) => $"{Between}, is",
+            _ => "whether such a node holds the conductor's potential or zero is",
         };
 
-        var example = ExampleIsArm ? $"an arm meeting it at {at}" : $"the node at {at}";
+        sentences.Add(
+            char.ToUpperInvariant(decided[0]) + decided[1..]
+            + " decided by the last bit of the face's arithmetic: a coin toss rather than "
+            + "discretization error, and one no refinement ladder can see, because a power-of-two mesh "
+            + "puts the same face on a node at every rung.");
+
+        var fixes = new List<string>(2);
+
+        if (Nodes + Arms > 0)
+        {
+            fixes.Add("Move the solve domain by a fraction of a cell - a tenth is plenty - or leave a gap between the conductors");
+        }
+
+        if (BoundaryNodes > 0)
+        {
+            // A cross-section has a spelling for a conductor that is the edge itself; a volume
+            // does not, and there the domain is what moves.
+            var itself = Z is null
+                ? "a conductor meant to be the edge itself, lying in it or outside against it, is an edge profile"
+                : "for a conductor lying in the face or outside against it, move the domain face a fraction of a cell past it";
+
+            fixes.Add(
+                (fixes.Count > 0 ? "At the grounded face, carry the conductor past it" : "Carry the conductor past the grounded face")
+                + ", so every node on the face is inside the conductor by any "
+                + "arithmetic, or stop it a fraction of a cell short, and keep any face that crosses the "
+                + $"boundary off a line of nodes; {itself}");
+        }
 
         return new ValidityWarning(
             Code,
-            $"{what} a face shared by two conductors that hold different excitations - for "
-            + $"example {example}, on the face between '{First}' and '{Second}'. Which "
-            + "conductor such a node belongs to (or whether it is left free between two arms of "
-            + "vanishing length, taking a mixture of both potentials), and which conductor such "
-            + "an arm is cut against, is decided by the last bit of the face's arithmetic: a "
-            + "coin toss rather than discretization error, and one no refinement ladder can see, "
-            + "because a power-of-two mesh puts the same face on a node at every rung. Move the "
-            + "solve domain by a fraction of a cell - a tenth is plenty - or leave a gap between "
-            + "the conductors",
+            string.Join(" ", sentences) + " " + string.Join(". ", fixes),
             WarningSeverity.Qualified);
     }
 

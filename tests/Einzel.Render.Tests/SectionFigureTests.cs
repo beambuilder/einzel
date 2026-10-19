@@ -1,6 +1,7 @@
 using System.Globalization;
 using Einzel.Core.Model;
 using Einzel.Core.Units;
+using Einzel.Fields.Solved;
 using Einzel.Io;
 using Einzel.Library;
 using Einzel.Render;
@@ -223,7 +224,15 @@ public sealed class SectionFigureTests(ITestOutputHelper output)
         Assert.Equal(6, conductors);
         Assert.Contains(figure.Scene.Paths, p => p.Layer == "axis");
 
-        Assert.Empty(figure.Warnings);
+        // One warning and no other. The 500 V center tube runs out to the grounded outer
+        // wall, so the edge nodes on its outer face hold 500 V or zero on the last bit - and
+        // the equipotentials drawn within a cell or two of that contact depend on which. The
+        // lens itself does not: moving that face a hair either side leaves the flight time
+        // bit-identical and every potential more than three cells from the wall unchanged.
+        var warning = Assert.Single(figure.Warnings);
+
+        Assert.Equal(SharedFaceNodes.Code, warning.Code);
+        Assert.Contains("'centre' meets the grounded top edge", warning.Message, StringComparison.Ordinal);
     }
 
     /// <summary>A drift tube declaring diffusive transport, so no path exists to draw.</summary>

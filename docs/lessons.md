@@ -5261,3 +5261,40 @@ breaks, make the measurement deterministic and see what it says. And choose the 
 the errors the measurement now has, not the ones it used to have: the largest of three was
 right while samples could only miss, and wrong once they were dense enough to catch an instant
 the statement does not count - the middle of three is robust to a lone outlier either way.
+
+## A perturbation that isolates one thing must move only that thing
+
+The grounded-boundary check (`docs/numerics.md`, "A grounded face of the domain is a third
+conductor") needed a survey: seventeen shipped solved elements put a node on a grounded wall
+and on a conductor's surface at once, and the question was whether any of them cared. The
+plan was the one that had worked for the Astral's foil - move the domain by 1e-7 of its
+extent either way, so the node lands on one side and then the other, and compare. **It
+reported several volts of difference in the middle of the ion funnel, far from any wall** -
+which reads as the coin mattering, and was not.
+
+**The first move changed the mesh.** Interval counts round up to a power of two, and the
+funnel's radius is exactly 64 cells, 16 mm at 0.25 mm; growing it by any amount at all made
+it 128. So the comparison was between two different discretizations, and the difference was
+theirs. This is the same cliff `MeshCliffTests` and Amendment 33 are about, met from the
+other side: not a cost that jumps, but a perturbation meant to be infinitesimal that is not.
+
+**The second move - translate each conductor touching a wall instead, on a fixed mesh - found
+a different coin entirely.** The funnel's first and last rings have their inner faces exactly
+on node rows (12 mm on row 48, 1.5 mm on row 6), and translating a ring moves those faces
+too. A single conductor's face on a node plane is continuous in its normal position, but the
+arms *lying in* that plane beside the conductor are cut at its side face or graze past to a
+node a cell away according to the rounding: two cuts at 0.46 and 0.077 of a cell became two
+uncut arms, and the flight time moved 4.5e-4 for a 6.4e-6-cell move. Real, worth recording,
+and nothing to do with the wall.
+
+**Moving only the face on the wall** - the one thing moving the domain face changes relative
+to the conductor - gave the clean answer: fifteen of the seventeen identical to the bit more
+than three cells from the wall and in every figure, the two mirrors not.
+
+The rules. **A perturbation used to isolate an effect has to move exactly that effect's
+cause and nothing else**, and "move the domain" and "move the conductor" each move more than
+they appear to - the mesh with the first, every other face of the conductor with the second.
+**Check the mesh is the same mesh before comparing two solves of it**; `(CountX, CountY)`
+equal is one assertion. And **a surprising difference is a finding before it is an answer**:
+the interior volts were two things, neither the one being measured, and one of them is now an
+open item of its own.

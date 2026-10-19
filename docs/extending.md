@@ -134,7 +134,9 @@ geometry — a function is best tested through something that would visibly brea
   checks' own `StatesOf` and `Agrees`, so a new primitive is covered by the same two queries
   it already owes - a bounding box and a signed distance - plus the first entry the cut links
   already need. A primitive whose bounding box does not contain its surface would make that
-  check miss, silently, which is one more reason the box has to be right.
+  check miss, silently, which is one more reason the box has to be right. A grounded face of
+  the domain counts as a conductor at zero volts in the same check, asked with the same two
+  queries, so a new primitive flush with a wall is covered too.
 
   **Both checks ask about every state the instrument has.** A stage changes what an electrode
   *holds* and may not change where it *is*, so "do these two agree" has as many answers as

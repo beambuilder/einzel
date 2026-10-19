@@ -20,7 +20,7 @@ that has drifted is worse than none, because it is trusted.
 
 ## Where the project is
 
-**1,623 tests across thirteen assemblies, green on Windows and (bar the WPF project) Linux.** Warnings are errors; XML documentation is required on public API. Build clean. The EX-1 example corpus runs as a gate inside that suite (EX-2): 39 examples, every expectation a closed form, a published value, or an exact invariant.
+**1,642 tests across thirteen assemblies, green on Windows and (bar the WPF project) Linux.** Warnings are errors; XML documentation is required on public API. Build clean. The EX-1 example corpus runs as a gate inside that suite (EX-2): 39 examples, every expectation a closed form, a published value, or an exact invariant.
 
 | | Requirements |
 | --- | --- |
@@ -155,6 +155,53 @@ Einzel. **That, rather than a date, is the trigger.**
 
 ## Amendments to the specification
 
+### 57 - The grounded boundary is a conductor, and a conductor flush with it is the same coin toss
+
+**ACC-3, GRD-2, and Amendment 56.** Amendment 56 left one case stated and unchecked: a
+conductor whose face coincides with a Dirichlet face of the domain. The grounded boundary is a
+third conductor at zero volts - a face node is pinned to zero unless an electrode claimed it
+first, and an electrode claims it by containing it - so a node on the face that lies on the
+electrode's surface holds its potential or zero on the last bit of the arithmetic. **Measured
+before building anything**: on a 100 V plate flush with a grounded edge, a trillionth of a cell
+either way flips the edge node between 0 and 100 V, leaves **every free node's solution
+identical to the bit** (no free node reaches a flipped one through an uncut arm), and moves the
+interpolated potential half a cell off the contact by **21.9 V**, because the interpolant reads
+the node. A conductor lying *outside* the domain against the face is in the solve through those
+nodes alone: 9.61 V at the center of the domain against 0. A Neumann face is not a coin between
+two values - the node flips between fixed and free and solves to the plate's potential either
+way - and takes no part.
+
+So the check Amendment 56 built now treats each Dirichlet face as a conductor at zero, under the
+same code, and counts its findings apart (`BoundaryNodes`) with their own fix. **Nodes only**:
+a face node is fixed either way and the boundary is never a cut target, so no arm samples it.
+The face is the mesh's node plane, not the declared bound; "holds something other than zero" is
+the overlap checks' reading in every state; an edge carrying an edge profile is not grounded;
+and a face lying in a mirror plane - the axis of an axisymmetric solve included - is not a
+surface, since by symmetry the conductor continues across it.
+
+**What it found: 17 of 44 shipped solved elements**, every one a cross-section - ring stacks
+run out to the grounded outer wall, a Paul trap's ring truncated at it, the einzel lens's center
+tube, a Kingdon wire's ends, and two mirrors whose end cap is a plate with no thickness lying in
+the grounded edge. Moving only the face on the wall by 1e-7 of the domain's extent each way, on
+the same mesh: **fifteen are harmless** - every potential more than three cells from the wall and
+every figure run (eleven fly ions) identical to the bit, the coin confined to the contact, where
+it moves the potential by about a fifth of the applied. **For the two mirrors it decides whether
+the mirror has an end cap**: the documents write the cap and the edge as one expression, so the
+shipped arithmetic lands on the side with a cap, but 1e-7 of the extent outside the edge the cap
+is not in the solve, the potential ten cells in moves by 45 percent of the applied, and
+transmission goes from 1 to 0. Nothing in the templates is changed here; `SharedFaceCorpusTests`
+pins the seventeen, and the fixes are item 11 of *What to do next*.
+
+**Two traps in measuring it, both general.** Moving the domain face itself moved the mesh: the
+ion funnel's radius is exactly 64 cells, and growing it by anything made it 128, which the first
+survey reported as several volts of interior difference that was a different mesh. And
+translating whole conductors instead exposed a **second coin with nothing to do with the wall**:
+a single conductor's face lying on a node plane is continuous in its normal position, but the arms
+lying *in* that plane, beside the conductor, are cut at its side face or graze past to a node a
+cell away according to the rounding - on the funnel's last ring, a 4.5e-4 change in flight time
+for a 6.4e-6-cell move. Cut cells make the answer continuous in where one conductor's surface sits
+only while its faces are off the node planes. Not checked; item 11.
+
 ### 56 - A mesh samples a geometry at nodes and at arms, and a shared face must be clear of both
 
 **ACC-3, GRD-2, and Amendment 55.** Amendment 55 found that a node lying on a face two
@@ -189,7 +236,8 @@ two states near zero volts that the flight does not see.
 cell off a node draws no warning and sits on the edge of the same step, which a geometric
 sweep or sensitivity field would cross silently - so the fix the warning names is a tenth of
 a cell, not the tolerance. And a conductor flush with a **Dirichlet** domain face is the same
-coin toss against the grounded boundary at zero volts, and is not checked.
+coin toss against the grounded boundary at zero volts, and is not checked. **Now checked** -
+Amendment 57, which also found seventeen shipped elements that were not clean after all.
 
 ### 55 - Where a mesh sits is part of its error, and a node on a shared face is not error at all
 
@@ -3337,7 +3385,28 @@ project's author needs to run it and more than any physics the moment one does.
      links rather than rasterization, so the next lever is how many exact entry tests that
      pass asks for (`docs/numerics.md`, "What building the mask costs").
 
-11. **Distribution, and the trigger is a person rather than a date.** Fourteen of the
+11. **Clear the shipped models of the grounded-face coin, and look for the single-conductor
+   one (Amendment 57).** Placed above distribution and below the device work because it moves no
+   number anyone has published - fifteen of the seventeen trips are measured harmless - but it
+   puts a qualified mark on every figure of those models, and a warning that is always there is
+   the one people learn to skim.
+
+   - **The two mirrors first**, because there the coin is the physics: the end cap of
+     `planar-mirror-pair` and `astral-mirror` is a rectangle with no thickness lying in the
+     grounded edge, in the solve only because two expressions agree to the bit. A cap meant to be
+     the edge is an edge profile, and the change is bit-identical - check it is.
+   - **Then the ring stacks, the lens and the Paul trap**: carry the conductor past the wall so
+     every node on it is inside by any arithmetic. Bit-identical where no side face crosses the
+     wall on a line of nodes (the lens, the TIMS stacks); the funnels and the traveling-wave guide
+     have three or four ring corners that do, and clearing those moves geometry by a fraction of a
+     cell and their numbers with it - a change for its own review.
+   - **The single-conductor coin**: a face on a node plane makes the arms lying in that plane cut
+     or graze on the last bit. Measure how common it is (the funnel's first and last rings have
+     it; round-number geometry on round-number meshes will often), then decide whether it wants a
+     warning, a fix in the cut links - treating an arm in a face's plane as meeting it - or both.
+
+
+12. **Distribution, and the trigger is a person rather than a date.** Fourteen of the
    twenty-one not-built requirements are `UPD-*` and `DST-*` - one assembly that does not exist -
    and SPEC's own summary is blunt about the consequence: **nobody can install this**.
 

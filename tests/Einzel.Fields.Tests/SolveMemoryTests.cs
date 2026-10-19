@@ -178,7 +178,15 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     /// about 135 rather than 143. A slope between two builds turns that into an error either
     /// way: it read 0.78 of the statement on one CI runner. One build at a quarter of a
     /// million nodes, where the fixed cost of a build is a tenth of a byte a node, can only
-    /// read low, and the band below holds whether or not the transient is caught.
+    /// read low.
+    /// </para>
+    /// <para>
+    /// <b>How low depends on how loaded the machine is, so the lower edge is 0.85.</b> The plane
+    /// spends most of a build smoothing its fine level, and its coarse levels exist only during
+    /// each cycle's descent. A sampler reads 143.3 to 143.9 when it catches the copy, about 135
+    /// when it catches a descent but not the copy, and about 126.6 when it sees only the fine
+    /// level and the first coarse mask - which a four-core CI runner did in two builds of three,
+    /// reading 0.884. The upper edge, which is what guards against under-billing, is unchanged.
     /// </para>
     /// <para>
     /// The smaller build is kept, and printed, as a control on the fixed cost: it reads the
@@ -204,8 +212,9 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
             $"plane {planLarge.Nodes:N0} nodes: predicted {predicted:F1} B/node, measured {measured:F1} "
             + $"({planSmall.Nodes:N0} nodes: {peakSmall / planSmall.Nodes:F1})");
 
-        // 135 when every sample misses the transient, 143.3 when one catches it.
-        Assert.InRange(measured / predicted, 0.90, 1.02);
+        // 143.3 when a sample catches the transient, 135 when it catches only a descent, 126.6
+        // when it sees only the fine level.
+        Assert.InRange(measured / predicted, 0.85, 1.02);
     }
 
     /// <summary>A second plane channel costs one kept potential, not a second geometry.</summary>

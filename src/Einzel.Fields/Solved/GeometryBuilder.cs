@@ -73,23 +73,16 @@ public static class GeometryBuilder
         ArgumentNullException.ThrowIfNull(solve);
         ArgumentNullException.ThrowIfNull(grid);
 
+        var (left, right, bottom, top) = Edges(solve, grid);
+
         var mask = new DirichletMask(grid)
         {
-            LeftEdge = Translate(solve.LeftEdge),
-            RightEdge = Translate(solve.RightEdge),
-            BottomEdge = Translate(solve.BottomEdge),
-            TopEdge = Translate(solve.TopEdge),
+            LeftEdge = left,
+            RightEdge = right,
+            BottomEdge = bottom,
+            TopEdge = top,
             Symmetry = solve.Symmetry,
         };
-
-        // The axis of an axisymmetric solve is a mirror plane whatever the document
-        // says, because it is one. Forced rather than validated: requiring the
-        // author to declare it is an opportunity to get it wrong, and there is no
-        // second thing it could be.
-        if (solve.Symmetry == SolveSymmetry.Cylindrical && grid.OriginY <= 0.5 * grid.SpacingY)
-        {
-            mask.BottomEdge = EdgeCondition.Neumann;
-        }
 
         foreach (var electrode in solve.Electrodes)
         {
@@ -125,6 +118,29 @@ public static class GeometryBuilder
         return mask;
     }
 
+    /// <summary>What each edge of a solve's mask is, the axis of an axisymmetric solve included.</summary>
+    /// <remarks>
+    /// <para>
+    /// The axis of an axisymmetric solve is a mirror plane whatever the document says,
+    /// because it is one. Forced rather than validated: requiring the author to declare it
+    /// is an opportunity to get it wrong, and there is no second thing it could be.
+    /// </para>
+    /// <para>
+    /// One function, so the mask and the check for nodes on a grounded edge
+    /// (<see cref="NodesOnSharedFaces"/>) cannot come to disagree about which edges are
+    /// grounded.
+    /// </para>
+    /// </remarks>
+    private static (EdgeCondition Left, EdgeCondition Right, EdgeCondition Bottom, EdgeCondition Top) Edges(
+        CompiledSolvedField solve, Grid2D grid)
+    {
+        var bottom = solve.Symmetry == SolveSymmetry.Cylindrical && grid.OriginY <= 0.5 * grid.SpacingY
+            ? EdgeCondition.Neumann
+            : Translate(solve.BottomEdge);
+
+        return (Translate(solve.LeftEdge), Translate(solve.RightEdge), bottom, Translate(solve.TopEdge));
+    }
+
     /// <summary>
     /// Grounds every node on a Dirichlet domain edge that no electrode has already
     /// claimed.
@@ -149,7 +165,10 @@ public static class GeometryBuilder
     /// </para>
     /// <para>
     /// Electrodes are rasterised first and are not overwritten, so a plate that
-    /// reaches the edge of the domain still holds the edge.
+    /// reaches the edge of the domain still holds the edge. Which edge nodes it reaches
+    /// is decided by rasterization, so a plate whose face is <em>flush</em> with the edge
+    /// holds the nodes on that face or leaves them grounded according to the rounding -
+    /// which <see cref="NodesOnSharedFaces"/> reports.
     /// </para>
     /// </remarks>
     private static void PinDirichletEdges(DirichletMask mask, Grid2D grid)
@@ -313,6 +332,13 @@ public static class GeometryBuilder
     /// include it, according to which electrode was declared last.
     /// </para>
     /// <para>
+    /// <b>A grounded edge of the domain counts as a conductor at zero volts</b>, and nodes on
+    /// it lying on an electrode's surface are counted apart, as
+    /// <see cref="SharedFaceNodes.BoundaryNodes"/>: the edge pins a node to zero unless an
+    /// electrode claimed it, so such a node holds the electrode's potential or zero on the last
+    /// bit. Nodes only, since an edge node is fixed either way.
+    /// </para>
+    /// <para>
     /// An edge profile has no surface to be near: it lies along a domain edge and its signed
     /// distance is infinite, so it takes no part. A profiled board meeting an interior
     /// electrode at the edge is decided by declaration order rather than by rounding, which is
@@ -458,11 +484,162 @@ public static class GeometryBuilder
             }
         }
 
-        return (nodeExample ?? armExample) is { } first
-            ? new SharedFaceNodes(
+        var (boundary, boundaryExample) = NodesOnGroundedEdges(solve, grid, states, tolerance);
+
+        if ((nodeExample ?? armExample) is { } first)
+        {
+            return new SharedFaceNodes(
                 nodes.Count, arms.Count, first.First, first.Second, first.X, first.Y, null,
                 ExampleIsArm: nodeExample is null)
+            {
+                BoundaryNodes = boundary,
+            };
+        }
+
+        return boundaryExample is { } edge
+            ? new SharedFaceNodes(0, 0, edge.First, edge.Face, edge.X, edge.Y, null, ExampleIsArm: false)
+            {
+                BoundaryNodes = boundary,
+                ExampleIsBoundary = true,
+            }
             : null;
+    }
+
+    /// <summary>
+    /// Nodes on a grounded edge of the domain that lie on the surface of an electrode holding
+    /// something other than zero volts in some state, so that whether the electrode or the
+    /// edge claims them is decided by rounding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The grounded boundary is a third conductor at zero volts (<c>docs/numerics.md</c>,
+    /// "Domain edges"): <see cref="PinDirichletEdges"/> fixes an edge node to zero unless an
+    /// electrode has claimed it first, and an electrode claims it by containing it. So a node
+    /// on the edge that is on the electrode's surface - on a face flush with the edge, or where
+    /// a face crossing the edge meets it - holds the electrode's potential or zero on the last
+    /// bit.
+    /// </para>
+    /// <para>
+    /// Nodes only. An edge node is fixed either way and the edge is never a cut target, so no
+    /// arm samples the boundary; an arm that reaches a flipped node uncut - from a conductor
+    /// lying outside the domain against it - reads the node's value, which is the node's coin.
+    /// </para>
+    /// <para>
+    /// "Holds something other than zero" is the overlap check's own reading, asked of the
+    /// electrode against itself stripped of its excitation, so a zero-volt electrode is
+    /// harmless against the edge exactly when it would be harmless against another zero-volt
+    /// electrode. A Neumann edge - the axis of an axisymmetric solve included - is a mirror and
+    /// takes no part: a node there flips between fixed and free beside the conductor, which is
+    /// an ordinary cut cell rather than a choice between two values. An edge carrying an edge
+    /// profile is not grounded anywhere, since the profile claims every node on it.
+    /// </para>
+    /// <para>
+    /// <b>A face lying in a mirror plane is not a surface.</b> By symmetry the conductor
+    /// continues across a Neumann edge, so a face declared in it is where the half-domain stops
+    /// describing the conductor, not where the conductor stops. The case that forced it is the
+    /// axis of an axisymmetric solve: a solid rod is written as a rectangle from the axis
+    /// outward, and in space the axis is inside it. So where a grounded edge meets a mirror
+    /// edge, the corner node is asked about a point just inside the mirror instead. A face
+    /// crossing the mirror still counts there - a rod whose end is flush with the grounded edge
+    /// is flagged at that corner - and a face lying in it does not, so a rod carried past the
+    /// edge is clean, as the warning's advice says it will be.
+    /// </para>
+    /// </remarks>
+    private static (int Count, (string First, string Face, double X, double Y)? Example) NodesOnGroundedEdges(
+        CompiledSolvedField solve,
+        Grid2D grid,
+        IReadOnlyList<IReadOnlyList<CompiledElectrode>> states,
+        double tolerance)
+    {
+        var electrodes = solve.Electrodes;
+        var (left, right, bottom, top) = Edges(solve, grid);
+
+        // Ten tolerances into the domain from a mirror edge: clear of a face lying in it, and
+        // still on any face crossing it.
+        var lift = 10.0 * tolerance;
+
+        var profiled = electrodes
+            .Where(e => e.Shape == ElectrodeShape.EdgeProfile)
+            .Select(e => e.Edge)
+            .ToHashSet();
+
+        // Each grounded edge as the line of nodes it is: which index is held, along which axis.
+        var edges = new List<(string Face, bool Vertical, int Line)>(4);
+
+        void Add(string face, EdgeCondition condition, GridEdge edge, bool vertical, int line)
+        {
+            if (condition == EdgeCondition.Dirichlet && !profiled.Contains(edge))
+            {
+                edges.Add((face, vertical, line));
+            }
+        }
+
+        Add("left edge", left, GridEdge.Left, vertical: true, 0);
+        Add("right edge", right, GridEdge.Right, vertical: true, grid.CountX - 1);
+        Add("bottom edge", bottom, GridEdge.Bottom, vertical: false, 0);
+        Add("top edge", top, GridEdge.Top, vertical: false, grid.CountY - 1);
+
+        var found = new HashSet<long>();
+        (string First, string Face, double X, double Y)? example = null;
+
+        for (var e = 0; e < electrodes.Count; e++)
+        {
+            var index = e;
+            var electrode = electrodes[e];
+
+            if (BoundsOf(electrode) is not { } box
+                || states.All(state => ElectrodeOverlap.Agrees(
+                    state[index], state[index] with { Potential = 0.0, Taps = [] })))
+            {
+                continue;
+            }
+
+            foreach (var (face, vertical, line) in edges)
+            {
+                // The line of nodes' own coordinate, not the declared bound: a last node written
+                // as origin plus count times spacing need not land on the declared maximum
+                // exactly, and the line of nodes is what gets pinned.
+                var (across, lo, hi) = vertical
+                    ? (grid.X(line), box.MinX, box.MaxX)
+                    : (grid.Y(line), box.MinY, box.MaxY);
+
+                if (across < lo - tolerance || across > hi + tolerance)
+                {
+                    continue;
+                }
+
+                var (first, last) = vertical
+                    ? SharedFaceNodes.Range(
+                        grid.OriginY, grid.SpacingY, grid.CountY, box.MinY - tolerance, box.MaxY + tolerance)
+                    : SharedFaceNodes.Range(
+                        grid.OriginX, grid.SpacingX, grid.CountX, box.MinX - tolerance, box.MaxX + tolerance);
+
+                for (var along = first; along <= last; along++)
+                {
+                    var (i, j) = vertical ? (line, along) : (along, line);
+                    var (x, y) = (grid.X(i), grid.Y(j));
+
+                    var askedX = x
+                        + (i == 0 && left == EdgeCondition.Neumann ? lift : 0.0)
+                        - (i == grid.CountX - 1 && right == EdgeCondition.Neumann ? lift : 0.0);
+                    var askedY = y
+                        + (j == 0 && bottom == EdgeCondition.Neumann ? lift : 0.0)
+                        - (j == grid.CountY - 1 && top == EdgeCondition.Neumann ? lift : 0.0);
+
+                    if (Math.Abs(electrode.SignedDistance(askedX, askedY)) > tolerance)
+                    {
+                        continue;
+                    }
+
+                    if (found.Add(((long)j * grid.CountX) + i))
+                    {
+                        example ??= (electrode.Name, face, x, y);
+                    }
+                }
+            }
+        }
+
+        return (found.Count, example);
     }
 
     /// <summary>The four stencil arms, in the order <see cref="AddCuts"/> visits them.</summary>
