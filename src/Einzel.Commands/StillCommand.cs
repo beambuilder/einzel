@@ -49,6 +49,22 @@ public sealed record StillOutcome
     /// <summary>Whether a validity violation marked the picture with a hatched band.</summary>
     public required bool Tainted { get; init; }
 
+    /// <summary>
+    /// The true length of each arm of the scale indicator, in millimeters; absent when none
+    /// was drawn - because <c>--no-scale</c> asked for none, or because the picture is too small
+    /// to hold one.
+    /// </summary>
+    public double? ScaleMm { get; init; }
+
+    /// <summary>The model axes the scale indicator has an arm along; empty when none was drawn.</summary>
+    public IReadOnlyList<string> ScaleAxes { get; init; } = [];
+
+    /// <summary>
+    /// Which corner the scale indicator sits in - the one the instrument covers least; absent
+    /// when none was drawn.
+    /// </summary>
+    public string? ScaleCorner { get; init; }
+
     /// <summary>Everything the viewport reported, which the PNG also carries (GRD-2).</summary>
     public required IReadOnlyList<WarningJson> Warnings { get; init; }
 }
@@ -86,6 +102,7 @@ public static class StillCommand
     /// <param name="seeThrough">Whether to draw the conductors translucent.</param>
     /// <param name="outputPath">Where to write, or null to name it after the model.</param>
     /// <param name="dryRun">Whether to draw without writing.</param>
+    /// <param name="scale">Whether to draw the scale indicator.</param>
     /// <returns>What was drawn and where it went.</returns>
     /// <exception cref="ArgumentException">The model path is blank, or the view has no such name.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A size is outside 16 to 8192 pixels.</exception>
@@ -98,7 +115,8 @@ public static class StillCommand
         int height = 1000,
         bool seeThrough = false,
         string? outputPath = null,
-        bool dryRun = false)
+        bool dryRun = false,
+        bool scale = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
         ArgumentNullException.ThrowIfNull(project);
@@ -122,16 +140,30 @@ public static class StillCommand
         var layers = ViewportPicture.Compose(
             outcome, seeThrough ? ViewportPicture.SeeThroughOpacity : 1.0);
         var framing = Framing.Measure(outcome, angles.Azimuth, angles.Elevation);
+        var matrix = framing.Matrix((double)width / height);
+
+        var tainted = outcome.Warnings.Any(w => w.Severity == WarningSeverity.ValidityViolation);
+
+        // Sized from the same matrix the picture is drawn with, and kept above the hatched
+        // band a tainted picture carries, so the band cannot strike the ruler through.
+        var ruler = scale
+            ? ScaleIndicator.For(
+                matrix,
+                width,
+                height,
+                ScaleIndicator.TextHeightFor(width, height),
+                tainted ? Rasterizer.HatchHeight(height) : 0.0,
+                layers)
+            : null;
 
         var rgb = Rasterizer.Draw(
             [.. layers.Select(Raster)],
-            framing.Matrix((double)width / height),
+            matrix,
             new RasterLighting(ViewportPicture.Brightness, ViewportPicture.LineBrightness),
             ColorRamp.Ground,
             width,
-            height);
-
-        var tainted = outcome.Warnings.Any(w => w.Severity == WarningSeverity.ValidityViolation);
+            height,
+            overlay: ruler is null ? null : Overlay(ruler));
 
         if (tainted)
         {
@@ -146,7 +178,7 @@ public static class StillCommand
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllBytes(path, PngWriter.Write(rgb, width, height, Provenance(
-                absolute, hash, view, angles, width, height, seeThrough, outcome)));
+                absolute, hash, view, angles, width, height, seeThrough, outcome, ruler)));
         }
 
         return new StillOutcome
@@ -164,6 +196,9 @@ public static class StillCommand
             Trajectories = outcome.Trajectories.Count,
             DensityShells = outcome.Density.Count,
             Tainted = tainted,
+            ScaleMm = ruler?.LengthMm,
+            ScaleAxes = ruler is null ? [] : [.. ruler.Arms.Select(a => a.Axis)],
+            ScaleCorner = ruler?.Corner,
             Warnings = [.. outcome.Warnings.Select(w => new WarningJson
             {
                 Code = w.Code,
@@ -187,6 +222,26 @@ public static class StillCommand
             layer.Alpha,
             layer.WritesDepth);
 
+    /// <summary>A scale indicator, as the rasterizer draws it: strokes and text in pixels.</summary>
+    /// <remarks>
+    /// Where each piece goes was decided in <see cref="ScaleIndicator.For"/>, which the window
+    /// draws from too; this only changes the records' shape, for the reason
+    /// <see cref="Raster"/> gives.
+    /// </remarks>
+    private static RasterOverlay Overlay(ScaleIndicator ruler)
+    {
+        var (r, g, b) = ScaleIndicator.Ink;
+        var (ox, oy) = ruler.OriginPx;
+
+        return new RasterOverlay(
+            [.. ruler.Arms.Select(a => new OverlayStroke([ox, oy, a.TipPx.X, a.TipPx.Y], r, g, b))],
+            [
+                new OverlayText(ruler.Label, ruler.LabelPx.X, ruler.LabelPx.Y, ruler.TextPx, r, g, b),
+                .. ruler.Arms.Select(a => new OverlayText(a.Axis, a.LetterPx.X, a.LetterPx.Y, 0.8 * ruler.TextPx, r, g, b)),
+            ],
+            ScaleIndicator.LineWidthPx);
+    }
+
     private static List<(string Keyword, string Text)> Provenance(
         string model,
         string hash,
@@ -195,7 +250,8 @@ public static class StillCommand
         int width,
         int height,
         bool seeThrough,
-        ViewportOutcome outcome)
+        ViewportOutcome outcome,
+        ScaleIndicator? ruler)
     {
         var text = new List<(string, string)>
         {
@@ -206,6 +262,13 @@ public static class StillCommand
                 CultureInfo.InvariantCulture,
                 $"einzel render still, view {view} (azimuth {angles.Azimuth:G}, elevation {angles.Elevation:G}), {width} by {height} px, orthographic; {outcome.ElectrodeCount()} electrodes{(seeThrough ? " drawn translucent" : string.Empty)}, {outcome.Equipotentials.Count} equipotential levels, {outcome.Trajectories.Count} trajectories, {outcome.Density.Count} density contours")),
         };
+
+        // The scale in words as well as in lines, because the lines are only as good as the
+        // pixels they survive being resized into.
+        if (ruler is not null)
+        {
+            text.Add(("Scale", $"each arm of the ruler in the {ruler.Corner} is {ruler.Label} along the model's {string.Join(", ", ruler.Arms.Select(a => a.Axis))} axis, drawn with the picture's own projection"));
+        }
 
         // Every warning, not only the violations the band marks: a PNG travels without the
         // JSON that described it, so what qualified the picture has to travel inside it.

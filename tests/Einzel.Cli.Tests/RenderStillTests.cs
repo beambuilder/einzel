@@ -187,6 +187,105 @@ public sealed class RenderStillTests(ITestOutputHelper output) : IDisposable
         return JsonSerializer.Deserialize<StillOutcome>(stdout, Web)!;
     }
 
+    /// <summary>
+    /// A still carries a ruler where the layout puts it, says how long its arms are, and leaves
+    /// it out when asked.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The ruler is found by carrying its own layout - the same call the window makes, from the
+    /// same framing - into the file and reading the pixels halfway along the x arm. The arm is an
+    /// antialiased line a pixel and a half wide, centered wherever the layout put it, so it is
+    /// looked for across the row it runs through and the rows either side; the ground is white,
+    /// so nothing distinctly darker there means it was not drawn where it belongs.
+    /// </para>
+    /// <para>
+    /// The control is the same picture with <c>--no-scale</c>: a ruler drawn on every still, or a
+    /// dark pixel there for some other reason, would pass the first half alone.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AStillCarriesARulerWhereTheLayoutPutsItAndOmitsItWhenAsked()
+    {
+        const int Width = 900;
+        const int Height = 560;
+
+        var model = Template("einzel-lens");
+        var with = Path.Combine(_root, "figures", "lens-ruler.png");
+        var without = Path.Combine(_root, "figures", "lens-bare.png");
+
+        var (code, stdout, _) = Cli(
+            "render", "still", model, "--view", "side", "--out", with,
+            "--width-px", "900", "--height-px", "560", "--json");
+
+        Assert.Equal(0, code);
+
+        using var result = JsonDocument.Parse(stdout);
+        var arm = result.RootElement.GetProperty("scaleMm").GetDouble();
+        var axes = result.RootElement.GetProperty("scaleAxes").EnumerateArray().Select(a => a.GetString()!).ToArray();
+
+        var scene = ViewportCommand.Execute(model);
+        var (azimuth, elevation) = ViewportPicture.Views["side"];
+        var matrix = Framing.Measure(scene, azimuth, elevation).Matrix((double)Width / Height);
+        var ruler = ScaleIndicator.For(
+            matrix, Width, Height, ScaleIndicator.TextHeightFor(Width, Height), 0.0, ViewportPicture.Compose(scene))!;
+
+        output.WriteLine($"ruler arms {ScaleIndicator.Format(arm)} along {string.Join(", ", axes)}");
+
+        Assert.Equal(ruler.LengthMm, arm, 12);
+        Assert.Equal(["x", "y"], axes);
+        Assert.Equal(ruler.Corner, result.RootElement.GetProperty("scaleCorner").GetString());
+
+        var x = ruler.Arms.Single(a => a.Axis == "x");
+        var middle = ((int)Math.Round((ruler.OriginPx.X + x.TipPx.X) / 2.0), (int)Math.Round(ruler.OriginPx.Y));
+
+        var (_, _, drawn) = Decode(File.ReadAllBytes(with));
+        var darkest = Rows(drawn, middle).Min();
+
+        Assert.True(darkest < 200, $"the ruler's x arm is not at {middle}: darkest {darkest}");
+
+        var (bareCode, bareOut, _) = Cli(
+            "render", "still", model, "--view", "side", "--out", without,
+            "--width-px", "900", "--height-px", "560", "--no-scale", "--json");
+
+        Assert.Equal(0, bareCode);
+
+        using var bare = JsonDocument.Parse(bareOut);
+        Assert.False(bare.RootElement.TryGetProperty("scaleMm", out var none) && none.ValueKind != JsonValueKind.Null);
+
+        var (_, _, plain) = Decode(File.ReadAllBytes(without));
+
+        Assert.All(Rows(plain, middle), value => Assert.Equal(255, value));
+
+        // The darkest channel of the pixel at the arm's midpoint and one row either side.
+        static IEnumerable<int> Rows(byte[] rgb, (int X, int Y) at) =>
+            Enumerable.Range(at.Y - 1, 3).Select(y => At(rgb, Width, at.X, y)).Select(p => Math.Min(p.R, Math.Min(p.G, p.B)));
+    }
+
+    /// <summary>
+    /// A still too small to hold the ruler reports none, rather than reporting one it drew off
+    /// the edge.
+    /// </summary>
+    /// <remarks>
+    /// Found by review: at 32 pixels a side the ruler's origin sat above the picture with both
+    /// arms clipped away while <c>scaleMm</c> still said a ruler was drawn.
+    /// </remarks>
+    [Fact]
+    public void ATinyStillReportsNoRuler()
+    {
+        var png = Path.Combine(_root, "figures", "lens-tiny.png");
+        var (code, stdout, _) = Cli(
+            "render", "still", Template("einzel-lens"), "--view", "side", "--out", png,
+            "--width-px", "32", "--height-px", "32", "--json");
+
+        Assert.Equal(0, code);
+
+        using var result = JsonDocument.Parse(stdout);
+
+        Assert.False(result.RootElement.TryGetProperty("scaleMm", out var arm) && arm.ValueKind != JsonValueKind.Null);
+        Assert.Empty(result.RootElement.GetProperty("scaleAxes").EnumerateArray());
+    }
+
     private static int BottomRowRed(string png)
     {
         var (width, height, rgb) = Decode(File.ReadAllBytes(png));

@@ -653,7 +653,7 @@ correctly empty of metal. The plane is moved with a render spec's `plane` block.
 ## `render still` - the viewport's picture, as a PNG
 
 ```bash
-einzel render still models/mirror.json --view iso --width-px 1600 --height-px 1000 [--see-through] [--out f.png] [--json]
+einzel render still models/mirror.json --view iso --width-px 1600 --height-px 1000 [--see-through] [--no-scale] [--out f.png] [--json]
 ```
 
 A shaded three-dimensional raster, headless, and **the picture the interactive viewport
@@ -702,13 +702,57 @@ viewport always did.
 versions, the model and its hash, the view, and every warning the viewport earned, in UTF-8
 because warnings quote microseconds. **A validity violation hatches the bottom of the
 picture** (RND-11). What it does not draw is RND-11's `QUALIFIED` line naming the code: a
-raster needs glyphs, nothing here rasterizes text, and the codes are in the text chunks and
-on stderr instead.
+raster needs glyphs, and the only ones here are the ruler's (below) - digits, units and axis
+letters, not the alphabet a warning code is written in - so the codes are in the text chunks
+and on stderr instead.
 
 **What it cannot check** is the window's own GPU half - shader compilation, uploads, depth
 state - which needs a GL context. The still shares every decision with the window and none of
 its pixels; the ANGLE dialect defect in `docs/shell.md` is exactly the kind of thing only the
 window can show.
+
+### A ruler in the corner, true in every view
+
+Every still carries a scale in a corner: **one arm along each model axis, all the same
+round length, projected with the matrix the picture is drawn with.** The length is the
+largest 1, 2 or 5 times a power of ten that keeps the longest arm under 0.16 of the picture's
+smaller side, and it is written once under the arms, in the unit that keeps the number small
+(`10 mm`, `500 µm`, `2 m`), with each arm's axis letter at its tip.
+
+**A ruler in the scene rather than a bar on the screen, and the angled view is why.** In the
+side, top and front views the camera looks straight down a model axis, so a flat bar would
+be exact - and the ruler is one there: an L of two arms, with the axis pointing at the viewer
+left out. In the iso view each axis is foreshortened by its own amount - x by 0.87, y by 0.91
+and z by 0.63 at the shipped angles - so a flat bar would state one scale for three. Arms
+along the model's axes shorten exactly as the instrument does, which a test pins against the
+closed form in the two view angles rather than against the matrix the ruler reads.
+
+**In a corner, because the camera is orthographic**: a segment along an axis has the same
+length on screen wherever it sits, so the ruler can stand away from the instrument without being
+any less true, and does not widen the frame. **Which corner is chosen from the picture, and it
+is not always clear.** The camera fits the instrument with only a few percent to spare, so a
+plate seen face-on fills all four corners - the first version, always in the lower left, landed
+on the electrode there while this page said it never would, which a review caught. Each corner is
+now scored by how much of the drawn instrument it would cover, triangle by triangle and segment by
+segment on screen with the equipotentials left out (they cover the whole sampled region), and the
+least-covered one wins, lower left on a tie. Where every corner is covered the ruler is drawn over
+the instrument. The corner is in the `--json` result (`scaleCorner`) and the PNG's text.
+**A ruler that does not fit is left out**: one whose arms, letters and label cannot all sit inside
+the picture is not laid out, rather than drawn partly off the edge - a 32-pixel still gets none,
+and its `--json` reports none.
+**One length for every arm**, because per-axis lengths would invite comparing arms that are
+not comparable; with one, the arms' different screen lengths *are* the foreshortening. The
+layout keeps above the hatched band a tainted picture carries, and `--no-scale` leaves it out.
+
+**Decided in the command layer (`ScaleIndicator`), like the rest of the picture**, and drawn
+by the Avalonia viewport from the same call, over its GL control and redrawn when the view or
+the window's size changes. The still draws it in `StrokeFont`: a line font of digits, units
+and axis letters, drawn through the rasterizer's own line routine - no font file, so no
+license question and nothing for a headless runner to lack. A character it cannot spell is
+drawn as an empty box rather than dropped, so a gap reads as a gap rather than as a shorter,
+different length; a test walks every label the ruler can write, nanometers to kilometers. The
+length is in the `--json` result (`scaleMm`, `scaleAxes`) and in the PNG's text chunks,
+because the lines are only as good as the pixels they survive being resized into.
 
 ### What drawing it found
 
@@ -730,7 +774,11 @@ window can show.
 
 - **Filled density bands, and a color scale.** Contour lines carry the levels in the
   provenance; a filled and keyed plot would carry them on the page.
-- **Text in a raster.** See above.
+- **Text in a raster beyond the ruler's.** The line font spells lengths, units and axis
+  letters; RND-11's `QUALIFIED` line needs the alphabet. See above.
+- **The ruler in the WPF viewport.** The Avalonia viewport draws it; the WPF one has its own
+  camera, from Helix Toolkit, and would need that camera's projection carried to the same
+  layout.
 
 Also not built for animations: **geometry that moves**. A stage may change what an
 electrode holds and not where it is, which is a rule the sequencer already enforces, so

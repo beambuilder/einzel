@@ -804,6 +804,7 @@ each of them rather than against whichever the scan happened to pick up.
 | Model tree | yes | **yes** |
 | Field over the geometry | yes | **yes** |
 | A run watched while it steps | yes | **yes** |
+| A scale in the viewport | not yet | **yes** |
 | Journal | yes | not yet |
 | Results by accuracy class | yes | not yet |
 | Regime inspector | yes | not yet |
@@ -814,6 +815,29 @@ each of them rather than against whichever the scan happened to pick up.
 Every row in the second column that says "not yet" is presentation over a command that
 already works - the same observation this page makes about the WPF shell's own remaining
 rows, and the reason a second window is a drawing exercise rather than a capability one.
+
+### A ruler in the corner of the viewport
+
+`ScaleOverlay` draws the scale indicator over the GL control as ordinary Avalonia lines and
+text: one arm along each model axis, all the same round length, foreshortened exactly as the
+instrument is. **It decides nothing** - the length, which arms show and where they sit come
+from `ScaleIndicator.For`, laid out from the very matrix the render pass hands the GPU and the
+composed picture it is drawing (`SceneView.Picture`), which is the call `einzel render still`
+makes. So a still and the window put the same ruler in the same corner - the one the instrument
+covers least - and leave it out alike when the picture is too small to hold it
+(`docs/rendering.md` has why it is a ruler in the scene rather than a flat bar, and how the
+corner is chosen).
+
+Over the GL control rather than inside it, because Avalonia draws text and the shader does
+not, and an annotation must not be hidden by the instrument; it takes no pointer input. It is
+redrawn when the framing changes - a named view, or a watched packet growing the frame, which
+happens on the render thread and is marshalled to the UI thread - and when the window is
+resized, since the ruler is sized from the picture's smaller side.
+
+**Not looked at in a live window yet.** Everything it draws is decided and tested in the
+command layer and drawn identically in the still; what the control adds is a handful of
+`DrawLine` and `DrawText` calls, and opening a window on somebody's desktop to look at it was not
+done unasked.
 
 ### Avalonia is 2-D, so the viewport is ours
 

@@ -2462,6 +2462,42 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
   and fails both once each also has a face *crossing* the mirror on a line of nodes, which only the
   Neumann exclusion keeps quiet.
 
+- **A scale in every 3D picture, and why it is a ruler rather than a bar.** Stills
+  (`einzel render still`) and the Avalonia viewport now carry a scale indicator in a corner;
+  the vector sections have always had a scale bar. **In the angled view a flat bar would
+  be wrong**: the camera is orthographic, so a flat bar is exact straight down an axis, but in
+  iso each model axis is foreshortened by its own amount - x by 0.87, y by 0.91, z by 0.63 at
+  the shipped angles - and one bar would state one scale for three. So the indicator is **one
+  arm along each model axis, all the same round length, projected with the picture's own
+  matrix**: each shortens exactly as the instrument does, and in a straight-on view the same
+  construction is an L-shaped scale bar with the arm that points at the viewer left out. It
+  sits in a corner because an orthographic projection gives an axis segment the same screen
+  length wherever it is, so it does not widen the frame. **The first version said it "never
+  overlaps an electrode", and a review found that false**: the camera fits the instrument with
+  a few percent to spare, so a fixed lower-left ruler landed on a plate seen face-on. It now
+  takes the corner the drawn instrument covers least - scored triangle by triangle and segment by
+  segment on screen, the equipotentials left out because they cover every corner - and is drawn
+  over the instrument only where all four are covered. The same review found it **drawn off the
+  edge of small stills**: at 32 pixels the minimum text and margin put its origin above the
+  picture while `--json` still reported a ruler. A ruler whose whole outline, label included,
+  does not fit is now left out and reported absent.
+
+  **Decided once, in `ScaleIndicator` in the command layer, from the matrix the picture is
+  drawn with** - a ruler computed from anything else would be a second account of the camera.
+  The still draws it through the rasterizer in `StrokeFont`, a line font of digits, units and
+  axis letters with no font file (LIC-1, and nothing for a headless runner to lack); an
+  unknown character is drawn as an empty box, not dropped, so a gap cannot read as a shorter
+  length, and a test walks every label the ruler can write. The length is in the still's
+  `--json` (`scaleMm`, `scaleAxes`) and its PNG text chunks; `--no-scale` omits it. Tests pin
+  the side view's arms to the framing's own pixels-per-millimeter rule and the iso arms to the
+  closed-form foreshortening in the two view angles, not to the matrix the ruler reads;
+  mutation-checked both ways (equal on-screen arms fail the iso test, a still without the
+  overlay fails the pixel test). **Two things the first draft got wrong**: `G3` would have
+  printed a kilometer ruler as `1E+03 m` in a font with no E, caught by the font test before it
+  shipped; and the pixel test first demanded a near-black pixel where an antialiased 1.5-pixel
+  line centered between rows leaves gray. **Not built**: the WPF viewport's ruler (its camera
+  is Helix's own), and the Avalonia overlay has not been looked at in a live window.
+
 Adding a travelling-wave guide or a multipole should need only one more file — axisymmetry, repeats and RF all exist now. If it needs a change below `Einzel.Library`, LIB-1 says the abstraction is wrong — believe it.
 
 Two findings from Stage 1 that bear on the spec:

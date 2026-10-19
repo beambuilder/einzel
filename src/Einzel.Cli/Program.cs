@@ -1597,7 +1597,7 @@ public static class Program
                 "usage: einzel render still <model.json> [--out <file.png>] "
                 + "[--view " + string.Join("|", ViewportPicture.Views.Keys) + "]");
             Console.Error.WriteLine(
-                "       [--width-px N] [--height-px N] [--see-through] [--dry-run] [--json]");
+                "       [--width-px N] [--height-px N] [--see-through] [--no-scale] [--dry-run] [--json]");
 
             return (int)ExitCode.ValidationFailure;
         }
@@ -1655,7 +1655,8 @@ public static class Program
             height,
             options.Has("see-through"),
             options.Value("out"),
-            options.Has("dry-run"));
+            options.Has("dry-run"),
+            scale: !options.Has("no-scale"));
 
         if (options.Has("json"))
         {
@@ -1669,6 +1670,9 @@ public static class Program
             + (outcome.SeeThrough ? ", conductors translucent" : string.Empty)
             + $"; {outcome.Electrodes} electrodes, {outcome.FieldLevels} equipotential levels, "
             + $"{outcome.Trajectories} trajectories, {outcome.DensityShells} density contours"
+            + (outcome.ScaleMm is { } arm
+                ? $"; ruler arms {ScaleIndicator.Format(arm)} along {string.Join(", ", outcome.ScaleAxes)}, {outcome.ScaleCorner}"
+                : string.Empty)
             + (outcome.Tainted ? "; marked with a hatched band for a validity violation" : string.Empty));
 
         // GRD-2: onto stderr, so a warning is not lost in a pipe that keeps stdout.

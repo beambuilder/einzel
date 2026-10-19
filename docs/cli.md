@@ -116,6 +116,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `--view iso\|side\|top\|front` | `render still` only: the named view, the same names as the window's buttons |
 | `--width-px N`, `--height-px N` | `render still` only: the picture's size, 16 to 8192 pixels; the unit is in the name, as `--width-mm` does it |
 | `--see-through` | `render still` only: draw the conductors translucent, as the window's toggle does |
+| `--no-scale` | `render still` only: leave out the ruler, which is drawn by default in the corner the instrument covers least (and left out anyway when the picture is too small to hold it) |
 | `--progress <seconds>` | `run` and both render verbs: how often to say where the transport has got to, on stderr. Thirty seconds by default, `0` for silence |
 | `--project <dir>` | Project root; otherwise inferred by walking up from the model |
 

@@ -30,6 +30,31 @@ public sealed record RasterLine(IReadOnlyList<double> PointsMm, double R, double
 public sealed record RasterLayer(
     IReadOnlyList<RasterMesh> Meshes, IReadOnlyList<RasterLine> Lines, double Alpha, bool WritesDepth);
 
+/// <summary>A flat polyline drawn over the picture, in output pixels.</summary>
+/// <param name="PointsPx">Consecutive x, y pairs, in pixels from the top left.</param>
+/// <param name="R">Red, zero to one.</param>
+/// <param name="G">Green, zero to one.</param>
+/// <param name="B">Blue, zero to one.</param>
+public sealed record OverlayStroke(IReadOnlyList<double> PointsPx, double R, double G, double B);
+
+/// <summary>A line of text drawn over the picture.</summary>
+/// <param name="Text">What it says.</param>
+/// <param name="CenterXPx">Its horizontal center, in pixels from the left.</param>
+/// <param name="CenterYPx">The vertical center of a digit, in pixels from the top.</param>
+/// <param name="HeightPx">The height of a digit, in pixels.</param>
+/// <param name="R">Red, zero to one.</param>
+/// <param name="G">Green, zero to one.</param>
+/// <param name="B">Blue, zero to one.</param>
+public sealed record OverlayText(
+    string Text, double CenterXPx, double CenterYPx, double HeightPx, double R, double G, double B);
+
+/// <summary>What is drawn over the finished picture, in its pixels, with no depth.</summary>
+/// <param name="Strokes">Flat polylines.</param>
+/// <param name="Texts">Lines of text, drawn in <see cref="StrokeFont"/>.</param>
+/// <param name="LineWidthPx">The width of a stroke, in output pixels.</param>
+public sealed record RasterOverlay(
+    IReadOnlyList<OverlayStroke> Strokes, IReadOnlyList<OverlayText> Texts, double LineWidthPx);
+
 /// <summary>How a surface is lit: a brightness for a normal, and one for a line.</summary>
 /// <param name="Surface">Brightness from zero to one, given a normal's x, y and z.</param>
 /// <param name="Line">Brightness of every line.</param>
@@ -73,6 +98,7 @@ public static class Rasterizer
     /// <param name="height">Output height in pixels.</param>
     /// <param name="supersample">Samples per output pixel along each axis.</param>
     /// <param name="lineWidth">Line width in output pixels.</param>
+    /// <param name="overlay">What to draw over the finished scene, in its pixels, or null.</param>
     /// <param name="samplesPerBand">
     /// The most samples held in memory at once. The picture is drawn in horizontal bands of
     /// at most this many samples, one band after another into one reused buffer.
@@ -105,6 +131,7 @@ public static class Rasterizer
         int height,
         int supersample = 2,
         double lineWidth = 1.5,
+        RasterOverlay? overlay = null,
         int samplesPerBand = DefaultSamplesPerBand)
     {
         ArgumentNullException.ThrowIfNull(layers);
@@ -127,6 +154,7 @@ public static class Rasterizer
         var rgb = new byte[3 * width * height];
         var canvas = new Canvas(
             width * supersample, rowsPerBand * supersample, matrix, height * supersample);
+        var annotations = Annotations(overlay, supersample);
 
         for (var top = 0; top < height; top += rowsPerBand)
         {
@@ -146,14 +174,65 @@ public static class Rasterizer
                 }
             }
 
+            // Over everything and tested against nothing: an annotation is not in the scene,
+            // so no electrode may hide it. Drawn on the supersampled canvas so it is
+            // antialiased like the rest of the picture.
+            foreach (var (points, r, g, b, strokeWidth) in annotations)
+            {
+                canvas.Flat(points, r, g, b, strokeWidth);
+            }
+
             canvas.Downsample(supersample, rgb, top);
         }
 
         return rgb;
     }
 
+    /// <summary>An overlay's strokes and glyphs in canvas pixels, each with its color and width.</summary>
+    private static List<(double[] Points, double R, double G, double B, double Width)> Annotations(
+        RasterOverlay? overlay, int supersample)
+    {
+        var laid = new List<(double[], double, double, double, double)>();
+
+        if (overlay is null)
+        {
+            return laid;
+        }
+
+        var strokeWidth = overlay.LineWidthPx * supersample;
+
+        foreach (var stroke in overlay.Strokes)
+        {
+            laid.Add(([.. stroke.PointsPx.Select(v => v * supersample)], stroke.R, stroke.G, stroke.B, strokeWidth));
+        }
+
+        foreach (var text in overlay.Texts)
+        {
+            // A stroke a ninth of the text's height, and never thinner than the picture's own
+            // lines, so a small label stays legible.
+            var textWidth = Math.Max(overlay.LineWidthPx * 0.8, text.HeightPx / 9.0) * supersample;
+
+            foreach (var glyph in StrokeFont.Layout(
+                text.Text, text.CenterXPx * supersample, text.CenterYPx * supersample, text.HeightPx * supersample))
+            {
+                laid.Add((glyph, text.R, text.G, text.B, textWidth));
+            }
+        }
+
+        return laid;
+    }
+
     /// <summary>The samples a band holds at most unless told otherwise: about 134 MB of them.</summary>
     public const int DefaultSamplesPerBand = 1 << 22;
+
+    /// <summary>How tall <see cref="Hatch"/>'s band is on a picture of this height.</summary>
+    /// <param name="height">The picture's height, in pixels.</param>
+    /// <returns>The band's height, in pixels.</returns>
+    /// <remarks>
+    /// Public so that anything placed near the bottom edge - a scale indicator - can stay clear
+    /// of the band rather than being struck through by it.
+    /// </remarks>
+    public static int HatchHeight(int height) => Math.Max(6, height / 40);
 
     /// <summary>
     /// Crosses the bottom of an image with a hatched band, marking the figure as carrying a
@@ -172,7 +251,7 @@ public static class Rasterizer
     {
         ArgumentNullException.ThrowIfNull(rgb);
 
-        var band = Math.Max(6, height / 40);
+        var band = HatchHeight(height);
         var stripe = Math.Max(3, band / 2);
 
         for (var y = height - band; y < height; y++)
@@ -378,6 +457,50 @@ public static class Rasterizer
                         if (writesDepth)
                         {
                             _depth[index] = depth;
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// A polyline already in the whole canvas's pixels, drawn over everything with no depth,
+        /// into whichever of its rows this band holds.
+        /// </summary>
+        public void Flat(double[] xy, double r, double g, double b, double width)
+        {
+            var half = 0.5 * width;
+
+            for (var i = 0; i + 3 < xy.Length; i += 2)
+            {
+                double ax = xy[i], ay = xy[i + 1], bx = xy[i + 2], by = xy[i + 3];
+
+                var minX = Math.Max(0, (int)Math.Floor(Math.Min(ax, bx) - half));
+                var maxX = Math.Min(_width - 1, (int)Math.Ceiling(Math.Max(ax, bx) + half));
+                var minY = Math.Max(_top, (int)Math.Floor(Math.Min(ay, by) - half));
+                var maxY = Math.Min(_top + _rows - 1, (int)Math.Ceiling(Math.Max(ay, by) + half));
+
+                var dx = bx - ax;
+                var dy = by - ay;
+                var length2 = (dx * dx) + (dy * dy);
+
+                for (var py = minY; py <= maxY; py++)
+                {
+                    for (var px = minX; px <= maxX; px++)
+                    {
+                        var sx = px + 0.5;
+                        var sy = py + 0.5;
+
+                        var t = length2 > 0.0
+                            ? Math.Clamp((((sx - ax) * dx) + ((sy - ay) * dy)) / length2, 0.0, 1.0)
+                            : 0.0;
+
+                        var ex = sx - (ax + (t * dx));
+                        var ey = sy - (ay + (t * dy));
+
+                        if ((ex * ex) + (ey * ey) <= half * half)
+                        {
+                            Put(((py - _top) * _width) + px, r, g, b, 1.0);
                         }
                     }
                 }

@@ -183,6 +183,9 @@ public sealed partial class MainWindow : Window
         var view = new SceneView { Scene = outcome };
         host.Children.Add(view);
 
+        // Over the viewport, so it is never hidden by the instrument and never takes a click.
+        host.Children.Add(new ScaleOverlay(view));
+
         // The model's own knobs, through the command that exists so the window need not
         // parse the document. An outline that fails becomes one row carrying its reason
         // rather than taking the window down - the picture is still worth having, and an
