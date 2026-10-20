@@ -836,10 +836,18 @@ public static class SectionRenderer
             {
                 declared++;
 
-                var values = Contours.Sample(
-                    plane, minU, minV, stepU, stepV, columns, rows,
-                    point => electrode.SignedDistance(
-                        point.X, mirrored ? Math.Abs(point.Y) : point.Y));
+                // As the solve holds it, ended against every domain edge that is not a
+                // mirror. The page is the domain, so a face lying on a domain edge lies on
+                // the page's last row with nothing sampled past it, and was left open - and
+                // an open path filled is closed by a chord, which drew the einzel lens's
+                // tubes as wedges.
+                var (values, _) = HeldConductor.Sample(
+                    element.Solve!,
+                    electrode,
+                    Math.Min(stepU, stepV),
+                    distance => Contours.Sample(
+                        plane, minU, minV, stepU, stepV, columns, rows,
+                        point => distance(point.X, mirrored ? Math.Abs(point.Y) : point.Y)));
 
                 nearest = Math.Min(nearest, Nearest(values));
 

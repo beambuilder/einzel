@@ -974,9 +974,11 @@ public static class ViewportCommand
                 continue;
             }
 
+            // The run itself rather than its points, so a closed shell keeps its closing
+            // segment: Contours does not repeat a closed run's first point.
             var mesh = Join(traced.Select(contour => cylindrical
-                ? Surfaces.Revolve([.. contour.Points], RevolutionFacets)
-                : Surfaces.Extrude([.. contour.Points], grid.OriginY, grid.MaxY)));
+                ? Surfaces.Revolve(contour, RevolutionFacets)
+                : Surfaces.Extrude(contour, grid.OriginY, grid.MaxY)));
 
             if (mesh.Triangles.Count == 0)
             {
@@ -1502,40 +1504,57 @@ public static class ViewportCommand
     }
 
     /// <summary>A cross-section's conductor, drawn as the prism the solve says it is.</summary>
+    /// <remarks>
+    /// Oriented by the same distance it was traced from: for a conductor ended against the
+    /// domain edge only that distance points outward through the face on the edge, while the
+    /// electrode's own may point back into the metal there.
+    /// </remarks>
     private static SurfaceMesh Extruded(
         CompiledElectrode electrode, CompiledSolvedField plane, double nearZ, double farZ)
     {
-        var mesh = Join(
-            Trace(electrode, plane)
-                .Select(run => Surfaces.Extrude([.. run.Points], nearZ, farZ)));
+        var (runs, distance) = Trace(electrode, plane);
 
-        return Surfaces.Orient(
-            mesh, (x, y, _) => electrode.SignedDistance(x, y), OrientStepMetres);
+        var mesh = Join(runs.Select(run => Surfaces.Extrude(run, nearZ, farZ)));
+
+        return Surfaces.Orient(mesh, (x, y, _) => distance(x, y), OrientStepMetres);
     }
 
     /// <summary>An axisymmetric conductor, drawn as the solid of revolution it is.</summary>
     private static SurfaceMesh Revolved(CompiledElectrode electrode, CompiledSolvedField plane)
     {
-        var mesh = Join(
-            Trace(electrode, plane)
-                .Select(run => Surfaces.Revolve([.. run.Points], RevolutionFacets)));
+        var (runs, distance) = Trace(electrode, plane);
+
+        var mesh = Join(runs.Select(run => Surfaces.Revolve(run, RevolutionFacets)));
 
         return Surfaces.Orient(
             mesh,
-            (x, y, z) => electrode.SignedDistance(x, Math.Sqrt((y * y) + (z * z))),
+            (x, y, z) => distance(x, Math.Sqrt((y * y) + (z * z))),
             OrientStepMetres);
     }
 
-    /// <summary>The zero contour of one electrode's signed distance in the section plane.</summary>
+    /// <summary>
+    /// The zero contour of one electrode in the section plane, as its solve holds it, and the
+    /// distance it was traced from.
+    /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>Ended against the domain edge, not left open at it.</b> Traced over the domain alone,
+    /// a face lying on a grounded edge has no sample outside it to cross to, so the einzel
+    /// lens's tubes - which reach the domain's outer radius and both its ends - were drawn as
+    /// their bores with an annulus at each gap. <see cref="HeldConductor"/> clips the electrode
+    /// to the domain at every edge that is not a mirror, the same intersection the solve's
+    /// mask is.
+    /// </para>
+    /// <para>
     /// <b>An axisymmetric domain reaching below the axis needs no guard here</b>, which was
     /// worth finding out rather than assuming. Revolving a profile found at a negative
     /// radius would draw the same surface a second time, coincident with the first - but
     /// <c>ModelValidator</c> refuses such a document outright, naming the path and saying
     /// that y is the radius. Clamping here as well would be a second, weaker copy of a rule
     /// that already holds for every consumer.
+    /// </para>
     /// </remarks>
-    private static IReadOnlyList<Contours.Run> Trace(
+    private static (IReadOnlyList<Contours.Run> Runs, Func<double, double, double> Distance) Trace(
         CompiledElectrode electrode, CompiledSolvedField plane)
     {
         var minV = plane.MinY;
@@ -1549,18 +1568,25 @@ public static class ViewportCommand
         var stepU = spanU / (columns - 1);
         var stepV = spanV / (rows - 1);
 
-        var values = new double[columns, rows];
-
-        for (var j = 0; j < rows; j++)
+        double[,] Sample(Func<double, double, double> distance)
         {
-            for (var i = 0; i < columns; i++)
+            var values = new double[columns, rows];
+
+            for (var j = 0; j < rows; j++)
             {
-                values[i, j] = electrode.SignedDistance(
-                    plane.MinX + (i * stepU), minV + (j * stepV));
+                for (var i = 0; i < columns; i++)
+                {
+                    values[i, j] = distance(plane.MinX + (i * stepU), minV + (j * stepV));
+                }
             }
+
+            return values;
         }
 
-        return Contours.Trace(values, plane.MinX, minV, stepU, stepV, 0.0);
+        var (sampled, traced) = HeldConductor.Sample(
+            plane, electrode, Math.Min(stepU, stepV), Sample);
+
+        return (Contours.Trace(sampled, plane.MinX, minV, stepU, stepV, 0.0), traced);
     }
 
     /// <summary>Equipotentials on the section plane, at evenly spaced levels.</summary>

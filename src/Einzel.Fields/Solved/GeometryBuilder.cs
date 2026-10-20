@@ -126,9 +126,9 @@ public static class GeometryBuilder
     /// is an opportunity to get it wrong, and there is no second thing it could be.
     /// </para>
     /// <para>
-    /// One function, so the mask and the check for nodes on a grounded edge
-    /// (<see cref="NodesOnSharedFaces"/>) cannot come to disagree about which edges are
-    /// grounded.
+    /// One function, so the mask, the check for nodes on a grounded edge
+    /// (<see cref="NodesOnSharedFaces"/>) and the drawing of a conductor against the edge
+    /// (<see cref="IsMirror"/>) cannot come to disagree about which edges are grounded.
     /// </para>
     /// </remarks>
     private static (EdgeCondition Left, EdgeCondition Right, EdgeCondition Bottom, EdgeCondition Top) Edges(
@@ -139,6 +139,46 @@ public static class GeometryBuilder
             : Translate(solve.BottomEdge);
 
         return (Translate(solve.LeftEdge), Translate(solve.RightEdge), bottom, Translate(solve.TopEdge));
+    }
+
+    /// <summary>
+    /// Whether one edge of a solve's domain is a mirror plane, the axis of an axisymmetric
+    /// solve included.
+    /// </summary>
+    /// <param name="solve">The declared geometry.</param>
+    /// <param name="edge">Which edge.</param>
+    /// <returns>True for a Neumann edge, false for one the solve holds at a potential.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
+    /// <remarks>
+    /// <para>
+    /// Asked by whatever draws a conductor against the edge, because the two kinds of edge
+    /// end a conductor differently. By symmetry a conductor continues across a mirror, so
+    /// the edge is where the half-domain stops describing it and not where it stops; at any
+    /// other edge the solve holds nothing beyond, so a conductor reaching the edge ends there
+    /// with a face.
+    /// </para>
+    /// <para>
+    /// Answered by the same function the mask is built from, so a drawing and the solve it
+    /// is a drawing of cannot disagree about which edges are which - including the axis,
+    /// which is a mirror whatever the document says.
+    /// </para>
+    /// </remarks>
+    public static bool IsMirror(CompiledSolvedField solve, GridEdge edge)
+    {
+        ArgumentNullException.ThrowIfNull(solve);
+
+        var (left, right, bottom, top) = Edges(solve, BuildGrid(solve));
+
+        var condition = edge switch
+        {
+            GridEdge.Left => left,
+            GridEdge.Right => right,
+            GridEdge.Bottom => bottom,
+            GridEdge.Top => top,
+            _ => throw new ArgumentOutOfRangeException(nameof(edge), edge, "unhandled edge"),
+        };
+
+        return condition == EdgeCondition.Neumann;
     }
 
     /// <summary>

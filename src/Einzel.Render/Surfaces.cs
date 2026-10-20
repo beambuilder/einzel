@@ -321,6 +321,46 @@ public static class Surfaces
         return new SurfaceMesh(vertices, new double[vertices.Count], triangles);
     }
 
+    /// <summary>Revolves a traced outline in the half-plane about the x axis.</summary>
+    /// <param name="run">The outline, as (x, radius) in meters.</param>
+    /// <param name="segments">Facets around the turn.</param>
+    /// <returns>The surface of revolution.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Fewer than three facets.</exception>
+    /// <remarks>
+    /// Closed exactly when the run says it is. <see cref="Contours"/> does not repeat a
+    /// closed run's first point, so handing its points to the profile overload drops the
+    /// closing segment; this is the spelling that cannot.
+    /// </remarks>
+    public static SurfaceMesh Revolve(Contours.Run run, int segments = 32)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+
+        return Revolve(Profile(run), segments);
+    }
+
+    /// <summary>Extrudes a traced outline in the section plane along z.</summary>
+    /// <param name="run">The outline, as (x, y) in meters.</param>
+    /// <param name="minZ">Where the drawn prism starts, in meters.</param>
+    /// <param name="maxZ">Where it ends, in meters.</param>
+    /// <returns>The prism's sides, uncapped.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="run"/> is null.</exception>
+    /// <remarks>
+    /// Closed exactly when the run says it is, for the reason the revolving overload gives.
+    /// </remarks>
+    public static SurfaceMesh Extrude(Contours.Run run, double minZ, double maxZ)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+
+        return Extrude(Profile(run), minZ, maxZ);
+    }
+
+    /// <summary>A run's points as a profile, with the closing point repeated when it is closed.</summary>
+    private static (double, double)[] Profile(Contours.Run run) =>
+        run.Closed && run.Points.Count > 0
+            ? [.. run.Points, run.Points[0]]
+            : [.. run.Points];
+
     /// <summary>Extrudes a profile in the section plane along z.</summary>
     /// <param name="profile">Points as (x, y), in metres.</param>
     /// <param name="minZ">Where the drawn prism starts, in metres.</param>
@@ -551,11 +591,22 @@ public static class Surfaces
 
     /// <summary>Drops a profile's repeated closing point and says it was closed.</summary>
     /// <remarks>
+    /// <para>
     /// <b>Welding rather than carrying the duplicate</b>, because two vertices at one
     /// position leave a seam that is invisible on screen and is not invisible to anything
-    /// that asks whether the surface is closed. A closed run from <see cref="Contours"/>
-    /// repeats its first point at the end, so a prism built from one straightforwardly has
-    /// two open edges running down its side and would be reported as leaking.
+    /// that asks whether the surface is closed.
+    /// </para>
+    /// <para>
+    /// <b>A closed profile is one whose last point repeats its first, and a closed run from
+    /// <see cref="Contours"/> is not one.</b> This said it was: that a run from
+    /// <see cref="Contours"/> repeats its first point at the end. It never has - the joiner
+    /// drops the repeat and says <see cref="Contours.Run.Closed"/> instead - so every closed
+    /// outline the viewport revolved or extruded was read as open and lost its closing
+    /// segment: a slit down a prism, a band missing from a ring. The tests here built their
+    /// profiles by hand, with the repeat, and so tested a convention the producer did not
+    /// follow. A run goes through the overloads taking a <see cref="Contours.Run"/>, which
+    /// read its own flag.
+    /// </para>
     /// </remarks>
     private static (IReadOnlyList<T> Points, bool Closed) Weld<T>(
         IReadOnlyList<T> profile, Func<T, T, bool> same)

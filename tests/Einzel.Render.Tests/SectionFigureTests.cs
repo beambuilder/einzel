@@ -235,6 +235,60 @@ public sealed class SectionFigureTests(ITestOutputHelper output)
         Assert.Contains("'centre' meets the grounded top edge", warning.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The einzel lens's tubes are drawn closed against the domain edge they reach, and filled
+    /// as the rectangles they are.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every tube runs out to the domain's outer radius, and the first and last to its two
+    /// ends. The page is the domain, so those faces lie on the frame with nothing sampled past
+    /// them, and each outline was left open there. <b>An open path filled is closed by a
+    /// chord</b>, so the figure drew each tube as a wedge from one end of its outline to the
+    /// other - a drawing the eye reads as a shape rather than as a defect.
+    /// </para>
+    /// <para>
+    /// So every conductor outline must be closed, must reach the frame's top or bottom where
+    /// the outer wall is, and the entrance and exit must reach its left and right where the
+    /// domain ends. To within the inset a face on an edge is drawn at, a millionth of a sample
+    /// step, which is nothing on a page.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheEinzelLensTubesAreClosedAgainstTheDomainEdge()
+    {
+        var figure = SectionRenderer.Render(Compile("einzel-lens"), new RenderSpec());
+
+        var frame = Assert.Single(figure.Scene.Paths, p => p.Layer == "frame");
+        var (left, right) = (frame.Points.Min(p => p.X), frame.Points.Max(p => p.X));
+        var (top, bottom) = (frame.Points.Min(p => p.Y), frame.Points.Max(p => p.Y));
+
+        var conductors = figure.Scene.Paths.Where(p => p.Layer == "conductors").ToList();
+
+        Assert.Equal(6, conductors.Count);
+
+        foreach (var path in conductors)
+        {
+            var (minX, maxX) = (path.Points.Min(p => p.X), path.Points.Max(p => p.X));
+            var (minY, maxY) = (path.Points.Min(p => p.Y), path.Points.Max(p => p.Y));
+
+            output.WriteLine(
+                $"closed {path.Closed,-5} x {minX,8:F4} to {maxX,8:F4}, y {minY,8:F4} to {maxY,8:F4} "
+                + $"(frame {left:F4} to {right:F4}, {top:F4} to {bottom:F4})");
+
+            Assert.True(path.Closed);
+
+            // On the outer wall: the frame's top for the half above the axis, its bottom for
+            // the half below.
+            Assert.True(
+                Math.Abs(minY - top) < 1e-6 || Math.Abs(maxY - bottom) < 1e-6,
+                "a tube's outline does not reach the outer wall");
+        }
+
+        Assert.Equal(2, conductors.Count(p => Math.Abs(p.Points.Min(q => q.X) - left) < 1e-6));
+        Assert.Equal(2, conductors.Count(p => Math.Abs(p.Points.Max(q => q.X) - right) < 1e-6));
+    }
+
     /// <summary>A drift tube declaring diffusive transport, so no path exists to draw.</summary>
     private const string DiffusiveTube = """
     {

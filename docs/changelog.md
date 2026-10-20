@@ -2877,3 +2877,72 @@ Two findings from Stage 1 that bear on the spec:
   a 500 µs hold with it; **88 of 240 lost without it and no space charge at all**, 121 at
   96,000 ions. Mean free path 6.9 mm, so diffusion spreads ~17 mm in that time. That is the
   thing a cross-section cannot show, and it is why the axial sections exist.
+
+- **A face on the edge of its domain was never drawn, and no closed 2-D outline ever had its
+  closing segment.** Found from the einzel lens template in the viewport and `render still`:
+  each tube is a rectangle from the 5 mm bore to the domain's 12 mm outer radius, and the
+  entrance and exit also reach the domain's two ends - and all three drew as thin sleeves with
+  an annular flange at each gap, a 7 mm wall reading as a thin-walled tube.
+
+  **The cause was the sampling, not the shape.** A 2-D conductor is the zero level set of its
+  signed distance, traced over its solve's domain, and marching squares counts a sample equal
+  to the level as inside. A face on the domain's last row of samples has nothing sampled past
+  it, so no crossing to find, and the outline stays open there. **The vector section had it
+  worse**: its page is the domain, so those faces lay on the frame, and an outline is drawn
+  filled - an open path filled is closed by a chord, so `render section` drew each tube as a
+  wedge.
+
+  **Traced as the solve holds it.** `HeldConductor`, used by both renderers, clips each
+  electrode to the domain at every edge that is not a mirror - the larger of its signed
+  distance and the distance outside the domain - inset a millionth of a sample step so the row
+  on the edge counts as outside. **A mirror ends nothing**, since a conductor continues across
+  it by symmetry, and which edges are mirrors is asked of `GeometryBuilder.IsMirror`, the
+  function the mask is built from. **A conductor clear of every clipped edge traces exactly as
+  before**, to the bit: 0 of 361,501 samples differ. And **a sheet has no interior to close**:
+  the planar mirror pair's end cap is a rectangle of no thickness lying in the grounded edge,
+  which clipped and inset would vanish, so a conductor with no sample inside it is traced from
+  its declared distance as it always was. Padding the sample grid past the domain was the
+  obvious fix and is wrong twice over - it draws a conductor carried past a grounded edge, as
+  `mesh.node-on-shared-face` advises, out to a declared extent the solve never held, and it
+  wraps that cap, zero on the edge and positive either side, in a second copy of itself.
+
+  **The second defect was underneath, and only an expectation with a ceiling saw it.** A test
+  asked each lens tube for the volume its mesh encloses, against Pappus inscribed in the
+  viewport's 48 facets - and the entrance came out at **1.0008** of it, which an inscribed
+  solid cannot do. `Contours` drops a closed run's repeated first point and sets `Run.Closed`;
+  `Surfaces.Revolve` and `Extrude` decided closure by looking for the repeat, on the strength
+  of a comment saying `Contours` provides one. It never has, so **every closed outline the
+  viewport revolved or extruded, since it first drew conductors, lost its closing segment** -
+  a slit one sample wide down a prism, a band missing from a ring, and the density shells the
+  same. Their tests built profiles by hand, with the repeat, and so tested the comment. A
+  traced tube had 96 open edges and has none; overloads taking the `Contours.Run` read its own
+  flag, so the right spelling is the short one.
+
+  | | before | after |
+  | --- | --- | --- |
+  | lens tubes, outer wall along the middle third | absent (radius 5.0 only) | 5.0 to 12.0 mm |
+  | entrance and exit, end face on the domain's ends | the bore's rim | an annulus, to within the one-cell corner cut |
+  | enclosed volume against inscribed Pappus | not a volume (open surface) | **0.99755 / 0.99847 / 0.99882** |
+  | lens section, conductor outlines closed | 0 of 6 | 6 of 6, out to the frame |
+  | a traced outline revolved, open edges | 96 | 0, Pappus to 1e-12 |
+
+  Under one by the cell marching squares cuts from every corner, wherever the corner is. A
+  cross-section's prism stays uncapped, and a conductor against a mirror stays open, both
+  asserted.
+
+  **Surveyed against the build before it**, by `einzel export --mesh` on every template and
+  example with a 2-D solve - 35 models, the four diffusive ones (the PNNL funnel and three TIMS
+  templates) left out because the viewport's density run outlasts a ten-minute cap in either
+  build. **962 conductors are identical; 167 keep every vertex and gain only the closing
+  segment; and the 161 whose outlines changed all reach a grounded domain edge** - the lens
+  tubes, funnel and traveling-wave rings out to the wall, the Kingdon outer cylinder, the Paul
+  trap's ring, the slit's jaws, and the linear traps' housing and detector walls, which were
+  drawn as single sheets and are now the slabs declared. Both mirror pairs' caps and boards are
+  identical, and so are the Paul trap's endcaps, which touch only the axis. Volume solves were unaffected - each conductor is extracted over its own padded
+  box, and no shipped volume template declares one past its domain. `einzel export --mesh`
+  goes through the viewport and is fixed with it. Mutation-checked: tracing by the declared
+  distance again fails the four viewport tests, the section test and the helper's
+  grounded-edge test, and leaves passing the four that pin what the fix must not change
+  (clear of the edge, against a mirror, a sheet, which edges are mirrors); handing the
+  viewport bare points again fails the volume test and nothing else.
+  `docs/shell.md`, `docs/rendering.md`, `docs/lessons.md`.

@@ -295,6 +295,132 @@ public sealed class SurfaceTests(ITestOutputHelper output)
         Assert.Equal(8, boundary.Count(e => e.Value == 1));
     }
 
+    /// <summary>
+    /// A traced outline is revolved and extruded closed, as the run says it is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The two tests above build their profiles by hand, with the first point repeated at
+    /// the end, and the producer never did that.</b> <see cref="Contours"/> drops a closed
+    /// run's repeat and says <see cref="Contours.Run.Closed"/> instead, while the profile
+    /// overloads decide closure by looking for the repeat - so every closed outline the
+    /// viewport revolved or extruded lost its closing segment. Nothing on screen gave it away
+    /// at a glance: a slit one sample wide down a prism, a band one sample wide missing from
+    /// a ring.
+    /// </para>
+    /// <para>
+    /// So the outline here is a real one, traced from a sampled rectangle. Revolved, it must
+    /// be closed - every edge shared by exactly two triangles - and enclose the volume the
+    /// traced polygon's own area and centroid give by Pappus, inscribed in the facets: exact
+    /// for a polyhedron, not approximate. Extruded, its only open edges are the prism's two
+    /// ends. The control is the same points through the profile overload, which leaks.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ATracedOutlineIsRevolvedAndExtrudedClosed()
+    {
+        // A tube's section, 0 to 30 mm along and 5 to 12 mm out, sampled clear of it - and
+        // off its faces, since a sample exactly on one is a zero, which is a degenerate case
+        // of its own rather than this one.
+        const double Length = 0.030;
+        const double Inner = 0.005;
+        const double Outer = 0.012;
+        const int Segments = 48;
+
+        var (columns, rows, minU, minV, step) = (60, 30, -0.00307, 0.00213, 0.00061);
+        var values = new double[columns, rows];
+
+        for (var j = 0; j < rows; j++)
+        {
+            for (var i = 0; i < columns; i++)
+            {
+                var (x, r) = (minU + (i * step), minV + (j * step));
+
+                values[i, j] = Math.Max(Math.Max(-x, x - Length), Math.Max(Inner - r, r - Outer));
+            }
+        }
+
+        var run = Assert.Single(Contours.Trace(values, minU, minV, step, step, 0.0));
+
+        Assert.True(run.Closed);
+
+        // The traced polygon's area and centroid radius, by the shoelace formula.
+        var (area, moment) = (0.0, 0.0);
+
+        for (var k = 0; k < run.Points.Count; k++)
+        {
+            var (x0, y0) = run.Points[k];
+            var (x1, y1) = run.Points[(k + 1) % run.Points.Count];
+            var cross = (x0 * y1) - (x1 * y0);
+
+            area += 0.5 * cross;
+            moment += cross * (y0 + y1) / 6.0;
+        }
+
+        var inscribed = Segments / (2.0 * Math.PI) * Math.Sin(2.0 * Math.PI / Segments);
+        var pappus = 2.0 * Math.PI * Math.Abs(moment) * inscribed;
+
+        Surfaces.SignedDistance tube = (x, y, z) =>
+        {
+            var r = Math.Sqrt((y * y) + (z * z));
+
+            return Math.Max(Math.Max(-x, x - Length), Math.Max(Inner - r, r - Outer));
+        };
+
+        var revolved = Surfaces.Orient(Surfaces.Revolve(run, Segments), tube, 1e-6);
+        var leaking = Surfaces.Orient(Surfaces.Revolve([.. run.Points], Segments), tube, 1e-6);
+
+        var extruded = Surfaces.Extrude(run, -0.02, 0.02);
+        var slit = Surfaces.Extrude([.. run.Points], -0.02, 0.02);
+
+        output.WriteLine($"traced outline: {run.Points.Count} points, area {Math.Abs(area) * 1e6:F4} mm^2");
+        output.WriteLine(
+            $"revolved: {OpenEdges(revolved)} open edges, volume {Volume(revolved) * 1e9:F4} mm^3 "
+            + $"against Pappus {pappus * 1e9:F4}");
+        output.WriteLine(
+            $"its points alone: {OpenEdges(leaking)} open edges, volume {Volume(leaking) * 1e9:F4} mm^3");
+        output.WriteLine(
+            $"extruded: {extruded.TriangleCount} triangles, {OpenEdges(extruded)} open edges; "
+            + $"its points alone: {slit.TriangleCount} triangles");
+
+        Assert.Equal(0, OpenEdges(revolved));
+        Assert.Equal(1.0, Volume(revolved) / pappus, 1e-12);
+
+        // A side per outline point, and only the prism's two ends open, one edge per point at
+        // each.
+        Assert.Equal(2 * run.Points.Count, extruded.TriangleCount);
+        Assert.Equal(2 * run.Points.Count, OpenEdges(extruded));
+
+        // The control: the points alone leave the closing segment out. Counting open edges
+        // cannot show it for a prism - a slit adds its two sides and loses the two end edges
+        // the missing side would have had - so it is a side short instead.
+        Assert.True(OpenEdges(leaking) > 0);
+        Assert.Equal(2 * (run.Points.Count - 1), slit.TriangleCount);
+    }
+
+    /// <summary>How many of a mesh's edges belong to only one triangle.</summary>
+    private static int OpenEdges(SurfaceMesh mesh)
+    {
+        var uses = new Dictionary<(int, int), int>();
+
+        for (var t = 0; t + 2 < mesh.Triangles.Count; t += 3)
+        {
+            foreach (var (p, q) in new[]
+            {
+                (mesh.Triangles[t], mesh.Triangles[t + 1]),
+                (mesh.Triangles[t + 1], mesh.Triangles[t + 2]),
+                (mesh.Triangles[t + 2], mesh.Triangles[t]),
+            })
+            {
+                var key = p < q ? (p, q) : (q, p);
+
+                uses[key] = uses.GetValueOrDefault(key) + 1;
+            }
+        }
+
+        return uses.Count(e => e.Value == 1);
+    }
+
     /// <summary>A box that holds none of the surface yields nothing rather than throwing.</summary>
     /// <remarks>
     /// An electrode entirely outside the drawn region is ordinary — a repeat's copies, a

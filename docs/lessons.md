@@ -5463,3 +5463,32 @@ closes, so the wait always ran out and the server was killed. Varying the librar
 shutdown timeout moved disposal exactly with it - 1.06, 2.06, 5.05 s - which is the
 signature of a wait rather than of work. **A duration that does not move with the work and
 does move with a timeout is a timeout.**
+
+## A fixture built from a comment tests the comment
+
+`Surfaces.Revolve` and `Surfaces.Extrude` decided whether a profile was closed by looking for
+its first point repeated at the end, and the comment on the helper said why: *a closed run
+from `Contours` repeats its first point at the end*. It never has. The joiner drops the repeat
+and sets `Run.Closed` instead, so every closed outline the viewport revolved or extruded, from
+the day the viewport drew conductors, was read as open and lost its closing segment: a slit one
+sample wide down a prism, a band one sample wide missing from a ring. The tests of `Revolve`
+and `Extrude` built their profiles by hand, with the repeat, exactly as the comment described.
+They passed for as long as the code existed, and they were testing the comment.
+
+**What found it was an expectation with a ceiling.** A test of something else - that the einzel
+lens's tubes are closed against the edge of their domain - asked for the volume each mesh
+encloses, against Pappus inscribed in 48 facets. The entrance tube came out at **1.0008** of it.
+A polyhedron inscribed in the declared solid cannot exceed it, so the excess was a finding
+rather than noise; a bare revolved rectangle came out exact, which put the extra volume in the
+mesh rather than in the arithmetic, and a divergence-theorem sum over an open surface is not a
+volume at all - it depends on where the origin is. Had the assertion been a band of a per cent
+either side of Pappus, 1.0008 would have passed.
+
+The rules. **A unit's test input should come from the producer that feeds the unit in use**,
+not from that producer's description: a convention stated in a comment and followed by a
+hand-built fixture is checked against itself, and the producer is never in the loop. **Where
+two pieces of code must agree on a representation, give the boundary a spelling that carries
+it** - here an overload taking the `Contours.Run`, which reads the run's own flag - so the
+agreement does not depend on either side remembering the other's convention. And **write the
+bound a closed form actually guarantees**: an inscribed solid has a ceiling, and a symmetric
+tolerance would have absorbed the only sign that anything was wrong.

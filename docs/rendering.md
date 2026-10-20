@@ -92,6 +92,7 @@ revolved or extruded profile has no winding to inherit.
 | Worst normal against the true outward radius | **1.000000** |
 | A revolved tube against Pappus at 16 / 64 / 256 facets | 0.97450 / 0.99839 / **0.99990**, inscribed so approaching from below |
 | An extruded prism's open ends | exactly 8 boundary edges |
+| A *traced* outline, revolved | **0 open edges**, and the Pappus volume of the traced polygon to 1e-12 - against 96 open edges before |
 
 The volume is the sharpest of these because it tests three things at once - that the
 surface is closed, that every triangle is wound outward, and that the vertices sit
@@ -101,10 +102,37 @@ where the surface is. A hole, a flipped patch or a systematic offset all move it
 solve domain at 48 cells a cell is 1.25 mm and the plate falls between lattice
 planes, so the three-dimensional example produced no conductors at all, silently.
 The extraction runs over the electrode's own bounding box now, asked of the
-electrode rather than switched on its shape. And a **closed profile carries a
-duplicate point** - marching squares repeats the first point at the end - so a prism
-built straightforwardly from one has a seam down its side, invisible on screen and
-not invisible to anything asking whether the surface is closed.
+electrode rather than switched on its shape. And this paragraph said that **a closed
+profile carries a duplicate point** - that marching squares repeats the first point at
+the end - and so needs welding. **It does not, and the welding is how every closed
+outline lost a segment.** `Contours` drops the repeat and sets `Run.Closed`; the profile
+overloads of `Revolve` and `Extrude` decided closure by looking for the repeat, so a run
+handed over as its points was read as open and drawn without its closing segment. The
+revolved-tube and extruded-prism rows of the table above passed on profiles built by hand
+with the repeat; the row after them is a real traced outline. A run goes through the overloads taking a `Contours.Run`,
+which read its own flag.
+
+## A face on the domain's edge was left open, and filled as a wedge
+
+A conductor reaching the edge of its solve's domain had that face missing from the
+drawing, in the vector section and in the viewport alike. Marching squares counts a sample
+equal to the level as inside, and nothing is sampled past the domain, so a face lying on the
+domain's last row of samples has no crossing to find. The einzel lens shows it whole: all
+three tubes reach the outer radius and two reach the domain's ends, so every outline was open.
+
+**The section made it worse than missing.** Its page is the domain, so those faces lay on the
+frame, and a conductor outline is drawn filled - and **an open path filled is closed by a
+chord**, so each tube came out as a wedge from one end of its outline to the other, which the
+eye reads as a shape rather than as a defect.
+
+`HeldConductor` traces the conductor the solve holds: the electrode clipped to the domain at
+every edge that is not a mirror, inset a millionth of a sample step so the row on the edge is
+outside. A mirror is asked of `GeometryBuilder.IsMirror`, the function the solve's mask is built
+from; a conductor clear of every clipped edge traces exactly as before, to the bit; and a sheet
+lying in a grounded edge - the planar mirror pair's cap - has no interior to close and is traced
+as declared. Both renderers call it, so a section and the viewport cannot disagree about where
+a conductor ends. The lens section's six outlines are now closed and run out to the frame;
+`docs/shell.md` has the viewport's numbers.
 
 ## Decimation is a guarantee, not a hint
 

@@ -176,11 +176,59 @@ the box is asked of the electrode rather than switched on its shape, because tha
 exactly what invariant 2 forbids. `CompiledElectrode3D.Bounds` sits beside `Centre` and
 `CharacteristicSize`, in the one file that already owns the shape cases.
 
-**A profile that closes on itself has two vertices at one place.** A closed run from
-`Contours` repeats its first point at the end, so a prism built straightforwardly from one
-has a seam running down its side — invisible on screen and not invisible to anything asking
-whether the surface is closed. Welded, so a prism has exactly the eight open edges of its
-two deliberately open ends.
+**A closed outline was revolved and extruded open, and this paragraph is why.** It used to
+say that a closed run from `Contours` repeats its first point at the end, so a prism built
+from one needs the duplicate welded out. It never repeated it: the joiner drops the repeat
+and sets `Run.Closed`, while `Surfaces.Revolve` and `Extrude` decided closure by looking for
+the repeat. So every closed outline the viewport drew lost its closing segment — a slit one
+sample wide down a prism, a band one sample wide missing from a ring — from the day it drew
+conductors. The closed-form checks in the table above passed because their profiles were
+built by hand, with the repeat. A traced run now goes through overloads taking the
+`Contours.Run`, which read its own flag: a traced tube had 96 open edges and has none, and
+encloses the Pappus volume of its own traced polygon exactly. The density shells went through
+the same path and are fixed with it. `docs/lessons.md`, "A fixture built from a comment
+tests the comment".
+
+### A face on the domain's edge was not drawn
+
+**The einzel lens was drawn as three thin sleeves with flanges.** Each of its tubes is a
+rectangle from the bore at 5 mm to the domain's outer radius at 12 mm, and the entrance and
+exit also reach the domain's two ends. A conductor is traced over its solve's domain, and
+marching squares counts a sample equal to the level as inside — so a face lying on the last
+row of samples, with nothing sampled past it, had no crossing to find. The outline stayed open
+there, revolved into the bore and an annulus at each gap, and a 7 mm wall read as a thin tube
+with a flange at either end. The mesh's largest radius was 12 mm either way, because the
+annuli reach it; what was missing was the wall between.
+
+**Traced as the solve holds it.** `HeldConductor` (in `Einzel.Render`, so the vector section
+uses the same rule) clips each electrode to the domain at every edge that is not a mirror —
+the larger of its signed distance and the distance outside the domain, which is an
+intersection and has the edge as a face — inset a millionth of a sample step so the row on
+the edge counts as outside. Three properties, each tested:
+
+- **A mirror ends nothing.** By symmetry a conductor continues across a Neumann edge, so a face
+  there would be a face the instrument does not have. Which edges are mirrors is asked of
+  `GeometryBuilder.IsMirror`, the function the mask is built from, so the axis of an
+  axisymmetric solve is one whatever the document says.
+- **A conductor clear of every clipped edge is traced exactly as before**, to the bit: near its
+  surface the electrode is nearer than any edge. 0 of 361,501 samples differ.
+- **A sheet is traced as declared.** The planar mirror pair's end cap is a rectangle of no
+  thickness lying in the grounded edge; clipped and inset it holds nothing and would vanish.
+  Clipping only ever closes an interior, so a conductor with no sample inside it falls back to
+  its declared distance, and the cap is drawn exactly as it was.
+
+A conductor carried *past* a grounded edge — which is what `mesh.node-on-shared-face` advises —
+is drawn ending at the edge, where the solve ends it, rather than at a declared extent nothing
+computed. **Padding the sample grid past the domain was the obvious fix and the wrong one**: it
+would draw that declared extent, and it would wrap the mirror pair's cap, which is zero on the
+edge and positive on both sides of it, in a second copy of itself.
+
+On the shipped lens each tube now has its outer wall along its whole length and the end
+annuli at x = 0 and 166 mm, and encloses **0.99755 / 0.99847 / 0.99882** of the inscribed
+Pappus volume — under one by the cell marching squares cuts from each corner, wherever the
+corner is. A cross-section's prism is still uncapped. Volume solves were never affected: each
+conductor is extracted over its own padded bounding box, and no shipped volume template
+declares a conductor past its domain.
 
 ### The field is drawn as equipotentials on a slice
 
