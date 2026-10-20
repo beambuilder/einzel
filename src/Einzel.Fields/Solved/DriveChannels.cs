@@ -7,7 +7,10 @@ namespace Einzel.Fields.Solved;
 public readonly record struct DriveTap(int Drive, double Amplitude, double Phase);
 
 /// <summary>What one electrode is asked to hold, over time.</summary>
-/// <param name="Name">The electrode's name.</param>
+/// <param name="Name">
+/// The electrode's name, which is its identity in a decomposition: no two excitations handed
+/// to one may share it.
+/// </param>
 /// <param name="Direct">Its DC potential, in volts.</param>
 /// <param name="Taps">
 /// Every generator it is connected to. Usually one, and empty for an electrode held
@@ -114,6 +117,27 @@ public static class DriveChannels
         ArgumentNullException.ThrowIfNull(excitations);
         ArgumentNullException.ThrowIfNull(quadrature);
 
+        // A supply's coefficients are keyed by name, so a name has to be an identity here: two
+        // electrodes sharing one would write the same entry and the later would win, putting
+        // both at its potential. That is what happened to every pair of unnamed electrodes,
+        // all called "electrode", in every driven or sequenced solve. The validator now names
+        // them apart and refuses a repeat; this is the same rule at the seam, so a caller that
+        // did not come through the validator is stopped rather than given a quieter field.
+        var named = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var excitation in excitations)
+        {
+            if (!named.Add(excitation.Name))
+            {
+                throw new ArgumentException(
+                    $"two excitations are both called '{excitation.Name}'. A channel is a map "
+                    + "from electrode name to potential, so the second would overwrite the first "
+                    + "and both would be solved holding its potential. Name every electrode in a "
+                    + "solve distinctly.",
+                    nameof(excitations));
+            }
+        }
+
         var supplies = new List<Supply>();
 
         Supply Reach(double direct, int drive, double amplitude, double phase)
@@ -131,6 +155,14 @@ public static class DriveChannels
             return existing;
         }
 
+        // Added rather than assigned, because one electrode can reach one supply more than
+        // once: two taps on the same generator at the same phase, or at two phases of a
+        // sinusoid, each resolve into the same supply. Assigned, the later tap replaced the
+        // earlier, so 100 V and 50 V on one generator flew exactly as 50 V alone. Where an
+        // electrode reaches a supply once, zero plus its volts is its volts to the bit.
+        void Feed(Supply supply, string electrode, double volts) =>
+            supply.Coefficients[electrode] = supply.Coefficients.GetValueOrDefault(electrode) + volts;
+
         foreach (var excitation in excitations)
         {
             // The constant supply reaches every electrode that holds a DC
@@ -138,7 +170,7 @@ public static class DriveChannels
             // Drive -1 marks it: no clock, so no phase to distinguish it by.
             if (excitation.Direct != 0.0)
             {
-                Reach(1.0, -1, 0.0, 0.0).Coefficients[excitation.Name] = excitation.Direct;
+                Feed(Reach(1.0, -1, 0.0, 0.0), excitation.Name, excitation.Direct);
             }
 
             foreach (var tap in excitation.Taps)
@@ -154,7 +186,7 @@ public static class DriveChannels
 
                 if (!sinusoidal)
                 {
-                    Reach(0.0, tap.Drive, 1.0, phase).Coefficients[excitation.Name] = tap.Amplitude;
+                    Feed(Reach(0.0, tap.Drive, 1.0, phase), excitation.Name, tap.Amplitude);
                     continue;
                 }
 
@@ -168,13 +200,13 @@ public static class DriveChannels
 
                 if (inPhase != 0.0)
                 {
-                    Reach(0.0, tap.Drive, 1.0, 0.0).Coefficients[excitation.Name] = inPhase;
+                    Feed(Reach(0.0, tap.Drive, 1.0, 0.0), excitation.Name, inPhase);
                 }
 
                 if (outOfPhase != 0.0)
                 {
                     // A quarter cycle late: cos(2 pi (f t - 1/4)) is sin(2 pi f t).
-                    Reach(0.0, tap.Drive, 1.0, 0.25).Coefficients[excitation.Name] = outOfPhase;
+                    Feed(Reach(0.0, tap.Drive, 1.0, 0.25), excitation.Name, outOfPhase);
                 }
             }
         }

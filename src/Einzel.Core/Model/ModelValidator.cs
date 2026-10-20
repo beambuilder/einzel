@@ -1650,7 +1650,7 @@ public static class ModelValidator
             for (var i = 0; i < declaredElectrodes.Count; i++)
             {
                 Expand(
-                    declaredElectrodes[i], $"{phase.Path}/electrodes/{i}", drives,
+                    declaredElectrodes[i], i, $"{phase.Path}/electrodes/{i}", drives,
                     phase.Surface, electrodes, errors);
             }
 
@@ -1667,8 +1667,8 @@ public static class ModelValidator
                 var ignored = new List<EinzelError>();
                 for (var i = 0; i < declaredElectrodes.Count; i++)
                 {
-                    Expand(declaredElectrodes[i], $"{phase.Path}/electrodes/{i}", drives, phase.EndSurface, endElectrodes, ignored);
-                    Expand(declaredElectrodes[i], $"{phase.Path}/electrodes/{i}", drives, phase.MidSurface, midElectrodes, ignored);
+                    Expand(declaredElectrodes[i], i, $"{phase.Path}/electrodes/{i}", drives, phase.EndSurface, endElectrodes, ignored);
+                    Expand(declaredElectrodes[i], i, $"{phase.Path}/electrodes/{i}", drives, phase.MidSurface, midElectrodes, ignored);
                 }
                 if (!SameGeometry(baseline, endElectrodes, phase.Name, phase.Path, errors)
                     || !RampIsLinear(Excitations(electrodes), Excitations(midElectrodes), Excitations(endElectrodes), phase.Name, phase.Path, errors))
@@ -1864,17 +1864,24 @@ public static class ModelValidator
     }
 
     /// <summary>Compiles one declared 3D electrode into the electrodes it stands for.</summary>
+    /// <remarks>
+    /// <paramref name="position"/> is where the declaration sits in its solve's list, which is
+    /// what an unnamed electrode is called after - see <see cref="ElectrodeName"/>.
+    /// </remarks>
     private static void Expand3D(
         Electrode3DDocument declared,
+        int position,
         string path,
         IReadOnlyList<CompiledDrive> drives,
         IReadOnlyDictionary<string, Quantity> p,
         List<CompiledElectrode3D> into,
         List<EinzelError> errors)
     {
+        var name = ElectrodeName(declared.Name, position);
+
         if (declared.Repeat is not { } repeat)
         {
-            var single = CompileElectrode3D(declared, path, drives, p, errors);
+            var single = CompileElectrode3D(declared, name, path, drives, p, errors);
 
             if (single is not null)
             {
@@ -1923,8 +1930,6 @@ public static class ModelValidator
             return;
         }
 
-        var name = declared.Name ?? "electrode";
-
         for (var k = 0; k < copies; k++)
         {
             var scoped = new Dictionary<string, Quantity>(p, StringComparer.Ordinal)
@@ -1933,11 +1938,8 @@ public static class ModelValidator
             };
 
             var copy = CompileElectrode3D(
-                declared with
-                {
-                    Repeat = null,
-                    Name = $"{name}-{k.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
-                },
+                declared with { Repeat = null },
+                $"{name}-{k.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 $"{path}/repeat/{k.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 drives,
                 scoped,
@@ -1950,8 +1952,14 @@ public static class ModelValidator
         }
     }
 
+    /// <summary>Compiles one 3D electrode, its repeat already applied.</summary>
+    /// <remarks>
+    /// The name is handed in rather than read from the declaration, so that
+    /// <see cref="ElectrodeName"/> is the one place an unnamed electrode is named.
+    /// </remarks>
     private static CompiledElectrode3D? CompileElectrode3D(
         Electrode3DDocument electrode,
+        string name,
         string path,
         IReadOnlyList<CompiledDrive> drives,
         IReadOnlyDictionary<string, Quantity> p,
@@ -1959,7 +1967,6 @@ public static class ModelValidator
     {
         var length = Dimension.LengthDimension;
         var volt = Dimension.ElectricPotential;
-        var name = electrode.Name ?? "electrode";
 
         var potential = TryQuantity(electrode.Potential, $"{path}/potential", volt, p, errors);
 
@@ -2556,10 +2563,13 @@ public static class ModelValidator
         var drives = Drives(solve.Drive, solve.Drives, path, p, errors);
 
         var electrodes = new List<CompiledElectrode3D>();
+        var taken = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (var i = 0; i < (solve.Electrodes?.Count ?? 0); i++)
         {
-            Expand3D(solve.Electrodes![i], $"{path}/electrodes/{i}", drives, p, electrodes, errors);
+            var before = electrodes.Count;
+            Expand3D(solve.Electrodes![i], i, $"{path}/electrodes/{i}", drives, p, electrodes, errors);
+            DistinctNames(electrodes.Skip(before).Select(e => e.Name), i, taken, $"{path}/electrodes", errors);
         }
 
         if (electrodes.Count == 0 && errors.Count == 0)
@@ -2701,7 +2711,7 @@ public static class ModelValidator
             for (var i = 0; i < declaredElectrodes.Count; i++)
             {
                 Expand3D(
-                    declaredElectrodes[i], $"{phase.Path}/electrodes/{i}", drives,
+                    declaredElectrodes[i], i, $"{phase.Path}/electrodes/{i}", drives,
                     phase.Surface, electrodes, errors);
             }
 
@@ -2718,8 +2728,8 @@ public static class ModelValidator
                 var ignored = new List<EinzelError>();
                 for (var i = 0; i < declaredElectrodes.Count; i++)
                 {
-                    Expand3D(declaredElectrodes[i], $"{phase.Path}/electrodes/{i}", drives, phase.EndSurface, endElectrodes, ignored);
-                    Expand3D(declaredElectrodes[i], $"{phase.Path}/electrodes/{i}", drives, phase.MidSurface, midElectrodes, ignored);
+                    Expand3D(declaredElectrodes[i], i, $"{phase.Path}/electrodes/{i}", drives, phase.EndSurface, endElectrodes, ignored);
+                    Expand3D(declaredElectrodes[i], i, $"{phase.Path}/electrodes/{i}", drives, phase.MidSurface, midElectrodes, ignored);
                 }
 
                 if (!SameGeometry3D(baseline, endElectrodes, phase.Name, phase.Path, errors)
@@ -2856,10 +2866,13 @@ public static class ModelValidator
         var drives = Drives(solve.Drive, solve.Drives, path, p, errors);
 
         var electrodes = new List<CompiledElectrode>();
+        var taken = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (var i = 0; i < solve.Electrodes.Count; i++)
         {
-            Expand(solve.Electrodes[i], $"{path}/electrodes/{i}", drives, p, electrodes, errors);
+            var before = electrodes.Count;
+            Expand(solve.Electrodes[i], i, $"{path}/electrodes/{i}", drives, p, electrodes, errors);
+            DistinctNames(electrodes.Skip(before).Select(e => e.Name), i, taken, $"{path}/electrodes", errors);
         }
 
         var reflect = solve.ReflectAboutX is null
@@ -3403,19 +3416,23 @@ public static class ModelValidator
     /// ordinary parameter and every expression on the electrode sees it. That is
     /// what keeps a stack of two hundred rings a parametric document rather than a
     /// generated one: the placements are still expressions, so a sweep can still
-    /// move them.
+    /// move them. <paramref name="position"/> is where the declaration sits in its
+    /// solve's list, which is what an unnamed electrode is called after.
     /// </remarks>
     private static void Expand(
         ElectrodeDocument declared,
+        int position,
         string path,
         IReadOnlyList<CompiledDrive> drives,
         IReadOnlyDictionary<string, Quantity> p,
         List<CompiledElectrode> into,
         List<EinzelError> errors)
     {
+        var name = ElectrodeName(declared.Name, position);
+
         if (declared.Repeat is not { } repeat)
         {
-            var single = CompileElectrode(declared, path, drives, p, errors);
+            var single = CompileElectrode(declared, name, path, drives, p, errors);
 
             if (single is not null)
             {
@@ -3464,8 +3481,6 @@ public static class ModelValidator
             return;
         }
 
-        var name = declared.Name ?? "electrode";
-
         for (var k = 0; k < copies; k++)
         {
             var scoped = new Dictionary<string, Quantity>(p, StringComparer.Ordinal)
@@ -3476,7 +3491,8 @@ public static class ModelValidator
             // Named by position so a loss itemisation, a channel report or an error
             // says which one - "ring-17" rather than "ring", seventeen times.
             var copy = CompileElectrode(
-                declared with { Repeat = null, Name = $"{name}-{k.ToString(System.Globalization.CultureInfo.InvariantCulture)}" },
+                declared with { Repeat = null },
+                $"{name}-{k.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 $"{path}/repeat/{k.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
                 drives,
                 scoped,
@@ -3489,8 +3505,108 @@ public static class ModelValidator
         }
     }
 
+    /// <summary>What an electrode is called: its own name, or one made from its position.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A name is an electrode's identity within its solve, so an unnamed one cannot share
+    /// a default.</b> Every unnamed electrode used to be called <c>electrode</c>. A driven or
+    /// sequenced geometry builds its channels from a map keyed by name, so two unnamed plates
+    /// at +2 V and -2 V became one entry holding -2 V and were solved at the same potential:
+    /// the deflector they make was switched off, on a model that validated, solved and
+    /// converged. A static geometry was right only because it builds its mask electrode by
+    /// electrode; an ion lost on either plate was still reported as striking one surface.
+    /// </para>
+    /// <para>
+    /// After the position in the list rather than a counter of unnamed ones, so the name
+    /// matches the path an error gives (<c>electrode-3</c> is <c>/electrodes/3</c>) and does
+    /// not change when another electrode gains or loses a name.
+    /// </para>
+    /// </remarks>
+    private static string ElectrodeName(string? declared, int position) =>
+        declared ?? $"electrode-{position.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+
+    /// <summary>
+    /// Refuses a name already taken in this solve by an earlier declaration.
+    /// </summary>
+    /// <param name="names">What declaration <paramref name="position"/> compiled to, its repeat copies included.</param>
+    /// <param name="position">Where that declaration sits in the solve's list.</param>
+    /// <param name="taken">Every name compiled so far, and the declaration it came from.</param>
+    /// <param name="path">The solve's electrode list, for an error path (AGT-3).</param>
+    /// <param name="errors">Where a refusal goes.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Within one solve, not across the model.</b> Two field elements may declare the same
+    /// metal - the Astral's two mirror solves each carry all twenty-two boards, one holding
+    /// the near mirror's potentials and one the far's - and there a shared name is right,
+    /// because it is one conductor and an ion striking it struck one surface. The channels
+    /// are built per solve, so it is only within one that a shared name changes a field.
+    /// </para>
+    /// <para>
+    /// Refused for a static geometry too, although its field is right: ACC-5 itemizes losses
+    /// by name, so two plates sharing one are reported as one surface, and a static model
+    /// would otherwise change from valid to wrong the day somebody drives it.
+    /// </para>
+    /// <para>
+    /// One complaint per pair of declarations however many of their names collide, so two
+    /// repeated rings of two hundred sharing a base name read as one mistake rather than two
+    /// hundred.
+    /// </para>
+    /// </remarks>
+    private static void DistinctNames(
+        IEnumerable<string> names,
+        int position,
+        Dictionary<string, int> taken,
+        string path,
+        List<EinzelError> errors)
+    {
+        var collisions = new Dictionary<int, (string First, int Count)>();
+
+        foreach (var name in names)
+        {
+            if (taken.TryGetValue(name, out var earlier))
+            {
+                collisions[earlier] = collisions.TryGetValue(earlier, out var seen)
+                    ? (seen.First, seen.Count + 1)
+                    : (name, 1);
+
+                continue;
+            }
+
+            taken[name] = position;
+        }
+
+        foreach (var (earlier, (first, count)) in collisions)
+        {
+            var more = count > 1
+                ? $", and {(count - 1).ToString(System.Globalization.CultureInfo.InvariantCulture)} more of their names collide"
+                : string.Empty;
+
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{path}/{position.ToString(System.Globalization.CultureInfo.InvariantCulture)}/name",
+                Constraint =
+                    $"electrodes {earlier.ToString(System.Globalization.CultureInfo.InvariantCulture)} and "
+                    + $"{position.ToString(System.Globalization.CultureInfo.InvariantCulture)} in this solve are "
+                    + $"both called '{first}'{more}. A name is what identifies an electrode in a solve: a "
+                    + "driven or sequenced geometry builds its channels from it, so the two would be solved "
+                    + "holding the same potential, and an ion lost on either would be reported as one surface",
+                Observed = new ObservedValue(earlier, "index"),
+                Suggestion =
+                    "give each a distinct name. An unnamed electrode is called 'electrode-N' after its "
+                    + "place in the list, and the copies of a repeated one 'name-0', 'name-1' and so on",
+            });
+        }
+    }
+
+    /// <summary>Compiles one electrode, its repeat already applied.</summary>
+    /// <remarks>
+    /// The name is handed in rather than read from the declaration, so that
+    /// <see cref="ElectrodeName"/> is the one place an unnamed electrode is named.
+    /// </remarks>
     private static CompiledElectrode? CompileElectrode(
         ElectrodeDocument electrode,
+        string name,
         string path,
         IReadOnlyList<CompiledDrive> drives,
         IReadOnlyDictionary<string, Quantity> p,
@@ -3498,7 +3614,6 @@ public static class ModelValidator
     {
         var length = Dimension.LengthDimension;
         var volt = Dimension.ElectricPotential;
-        var name = electrode.Name ?? "electrode";
 
         switch (electrode.Shape)
         {

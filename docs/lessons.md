@@ -5298,3 +5298,54 @@ they appear to - the mesh with the first, every other face of the conductor with
 equal is one assertion. And **a surprising difference is a finding before it is an answer**:
 the interior volts were two things, neither the one being measured, and one of them is now an
 open item of its own.
+
+## A default every instance shares cannot be a key
+
+An electrode's name was optional and defaulted to `electrode`, and nothing required two in one
+solve to differ. The channel decomposition a driven or sequenced geometry is solved through is
+a map from electrode name to volts, and every contribution was written with `=`. So two unnamed
+plates at +2 V and -2 V were one entry holding -2 V, and the deflector they make was switched
+off: an ion the same model with named plates bends **0.595 mm** flew **1.6e-8 mm** off its
+axis, on a document that validated, solved, converged and exited 0. The same in a volume
+(0.178 mm against 2e-6), and in a geometry with no drive at all whose plates a sequence phase
+switches on.
+
+**Three things kept it hidden.** A static geometry builds its mask electrode by electrode, so
+its field was right and the defect needed a drive or a sequence to show; the control that says
+so is the same model with the drive deleted, which bends the ion 0.5952 mm with its plates
+unnamed. Every one of the 62 shipped templates and examples names every electrode distinctly,
+and so does every test that wrote a driven geometry, so the defect lived entirely in documents
+nobody in this project writes. And those are the documents an agent writing from prose is
+likeliest to write: the schema said a name was optional and described it as "used in
+reporting", which is how it reads and not how the code used it. **Four readers keyed on it** -
+the decomposition, the impact report ACC-5 itemizes losses by, the diffusive seed-loss ledger
+and the viewport's electrode count - so it was an identity in everything but its declaration.
+
+**So the fix makes it one, rather than moving the decomposition onto positions.** Keying by
+position would have fixed the field and left an ion lost on either plate reported as striking
+`electrode` - "never 92 percent" in a new form - and a position is the one identity a reader
+of a loss report cannot see. An unnamed electrode is now `electrode-N` after its place in the
+list, which matches the path an error gives and does not move when another electrode gains a
+name; two electrodes in one solve sharing a name are refused at the second one's `name`; and
+the decomposition refuses a repeated name itself, so a caller that did not come through the
+validator is stopped rather than given a quieter field.
+
+**The scope came from enumerating the corpus, and the obvious one was wrong.** A model-wide rule
+refuses `astral-3d` and `compact-astral-3d`, whose two mirror solves each declare all
+twenty-two boards under the same names at one mirror's potentials or the other's. That sharing
+is right - it is the same metal, and an ion striking it struck one surface - and channels are
+built per solve, so it is only within one that a shared name changes a field.
+
+**And the same assignment had a second victim.** One electrode tapping one generator twice, at
+one phase or at two phases of a sinusoid, resolves both taps into the same supplies, so it
+wrote one entry twice and the later tap replaced the earlier: 100 V and 50 V flew exactly as
+50 V alone. Contributions to a keyed accumulator add; `=` is right only where something
+guarantees one contribution per key, and nothing did.
+
+The rules. **A default every instance shares cannot be a key**: if a field is optional and
+anything indexes by it, the default has to be unique or the field required. **Find every reader
+that keys on a thing before deciding what the thing is** - here four did, and between them they
+had already decided. And **before scoping a uniqueness rule, enumerate the documents it would
+refuse**: two shipped templates said where the boundary was. The export fix (PR #56) met the
+same dictionary in the static channel and wrote the first half of this - a display name is not
+a key - and left the driven path for its own change, which this is.

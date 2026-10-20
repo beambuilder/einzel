@@ -867,6 +867,22 @@ needs a change below the template library, either it is genuinely novel physics
 or the abstraction is wrong, and almost always the second. A mirror and a
 quadrupole differ only in which primitives they use and where they put them.
 
+**A name is an electrode's identity within its solve.** It is optional, and an
+unnamed electrode is called `electrode-N` after its place in the list, so
+`electrode-3` is the one an error locates at `/electrodes/3`; a repeated one's
+copies are `name-0`, `name-1` and so on. Two electrodes in one solve may not share
+a name, and the second is refused at its `name`. That is not tidiness: a driven or
+sequenced geometry is solved through channels built from the names, so two sharing
+one were solved holding the same potential, and an ion lost on either is reported
+as striking one surface. Every unnamed electrode used to be called `electrode`, and
+two of them in a driven solve were one entry holding the later's potential - a
+deflector of two unnamed plates was switched off. Two *elements* may share names,
+and the Astral's do: its two mirror solves each declare every board, because it is
+the same metal at one mirror's potentials or the other's. The cost of allowing it is
+that unnamed electrodes in two elements share default names too - each element has
+an `electrode-0` - and a loss on either is tallied against one surface, so name the
+electrodes of a model with more than one solved element.
+
 ## Transport
 
 ```json

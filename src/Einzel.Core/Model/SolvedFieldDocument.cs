@@ -150,7 +150,11 @@ public sealed record TapTermDocument
 /// <summary>An electrode, as it appears in a model document.</summary>
 public sealed record ElectrodeDocument : ITappedElectrode
 {
-    /// <summary>A name, used in reporting and as the basis-field label.</summary>
+    /// <summary>
+    /// What the electrode is called: how a lost ion, a channel and an error name it, so it
+    /// must differ from every other electrode's in the same solve. Omitted, it is
+    /// <c>electrode-N</c> after its place in the list.
+    /// </summary>
     public string? Name { get; init; }
 
     /// <summary>One of <c>rectangle</c>, <c>disc</c>, <c>polygon</c>, or <c>edgeProfile</c>.</summary>

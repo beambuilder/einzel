@@ -46,6 +46,19 @@ become a feature release without being renamed twice.
 
 ## Fixed
 
+- **Two unnamed electrodes in a driven or sequenced solve were solved at the same potential.**
+  Every unnamed electrode was called `electrode`, and a driven or sequenced geometry is solved
+  through channels keyed by name, so the later of two set both: a deflector of two unnamed
+  plates at +2 V and -2 V was switched off, on a run that validated, converged and exited 0.
+  The same happened to two electrodes given one name. An unnamed electrode is now called
+  `electrode-N` after its place in the list, and **two electrodes in one solve sharing a name
+  are refused** at validation, since a lost ion is reported by its electrode's name as well.
+  Two field elements may still share names, as the Astral's mirror solves do for the same
+  metal. A static geometry's field was right and is unchanged; only its unnamed electrodes'
+  names in reports change. No shipped template or example is affected.
+- **Two taps of one electrode on one generator kept only the later.** At one phase, or at two
+  phases of a sinusoid, they reach the same supply, and 100 V and 50 V flew exactly as 50 V
+  alone. They now add.
 - **`astral-3d`'s flight time depended on rounding.** Three faces shared by foil slices at
   different voltages lay exactly on planes of mesh nodes, so which voltage the stencil arms in
   those planes took was decided by the last bit of arithmetic - worth 0.27 percent. The foil
