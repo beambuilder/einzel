@@ -40,3 +40,10 @@ ai/
 ## ask for them again. The tracked record of what they say is the published
 ## register in docs/literature-targets.md section 4.
 papers/
+
+## Fork (beambuilder/einzel): raw output of the benchmark suite (a later
+## addition under bench/) and exported ion lists are regenerable from the run
+## manifest. Small ion-list fixtures under tests/ stay tracked.
+bench/results/raw/
+*.ions.csv
+!tests/**/*.ions.csv
