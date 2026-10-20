@@ -16,6 +16,9 @@
     <Project Path="src/Einzel.Transport/Einzel.Transport.csproj" />
     <Project Path="src/Einzel.Wpf/Einzel.Wpf.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/quadbatch/QuadBatch.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Einzel.Analysis.Tests/Einzel.Analysis.Tests.csproj" />
     <Project Path="tests/Einzel.Cli.Tests/Einzel.Cli.Tests.csproj" />
