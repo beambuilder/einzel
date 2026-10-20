@@ -35,7 +35,11 @@ public sealed record RasterLayer(
 /// <param name="R">Red, zero to one.</param>
 /// <param name="G">Green, zero to one.</param>
 /// <param name="B">Blue, zero to one.</param>
-public sealed record OverlayStroke(IReadOnlyList<double> PointsPx, double R, double G, double B);
+/// <param name="WidthPx">
+/// Its width, in output pixels; null draws it at the overlay's <see cref="RasterOverlay.LineWidthPx"/>.
+/// </param>
+public sealed record OverlayStroke(
+    IReadOnlyList<double> PointsPx, double R, double G, double B, double? WidthPx = null);
 
 /// <summary>A line of text drawn over the picture.</summary>
 /// <param name="Text">What it says.</param>
@@ -51,7 +55,7 @@ public sealed record OverlayText(
 /// <summary>What is drawn over the finished picture, in its pixels, with no depth.</summary>
 /// <param name="Strokes">Flat polylines.</param>
 /// <param name="Texts">Lines of text, drawn in <see cref="StrokeFont"/>.</param>
-/// <param name="LineWidthPx">The width of a stroke, in output pixels.</param>
+/// <param name="LineWidthPx">The width of a stroke that does not carry its own, in output pixels.</param>
 public sealed record RasterOverlay(
     IReadOnlyList<OverlayStroke> Strokes, IReadOnlyList<OverlayText> Texts, double LineWidthPx);
 
@@ -199,18 +203,15 @@ public static class Rasterizer
             return laid;
         }
 
-        var strokeWidth = overlay.LineWidthPx * supersample;
-
         foreach (var stroke in overlay.Strokes)
         {
+            var strokeWidth = (stroke.WidthPx ?? overlay.LineWidthPx) * supersample;
             laid.Add(([.. stroke.PointsPx.Select(v => v * supersample)], stroke.R, stroke.G, stroke.B, strokeWidth));
         }
 
         foreach (var text in overlay.Texts)
         {
-            // A stroke a ninth of the text's height, and never thinner than the picture's own
-            // lines, so a small label stays legible.
-            var textWidth = Math.Max(overlay.LineWidthPx * 0.8, text.HeightPx / 9.0) * supersample;
+            var textWidth = StrokeFont.StrokeWidth(text.HeightPx, overlay.LineWidthPx) * supersample;
 
             foreach (var glyph in StrokeFont.Layout(
                 text.Text, text.CenterXPx * supersample, text.CenterYPx * supersample, text.HeightPx * supersample))

@@ -75,6 +75,16 @@ public static class StrokeFont
         return Math.Max(0.0, units) * heightPx / CapHeight;
     }
 
+    /// <summary>The width a line of text is stroked at.</summary>
+    /// <param name="heightPx">The height of a digit, in pixels.</param>
+    /// <param name="lineWidthPx">The width of the picture's own lines, in pixels.</param>
+    /// <returns>
+    /// A ninth of the text's height, and never thinner than 0.8 of the picture's own lines, so a
+    /// small label stays legible.
+    /// </returns>
+    public static double StrokeWidth(double heightPx, double lineWidthPx) =>
+        Math.Max(lineWidthPx * 0.8, heightPx / 9.0);
+
     /// <summary>The strokes that draw a line of text centered on a point.</summary>
     /// <param name="text">The text.</param>
     /// <param name="centerXPx">The horizontal center, in pixels from the left.</param>

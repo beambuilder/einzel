@@ -321,6 +321,39 @@ public sealed class ScaleIndicatorTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>
+    /// A ruler under a millimeter is labeled in micrometers, and the micro sign hangs a third of a
+    /// digit below the line. The box the layout keeps a margin clear of the picture's edge holds
+    /// it, so no glyph comes nearer the edge than the margin.
+    /// </summary>
+    /// <remarks>
+    /// Found by drawing the window's text from the still's strokes: the box had room under the
+    /// label for digits alone, and the descender reached 1.6 pixels into the margin at the
+    /// default text height.
+    /// </remarks>
+    [Fact]
+    public void AMicrometerLabelsDescenderStaysOutOfTheMargin()
+    {
+        // The test box shrunk a hundredfold: a millimeter long, so the round length is a
+        // fraction of one.
+        (double X, double Y, double Z)[] tiny = [.. Box.Select(p => (p.X / 100.0, p.Y / 100.0, p.Z / 100.0))];
+        var (azimuth, elevation) = ViewportPicture.Views["side"];
+        var matrix = Framing.Around(tiny, azimuth, elevation).Matrix((double)Width / Height);
+
+        var ruler = ScaleIndicator.For(matrix, Width, Height)!;
+        var margin = Math.Max(12.0, 0.04 * Math.Min(Width, Height));
+        var lowest = ruler.Strokes()
+            .Skip(ruler.Arms.Count)
+            .SelectMany(s => s.PointsPx.Where((_, i) => i % 2 == 1))
+            .Max();
+
+        output.WriteLine($"{ruler.Label} in the {ruler.Corner}: lowest glyph at {lowest:F2} px, margin begins at {Height - margin:F2}");
+
+        Assert.Contains("µm", ruler.Label, StringComparison.Ordinal);
+        Assert.Equal("lower left", ruler.Corner);
+        Assert.True(lowest <= Height - margin + 1e-9, $"the label reaches {lowest:F2} px, past {Height - margin:F2}");
+    }
+
     /// <summary>The review's own case: a 32-pixel side view has no room for a ruler, so has none.</summary>
     [Fact]
     public void AThirtyTwoPixelPictureHasNoRuler()
@@ -367,21 +400,26 @@ public sealed class ScaleIndicatorTests(ITestOutputHelper output)
     /// Every point the ruler reaches: where the arms meet, their tips, the extent of each letter,
     /// and the corners of the label as the still's font sets it.
     /// </summary>
+    /// <summary>
+    /// Where the ruler's ink reaches: every point of every stroke the window and the still draw,
+    /// out by half the stroke's width - the glyphs themselves, descenders included, rather than an
+    /// estimate of the box they sit in.
+    /// </summary>
     private static List<(double X, double Y)> Points(ScaleIndicator ruler)
     {
-        var points = new List<(double X, double Y)> { ruler.OriginPx };
-        var letter = 0.4 * ruler.TextPx;
+        var points = new List<(double X, double Y)>();
 
-        foreach (var arm in ruler.Arms)
+        foreach (var stroke in ruler.Strokes())
         {
-            points.Add(arm.TipPx);
-            points.Add((arm.LetterPx.X - letter, arm.LetterPx.Y - letter));
-            points.Add((arm.LetterPx.X + letter, arm.LetterPx.Y + letter));
-        }
+            var half = 0.5 * stroke.WidthPx;
 
-        var labelHalf = 0.5 * StrokeFont.Width(ruler.Label, ruler.TextPx);
-        points.Add((ruler.LabelPx.X - labelHalf, ruler.LabelPx.Y - (0.5 * ruler.TextPx)));
-        points.Add((ruler.LabelPx.X + labelHalf, ruler.LabelPx.Y + (0.5 * ruler.TextPx)));
+            for (var i = 0; i + 1 < stroke.PointsPx.Count; i += 2)
+            {
+                var (x, y) = (stroke.PointsPx[i], stroke.PointsPx[i + 1]);
+                points.Add((x - half, y - half));
+                points.Add((x + half, y + half));
+            }
+        }
 
         return points;
     }

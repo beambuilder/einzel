@@ -2496,7 +2496,24 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
   printed a kilometer ruler as `1E+03 m` in a font with no E, caught by the font test before it
   shipped; and the pixel test first demanded a near-black pixel where an antialiased 1.5-pixel
   line centered between rows leaves gray. **Not built**: the WPF viewport's ruler (its camera
-  is Helix's own), and the Avalonia overlay has not been looked at in a live window.
+  is Helix's own). **Looked at in a live window after it merged**: on five models and every
+  named view the ruler measured true, stayed clear of the instrument and matched a still of the
+  window's own size in length, corner and arm pixels - and its **text was two thirds the size of
+  the still's**, because the layout's text height is a digit's height and the window set its
+  text in Avalonia's font with that number as the size, which is an em. Scaling the font to its
+  measured digit height fixed the height, and a review of that fix found the label then ran
+  about 3 percent wider than the box the layout reserves from the still's glyphs: **two fonts
+  for one layout disagree, and the fit check can only measure one.** So the window sets no text:
+  `ScaleIndicator.Strokes` hands out the arms, label and letters as one list of polylines in
+  `StrokeFont` with their widths, and the window and the still both draw it. Live, every glyph's
+  ink box matches the still's to a pixel; stills through the list are pixel-identical to the old
+  ones on all twenty model-and-view pairs tried. Measuring the real glyphs also found the box
+  short of the micro sign's descender, a pixel and a half into the margin at the default size;
+  it now holds every glyph it lays out. Mutation-checked: dropping the descender from the box
+  fails the micrometer test and nothing else, and ignoring a stroke's own width fails the
+  rasterizer's. While the window was open it also showed the einzel lens's 7 mm tube walls drawn
+  as thin tubes with flanges - the faces lying on the solve domain's edge are not drawn, a
+  viewport defect older than the ruler and its own change.
 
 Adding a travelling-wave guide or a multipole should need only one more file — axisymmetry, repeats and RF all exist now. If it needs a change below `Einzel.Library`, LIB-1 says the abstraction is wrong — believe it.
 

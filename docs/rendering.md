@@ -745,10 +745,16 @@ not comparable; with one, the arms' different screen lengths *are* the foreshort
 layout keeps above the hatched band a tainted picture carries, and `--no-scale` leaves it out.
 
 **Decided in the command layer (`ScaleIndicator`), like the rest of the picture**, and drawn
-by the Avalonia viewport from the same call, over its GL control and redrawn when the view or
-the window's size changes. The still draws it in `StrokeFont`: a line font of digits, units
-and axis letters, drawn through the rasterizer's own line routine - no font file, so no
-license question and nothing for a headless runner to lack. A character it cannot spell is
+by the Avalonia viewport from the same calls, over its GL control and redrawn when the view or
+the window's size changes. Both draw it in `StrokeFont`, a line font of digits, units and axis
+letters: `ScaleIndicator.Strokes` hands out the arms, the label and the letters as one list of
+polylines with their widths, and the still strokes them through the rasterizer's own line
+routine while the window strokes them as Avalonia lines - no font file, so no license question
+and nothing for a headless runner to lack, and no second font to come out a different size
+from the first, which the window's did when it set its text in Avalonia's. The box the layout
+fits into the picture holds those glyphs, descenders included: the micro sign in `500 µm` hangs
+a third of a digit below the line, and the room once left under the label for digits alone let
+it reach a pixel and a half into the margin. A character it cannot spell is
 drawn as an empty box rather than dropped, so a gap reads as a gap rather than as a shorter,
 different length; a test walks every label the ruler can write, nanometers to kilometers. The
 length is in the `--json` result (`scaleMm`, `scaleAxes`) and in the PNG's text chunks,

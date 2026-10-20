@@ -84,6 +84,29 @@ public sealed class StrokeFontTests
         Assert.Equal((255, 0, 0), At(rgb, 40, 20, 10));   // the square, away from the stroke
     }
 
+    /// <summary>
+    /// A stroke that carries its own width is drawn at it, and one that does not is drawn at the
+    /// overlay's: the ruler's text strokes are thicker than its arms, and both come as strokes.
+    /// </summary>
+    [Fact]
+    public void AStrokeCarryingItsOwnWidthIsDrawnAtIt()
+    {
+        var overlay = new RasterOverlay(
+            [
+                new OverlayStroke([0.0, 10.0, 40.0, 10.0], 0.0, 0.0, 0.0),
+                new OverlayStroke([0.0, 30.0, 40.0, 30.0], 0.0, 0.0, 0.0, WidthPx: 6.0),
+            ],
+            [],
+            1.5);
+
+        var rgb = Rasterizer.Draw([], Orthographic(1.0), Lit, White, 40, 40, supersample: 1, overlay: overlay);
+
+        int Inked(int from, int to) => Enumerable.Range(from, to - from).Count(y => At(rgb, 40, 20, y) != (255, 255, 255));
+
+        Assert.Equal(2, Inked(0, 20));    // 1.5 px about a line between two rows of centers
+        Assert.Equal(6, Inked(20, 40));   // 6 px about the same
+    }
+
     /// <summary>Text in the overlay puts ink where the label is and nowhere else.</summary>
     [Fact]
     public void OverlayTextInksItsOwnBox()

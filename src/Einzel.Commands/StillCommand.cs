@@ -222,23 +222,19 @@ public static class StillCommand
             layer.Alpha,
             layer.WritesDepth);
 
-    /// <summary>A scale indicator, as the rasterizer draws it: strokes and text in pixels.</summary>
+    /// <summary>A scale indicator, as the rasterizer draws it: strokes in pixels.</summary>
     /// <remarks>
-    /// Where each piece goes was decided in <see cref="ScaleIndicator.For"/>, which the window
-    /// draws from too; this only changes the records' shape, for the reason
+    /// Every stroke, text included, comes from <see cref="ScaleIndicator.Strokes"/>, which the
+    /// window draws too; this only changes the records' shape, for the reason
     /// <see cref="Raster"/> gives.
     /// </remarks>
     private static RasterOverlay Overlay(ScaleIndicator ruler)
     {
         var (r, g, b) = ScaleIndicator.Ink;
-        var (ox, oy) = ruler.OriginPx;
 
         return new RasterOverlay(
-            [.. ruler.Arms.Select(a => new OverlayStroke([ox, oy, a.TipPx.X, a.TipPx.Y], r, g, b))],
-            [
-                new OverlayText(ruler.Label, ruler.LabelPx.X, ruler.LabelPx.Y, ruler.TextPx, r, g, b),
-                .. ruler.Arms.Select(a => new OverlayText(a.Axis, a.LetterPx.X, a.LetterPx.Y, 0.8 * ruler.TextPx, r, g, b)),
-            ],
+            [.. ruler.Strokes().Select(s => new OverlayStroke(s.PointsPx, r, g, b, s.WidthPx))],
+            [],
             ScaleIndicator.LineWidthPx);
     }
 
