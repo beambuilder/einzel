@@ -1457,6 +1457,10 @@ public static class Program
             Console.Out.WriteLine(outcome.Written ? $"wrote {artifact}" : $"would write {artifact}");
         }
 
+        // The files carry these in their headers; the terminal says them too, on stderr, so
+        // somebody who never opens the header in a text editor still hears them (GRD-2).
+        Warn(outcome.Warnings);
+
         return (int)ExitCode.Success;
     }
 

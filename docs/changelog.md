@@ -2462,6 +2462,48 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
   and fails both once each also has a face *crossing* the mirror on a line of nodes, which only the
   Neumann exclusion keeps quiet.
 
+- **`einzel export` was the last reader of a driven cross-section's DC, and it dropped the new
+  warning too.** Its 2-D path built one mask from each electrode's DC potential in its own twenty
+  lines - the defect `solve` had and lost. Measured over every template against the base build:
+  **six driven cross-sections exported every node at zero**, exit 0 (`quadrupole-rf`,
+  `linear-ion-trap`, `stellar-ion-trap`, `multipole-guide`, `paul-trap`, `travelling-wave-guide`), and **four exported their DC
+  chain and dropped their RF** (both funnels, both TIMS front ends). Both dimensions now go through
+  `SolveChannels`, one file per basis channel (`.channelN.vti` when there is more than one); the
+  seven static cross-sections export **bit-identically** and the three driven volumes identically
+  in value. `mesh.node-on-shared-face` reached
+  `run`, `preview` and `solve` and was dropped by `export`; it is now in each file's provenance
+  header with its severity, as `run --vtu` writes a density's, and on `ExportOutcome.Warnings`.
+
+  **Moving export onto `SolveChannels` found that function's static arm wrong.** The edge-profile
+  fix gave a profiled board a unit coefficient in the *driven* decomposition; the static branch ten
+  lines above still read `electrode.Potential`, zero for every shipped profile, and the rasterizer
+  multiplies the profile by it. So `einzel solve` on the planar mirror pair solved a mirror **with no
+  boards** and printed a peak of 4800 V - the cap's, which looks right. Runs were never affected
+  (`Build` takes the other arm). Now `DirectOf`, pinned by a node-by-node comparison with `Build`.
+
+  **And a basis was written as a potential.** A driven channel is a pattern with its leading
+  electrode at 1 V; the 3-D export named a lone one `potential_V`, so a quadrupole driven at 500 V
+  opened in ParaView with its rods at 1. It is `channelN_V_per_V` now, with the carrying electrodes
+  in the header. Mutation-checked five ways: the old DC-only 2-D solve (four tests fail, the
+  static and quarter-cell controls pass), warnings dropped from the header (two), from the outcome
+  (three), from the terminal (one), and a basis named as a potential (one). The lesson, in
+  `docs/lessons.md`: **a fix is a statement about a spelling, and the bug was a question** - after
+  fixing one caller, enumerate every place that performs the same construction, not the callers of
+  the function that was fixed.
+
+  **Review found that a name is not an identity.** An electrode's name was optional, defaulted to
+  `electrode` and need not have been unique, and the static channel was a dictionary keyed by it - so two
+  unnamed plates at +100 V and -100 V both exported at -100 V, where every run builds its mask
+  electrode by electrode and gets them right. The static channel now builds that same mask
+  (`Patterns` returns null for "as declared"), and `ChannelSolve.Holding` reports what each
+  declared electrode held **by position**, from the same function the mask is built with. Also
+  from review: channel files were named by replacing `.vti` in the whole path, so a project under
+  a directory called `session.vti` wrote outside itself or failed; names are now built from the
+  stem. Each fix mutation-checked against its own regression. The driven decomposition was
+  name-keyed too, so two same-named electrodes in a driven geometry shared one supply in every
+  run; that was older than this change and was fixed in its own (#62, below), which made
+  names unique within a solve. The export tests now use the names it assigns.
+
 - **A scale in every 3D picture, and why it is a ruler rather than a bar.** Stills
   (`einzel render still`) and the Avalonia viewport now carry a scale indicator in a corner;
   the vector sections have always had a scale bar. **In the angled view a flat bar would

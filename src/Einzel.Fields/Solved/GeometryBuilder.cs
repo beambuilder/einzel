@@ -86,7 +86,7 @@ public static class GeometryBuilder
 
         foreach (var electrode in solve.Electrodes)
         {
-            var potential = potentialOf?.Invoke(electrode) ?? electrode.Potential;
+            var potential = Held(electrode, potentialOf);
 
             switch (electrode.Shape)
             {
@@ -103,7 +103,7 @@ public static class GeometryBuilder
                     break;
 
                 case ElectrodeShape.EdgeProfile:
-                    RasteriseEdgeProfile(mask, grid, electrode, potentialOf is null ? 1.0 : potential);
+                    RasteriseEdgeProfile(mask, grid, electrode, potential);
                     break;
 
                 default:
@@ -817,7 +817,31 @@ public static class GeometryBuilder
     /// mask and cut links alive through every later solve, to report two integers.
     /// </remarks>
     public sealed record ChannelSolve(
-        int Index, int FixedNodes, int CutLinks, ScalarField2D Potential, SolveReport Report);
+        int Index, int FixedNodes, int CutLinks, ScalarField2D Potential, SolveReport Report)
+    {
+        /// <summary>
+        /// What each declared electrode held in this solve, in declaration order: volts, or for
+        /// an edge profile a scale on the profile that holds its volts.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The declared potentials for a static geometry, and for a driven or sequenced one
+        /// the channel's spatial pattern with its leading electrode at one volt - which is
+        /// what a reader of an exported channel needs to know it is looking at, since two
+        /// files called <c>channel0</c> and <c>channel1</c> say nothing about which is the DC
+        /// chain and which the RF.
+        /// </para>
+        /// <para>
+        /// <b>By position, not by name.</b> Each entry is the value the mask was built with,
+        /// through the same function and in the same order, so it cannot describe a solve other
+        /// than the one that ran. It was a dictionary keyed by name once, when a name defaulted
+        /// to <c>electrode</c> and need not have been unique, and two unnamed plates reported
+        /// one potential between them; the validator now makes names unique within a solve, and
+        /// the list keeps the report from depending on that.
+        /// </para>
+        /// </remarks>
+        public IReadOnlyList<double> Holding { get; init; } = [];
+    }
 
     /// <summary>Solves a geometry channel by channel, and hands back the diagnostics.</summary>
     /// <param name="solve">The compiled solve.</param>
@@ -851,14 +875,18 @@ public static class GeometryBuilder
 
         for (var index = 0; index < patterns.Count; index++)
         {
-            var channel = SolvePattern(solve, grid, patterns[index], askMesh: index == 0);
+            var potentialOf = patterns[index];
+            var channel = SolvePattern(solve, grid, potentialOf, askMesh: index == 0);
 
             // Every channel carries the same finding, because every channel solves on the
             // same mesh round the same conductors; einzel solve reports it once per element.
             warnings ??= channel.MeshWarnings;
 
             solves.Add(new ChannelSolve(
-                index, channel.FixedNodes, channel.CutLinks, channel.Potential, channel.Report with { Warnings = warnings ?? [] }));
+                index, channel.FixedNodes, channel.CutLinks, channel.Potential, channel.Report with { Warnings = warnings ?? [] })
+            {
+                Holding = [.. solve.Electrodes.Select(e => Held(e, potentialOf))],
+            });
         }
 
         return solves;
@@ -867,7 +895,9 @@ public static class GeometryBuilder
     /// <summary>Solves one channel's pattern, and lets go of everything but its potential.</summary>
     /// <param name="solve">The declared geometry.</param>
     /// <param name="grid">The finest grid.</param>
-    /// <param name="pattern">What each electrode holds in this channel; zero where it is absent.</param>
+    /// <param name="potentialOf">
+    /// What each electrode holds in this channel, or null for every electrode as declared.
+    /// </param>
     /// <param name="askMesh">Whether to ask, while the mask is in hand, where the mesh samples a shared face.</param>
     /// <remarks>
     /// <para>
@@ -883,17 +913,15 @@ public static class GeometryBuilder
     /// </remarks>
     private static (ScalarField2D Potential, SolveReport Report, int FixedNodes, int CutLinks,
         IReadOnlyList<Core.Results.ValidityWarning>? MeshWarnings) SolvePattern(
-        CompiledSolvedField solve, Grid2D grid, Dictionary<string, double> pattern, bool askMesh)
+        CompiledSolvedField solve, Grid2D grid, Func<CompiledElectrode, double>? potentialOf, bool askMesh)
     {
-        double Weight(CompiledElectrode e) => pattern.GetValueOrDefault(e.Name, 0.0);
-
-        var mask = BuildMask(solve, grid, Weight);
+        var mask = BuildMask(solve, grid, potentialOf);
 
         var (potential, report) = PoissonSolver2D.Solve(
             mask,
             solve.Tolerance,
             maximumCycles: 400,
-            coarsen: coarse => BuildMask(solve, coarse, Weight));
+            coarsen: coarse => BuildMask(solve, coarse, potentialOf));
 
         var warnings = askMesh ? SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid, mask)) : null;
 
@@ -919,26 +947,28 @@ public static class GeometryBuilder
             grid.NodeCount, Math.Max(1, Patterns(solve).Count), SolveMemoryModel.PlanePeak, galerkin: false);
     }
 
-    /// <summary>The relative potentials of each independent channel.</summary>
+    /// <summary>What each electrode holds in each independent channel.</summary>
     /// <remarks>
-    /// One entry with every electrode at its declared potential for a static
-    /// geometry, and one per spatial pattern for a driven or sequenced one. Written
-    /// once so the field builder and the diagnostics cannot disagree about how many
-    /// solves a geometry needs, which is exactly the disagreement that let the
+    /// <para>
+    /// One entry for a static geometry, and one per spatial pattern for a driven or sequenced
+    /// one. Written once so the field builder and the diagnostics cannot disagree about how
+    /// many solves a geometry needs, which is exactly the disagreement that let the
     /// diagnostics report a field nothing else used.
+    /// </para>
+    /// <para>
+    /// <b>A static geometry's entry is null, meaning every electrode as declared</b> - the mask
+    /// <see cref="Build"/> makes, electrode by electrode. It used to be a dictionary keyed by
+    /// name, and that was wrong twice. Read from each electrode's scalar it zeroed every edge
+    /// profile, whose volts are in its profile, so <c>einzel solve</c> solved the planar
+    /// mirror pair with no boards. And a name defaulted to <c>electrode</c> and need not have
+    /// been unique, so two unnamed plates at +100 V and -100 V both solved at -100.
+    /// </para>
     /// </remarks>
-    private static List<Dictionary<string, double>> Patterns(CompiledSolvedField solve)
+    private static List<Func<CompiledElectrode, double>?> Patterns(CompiledSolvedField solve)
     {
         if (solve.Drives.Count == 0 && solve.Stages.Count == 0)
         {
-            var single = new Dictionary<string, double>(StringComparer.Ordinal);
-
-            foreach (var electrode in solve.Electrodes)
-            {
-                single[electrode.Name] = electrode.Potential;
-            }
-
-            return [single];
+            return [null];
         }
 
         var states = StageStates(solve);
@@ -949,7 +979,7 @@ public static class GeometryBuilder
         [
             .. DriveChannels
                 .DecomposeStates(States(states), quadrature)
-                .Select(group => group.Pattern),
+                .Select(group => (Func<CompiledElectrode, double>?)Weighted(group.Pattern)),
         ];
     }
 
@@ -1053,7 +1083,7 @@ public static class GeometryBuilder
             // back on the weight, so this solve is in units of that weight. Solved in a
             // frame of its own, which lets go of the mask - see SolvePattern.
             var (potential, report, _, _, warnings) =
-                SolvePattern(solve, grid, group.Pattern, askMesh: index == 0);
+                SolvePattern(solve, grid, Weighted(group.Pattern), askMesh: index == 0);
 
             meshWarnings ??= warnings;
 
@@ -1250,6 +1280,26 @@ public static class GeometryBuilder
     private static Excitation Excited(CompiledElectrode electrode) =>
         new(electrode.Name, DirectOf(electrode), [.. electrode.Taps.Select(
             t => new DriveTap(t.Drive, t.Amplitude, t.Phase))]);
+
+    /// <summary>What an electrode holds in a mask built with <paramref name="potentialOf"/>.</summary>
+    /// <remarks>
+    /// The one definition <see cref="BuildMask"/> rasterizes with and
+    /// <see cref="ChannelSolve.Holding"/> reports, so the two cannot disagree. With no
+    /// override an edge profile is applied as written, a scale of one on the profile that
+    /// holds its volts; with one, the override is that scale.
+    /// </remarks>
+    private static double Held(CompiledElectrode electrode, Func<CompiledElectrode, double>? potentialOf) =>
+        potentialOf is not null ? potentialOf(electrode)
+        : electrode.Shape == ElectrodeShape.EdgeProfile ? 1.0
+        : electrode.Potential;
+
+    /// <summary>A channel's pattern as the function a mask is built with.</summary>
+    /// <remarks>
+    /// The decomposition keys its patterns by name, which the validator makes unique within a
+    /// solve and the decomposition itself refuses to see repeated.
+    /// </remarks>
+    private static Func<CompiledElectrode, double> Weighted(Dictionary<string, double> pattern) =>
+        electrode => pattern.GetValueOrDefault(electrode.Name, 0.0);
 
     /// <summary>
     /// What an electrode contributes to the constant supply: its DC potential, or for an

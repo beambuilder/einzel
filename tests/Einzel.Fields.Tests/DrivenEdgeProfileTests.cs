@@ -125,6 +125,46 @@ public sealed class DrivenEdgeProfileTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// An undriven geometry reports, through <see cref="GeometryBuilder.SolveChannels"/>, the
+    /// same field it runs in - profiled board included.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The driven fix above reached the decomposition and not the static arm beside it, which
+    /// built its one pattern from each electrode's scalar <c>Potential</c> - zero for every
+    /// shipped edge profile - and handed it to a rasterizer that multiplies the profile
+    /// through. So <c>einzel solve</c> on the planar mirror pair solved a mirror with no
+    /// boards, and reported it converged with a peak of 4800 V, the cap's, which looks right.
+    /// <c>einzel export</c> escaped only because it built its mask a third way.
+    /// </para>
+    /// <para>
+    /// Compared node by node against <see cref="GeometryBuilder.Build"/>, the path every run
+    /// and study takes, because "the channels agree with the field" is the property: a check
+    /// on the peak alone passes with the board missing, as the mirror pair shows.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnUndrivenEdgeProfileIsInTheChannelItReportsAgainst()
+    {
+        var box = Box(PlateVolts, driven: false);
+        var (field, _) = GeometryBuilder.Build(box);
+        var channel = Assert.Single(GeometryBuilder.SolveChannels(box));
+
+        var probe = new Vec3(0.0, 2.0e-3, 0.0);
+        var grid = channel.Potential.Grid;
+        var i = (int)Math.Round((probe.X - grid.OriginX) / grid.SpacingX);
+        var j = (int)Math.Round((probe.Y - grid.OriginY) / grid.SpacingY);
+
+        var reported = channel.Potential[i, j];
+        var flown = field.PotentialAt(new Vec3(grid.X(i), grid.Y(j), 0.0));
+
+        output.WriteLine($"channel {reported:F6} V, field {flown:F6} V at ({grid.X(i) * 1e3:F2}, {grid.Y(j) * 1e3:F2}) mm");
+
+        Assert.True(flown < -20.0, $"the -500 V edge is worth {flown:F4} V at the probe");
+        Assert.Equal(flown, reported, 1e-9);
+    }
+
+    /// <summary>
     /// A profile that is everywhere zero is a grounded board, and gets no channel of its own:
     /// a constant supply whose field is nothing is a solve nobody needs.
     /// </summary>

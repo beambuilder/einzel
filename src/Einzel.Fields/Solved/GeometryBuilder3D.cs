@@ -971,7 +971,19 @@ public static class GeometryBuilder3D
     /// it was most of the difference between one solve's working set and the whole build's.
     /// </remarks>
     public sealed record ChannelSolve(
-        int Index, int FixedNodes, int CutLinks, ScalarField3D Potential, SolveReport Report);
+        int Index, int FixedNodes, int CutLinks, ScalarField3D Potential, SolveReport Report)
+    {
+        /// <summary>
+        /// What each declared electrode held in this solve, in volts and in declaration order.
+        /// </summary>
+        /// <remarks>
+        /// The declared potentials for a static geometry, and for a driven or sequenced one
+        /// the channel's spatial pattern with its leading electrode at one volt. By position
+        /// rather than by name, for the reason the two-dimensional
+        /// <see cref="GeometryBuilder.ChannelSolve.Holding"/> gives.
+        /// </remarks>
+        public IReadOnlyList<double> Holding { get; init; } = [];
+    }
 
     /// <summary>Solves a geometry channel by channel, and hands back the diagnostics.</summary>
     /// <param name="geometry">The geometry.</param>
@@ -998,7 +1010,10 @@ public static class GeometryBuilder3D
             [
                 new ChannelSolve(
                     0, mask.FixedCount, mask.Cuts?.CutCount ?? 0, potential,
-                    report with { Warnings = SharedFaceNodes.Warnings(NodesOnSharedFaces(geometry, grid, mask)) }),
+                    report with { Warnings = SharedFaceNodes.Warnings(NodesOnSharedFaces(geometry, grid, mask)) })
+                {
+                    Holding = [.. geometry.Electrodes.Select(e => e.Potential)],
+                },
             ];
         }
 
@@ -1136,7 +1151,10 @@ public static class GeometryBuilder3D
 
         // The counts, not the mask: holding the mask kept every solved channel's cut links
         // alive through every later channel's solve. See ChannelSolve.
-        return new ChannelSolve(index, mask.FixedCount, mask.Cuts?.CutCount ?? 0, potential, report);
+        return new ChannelSolve(index, mask.FixedCount, mask.Cuts?.CutCount ?? 0, potential, report)
+        {
+            Holding = [.. geometry.Electrodes.Select(Weight)],
+        };
     }
 
     /// <summary>How a three-dimensional electrode is excited, for the shared decomposition.</summary>

@@ -5299,6 +5299,54 @@ equal is one assertion. And **a surprising difference is a finding before it is 
 the interior volts were two things, neither the one being measured, and one of them is now an
 open item of its own.
 
+## A fix reaches the function it was made in, and the construction lives in several
+
+Two defects found in one afternoon, and they are one defect.
+
+**`einzel export` was still reading the DC of a driven cross-section.** `einzel solve` had
+exactly this bug - one mask built from each electrode's DC potential, so the shipped
+`quadrupole-rf` solved as a grounded box - and it was fixed by giving the builder a
+`SolveChannels` and pointing `solve` at it. `export` did not call anything that was fixed. It
+built the same mask the same way in its own twenty lines, and went on writing driven
+cross-sections as volumes of zeros, which ParaView opens without complaint. Checked over every
+template against the base build: **six** exported every node at zero (the RF quadrupole, the two
+cross-section linear ion traps, the multipole guide, the Paul trap, the travelling-wave guide), **four**
+exported their DC chain and dropped their RF (both funnels, both TIMS front ends), and the
+seven static cross-sections are bit-identical before and after the move.
+
+**And the edge-profile fix had reached the driven arm of one function and not the static arm
+ten lines above it.** An edge profile's volts are in its profile and its scalar is zero; the
+decomposition was taught to give it a unit coefficient, and `Patterns`' static branch went on
+reading `electrode.Potential` and handing a zero to a rasterizer that multiplies the profile
+by it. So `einzel solve` on the planar mirror pair reported a mirror with no boards - converged,
+peak 4800 V, which is the cap and looks right. A check on the peak cannot see a missing board.
+What caught it was moving `export` onto the same function and requiring every static
+template to survive unchanged.
+
+**The rule.** When a defect is fixed in one caller, the population to enumerate is not the
+callers of the function that was fixed - it is every place that *performs the same
+construction*, which here meant grepping for `BuildMask(` without a `potentialOf` on a
+geometry that might be driven, and reading every branch of the function the fix landed in.
+A fix is a statement about a spelling; the bug was a statement about a question ("what does
+this electrode hold?"), and every spelling of that question had it.
+
+**A third thing came with it: a basis written as a potential.** A driven channel is a spatial
+pattern normalized so its leading electrode holds one volt. The three-dimensional export
+already named such an array `potential_V` when it was the only channel, so a quadrupole driven
+at 500 V opened in ParaView with its rods at 1. Out by the drive amplitude, and plausibly so -
+a small, confident, wrong number, which is the kind this project keeps finding. The array is
+now named as a basis and the header says what it holds and which electrodes carry it.
+
+**And review found the dictionary itself was the defect.** The static channel's pattern was a
+map from electrode name to potential, and a name is optional, defaults to `electrode`, and need
+not be unique - so two unnamed plates at opposite potentials became one entry and exported at
+the same voltage, while every run, which builds its mask electrode by electrode, got them
+right. **A display name is not a key.** Where a list of declared things is the source, identify
+them by position, and derive any report about them from the same function that acted on them.
+The next entry made the name a key on purpose, by giving each unnamed electrode its own and
+refusing two that share one; the static channel kept its positional identity anyway, because
+the mask is built from the list and a report about the mask should be built from the same list.
+
 ## A default every instance shares cannot be a key
 
 An electrode's name was optional and defaulted to `electrode`, and nothing required two in one

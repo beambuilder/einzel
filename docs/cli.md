@@ -764,6 +764,14 @@ element; the terminal prints them on stderr like every other verb. A qualified
 warning does not change the exit code: the solve succeeded, and the caveat is on
 the field.
 
+**It solved the planar mirror pair without its boards.** An edge profile keeps its
+volts in its profile and its scalar potential is zero; the channel decomposition was
+taught that for driven geometry, and the static arm beside it still read the scalar,
+which the rasterizer multiplies the profile by. So `solve` reported a mirror with no
+boards, converged, with a peak of 4800 V - the cap's, which looks right. Found while
+moving `export` onto the same function, which every static template had to survive
+unchanged: the mirror pair would not have.
+
 ### Why `export` writes ImageData
 
 A uniform Cartesian grid *is* VTK image data. An unstructured grid would carry
@@ -777,9 +785,41 @@ not be square.
 extent spanning something. A section through a solved quadrupole is a thing you
 look at once; a volume is a thing you cut, contour and re-cut, which is most of why
 VTU export lands a phase before any shell does. A driven geometry writes **one file
-per basis channel** rather than one called "the field", because what an ion sees is
-a weighted sum that changes within an RF cycle and a single file would be picking a
-phase without saying which.
+per basis channel**, in either dimension, rather than one called "the field", because
+what an ion sees is a weighted sum that changes within an RF cycle and a single file
+would be picking a phase without saying which. More than one channel names the files
+`.channel0.vti`, `.channel1.vti` and so on.
+
+**The two-dimensional path was reading the DC.** It built one mask from each
+electrode's DC potential, so the shipped `quadrupole-rf` - every rod at zero DC and
+all of its potential as drive - exported the field of a grounded box, every node
+zero, exit 0. Measured over every template against the previous build, that was
+**ten of them**: six driven cross-sections exported nothing but zeros
+(`quadrupole-rf`, `linear-ion-trap`, `stellar-ion-trap`, `multipole-guide`,
+`paul-trap`, `travelling-wave-guide`) and four exported their DC pattern and dropped
+the RF (`ion-funnel`, `pnnl-ion-funnel`, `tims-front-end`, `tims-tandem`). It was the
+defect `solve` had and lost (`docs/lessons.md`, "Reading the DC of an electrode that
+holds none"), still living in the verb beside it. Both dimensions now go through the
+same `SolveChannels` that `solve` reports against; the seven static cross-sections
+export bit-identically to before, and the three driven volumes identically in value.
+
+**A basis channel is not a potential, and the file says so.** A driven or sequenced
+geometry is solved once per spatial pattern, normalized so its leading electrode sits
+at one volt; the RF quadrupole's single channel has its rods at plus and minus one.
+Read as a field, that is out by the drive amplitude, and plausibly so. Such an array is
+named `channelN_V_per_V` rather than `potential_V` even when it is the only one, and
+the header says what it holds and which electrodes carry the pattern - two files
+called `channel0` and `channel1` do not otherwise say which is a funnel's DC chain and
+which its RF. A static geometry is still `potential_V`, in volts. And a reflected solve
+says it wrote only the half it solved, which otherwise reads as an instrument cut off at
+a plane it does not have.
+
+**The solve's warnings travel into the file** (GRD-2), in the provenance comment ahead
+of the data, with their severities, the way `run --vtu` writes a density's header -
+and onto the outcome's `warnings`, once per field element with the same prefix `solve`
+uses, which the terminal prints on stderr. A volume is the artifact most likely to be
+opened by somebody who never saw the command that wrote it, and until the solvers had
+a warning to give (`mesh.node-on-shared-face`) there was nothing for the file to drop.
 
 Trajectories are still `.vtu`, written by `run --vtu` where they are produced.
 
