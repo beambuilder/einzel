@@ -10,7 +10,7 @@ millibar of gas. It is a C# engine with a scriptable command line, a Python exte
 surface, a live-session server for AI agents, and a Windows viewport.
 
 **Two ideas shape everything else.** It is *open*, so a student, a collaborator, or a
-reviewer can run the same model without a licence or a seat. And it is designed *from the
+reviewer can run the same model without a license or a seat. And it is designed *from the
 engine outward for an agent to drive*: the command line is the primary surface, every
 result carries its units, its uncertainty and its warnings, and every error is a recovery
 instruction rather than a complaint.
@@ -115,7 +115,7 @@ Carlo, parameter scans, boundary bisection, and two optimisers.
 
 ## How it is checked
 
-There is no SIMION licence here, so cross-code comparison is not available and the load is
+There is no SIMION license here, so cross-code comparison is not available and the load is
 carried by two other tiers. **Analytic**: closed-form fields with exact trajectories — a
 single-stage reflectron reproduced to 1e-10 relative, four orders inside the 1 ppm budget.
 **Literature**: published instruments reproduced against published numbers, none of them
@@ -136,8 +136,8 @@ for the bare number, which is deliberate.
 | [`docs/`](docs/README.md) | architecture, model format, device templates, numerics, pressure, rendering, extensions, the CLI, and the lessons from bugs that presented as physics |
 | [`einzel-software-spec-r06.html`](einzel-software-spec-r06.html) | the original design document, kept unchanged as the record of intent |
 
-## Licence
+## License
 
-[Apache 2.0](LICENSE). No dependency in the default build is under a copyleft licence, and
+[Apache 2.0](LICENSE). No dependency in the default build is under a copyleft license, and
 that is a rule rather than a coincidence: GPL tools are invoked out-of-process where they
 are used at all, and their absence degrades a feature instead of blocking the platform.
