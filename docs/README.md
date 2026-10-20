@@ -14,6 +14,7 @@ states the intent and these pages state the reality; both are noted.
 
 | Page | What it covers |
 | --- | --- |
+| [The fork](fork.md) | Why `beambuilder/einzel` exists, its branch model (`main` mirrors upstream, `esibd` integrates), the PR body, the upstream sync routine, and what never enters the repository |
 | [Living specification](../SPEC.md) | Every r06 requirement with its status and evidence, what changed and why, and what to do next |
 | [Architecture](architecture.md) | Assemblies, layering, the four invariants, and why each exists |
 | [Model format](model-format.md) | Schema 0.9 in full: parameters, expressions, fields, electrodes (rectangle, disc, polygon, edge profile), source clouds, drives, sequences |
