@@ -5104,7 +5104,9 @@ full although about 4 per cent of the arms are cut. The Galerkin hierarchy then 
 operator as eight doubles a node and forms its first coarse level from it with three scratch
 arrays over the fine grid - 64, 20 and 27 more, all live at once at the peak. **A list of what
 a solver allocates, written by someone thinking about the numerics, lists the numerics.** The
-Astral at a 1 mm cell was billed 3.1 GiB and needs 15.3.
+Astral at a 1 mm cell was billed 3.1 GiB and needed 15.3. (The cut links have since been stored
+over their cut arms alone, which took the Galerkin figure to 149.5 and that Astral to 9.5 GiB;
+`docs/cli.md`.)
 
 Two checks said the live set was the right quantity. Under a hard heap limit the Astral at 4 mm
 completed at 279 MiB and ran out at 275, against a sampled live peak of 259 - so the collector
@@ -5262,6 +5264,15 @@ the errors the measurement now has, not the ones it used to have: the largest of
 right while samples could only miss, and wrong once they were dense enough to catch an instant
 the statement does not count - the middle of three is robust to a lone outlier either way.
 
+**And the outlier it was robust to was the sampler's own.** `GC.GetTotalMemory` after a forced
+collection is not the live set at that collection: it counts whatever the build allocated
+between the collection and the read, and a sampler thread descheduled in that gap - routine on
+a loaded four-core runner - came back to a fresh V-cycle residual, eight bytes a node of
+garbage. On PR #57's Linux run two readings of three caught it and the middle could not help.
+**Read what the collection reported about itself** (`GC.GetGCMemoryInfo`, size after less
+fragmentation), not a counter that keeps moving after it; and when an outlier only appears
+under load, load the machine on purpose before explaining it.
+
 ## A perturbation that isolates one thing must move only that thing
 
 The grounded-boundary check (`docs/numerics.md`, "A grounded face of the domain is a third
@@ -5298,6 +5309,37 @@ they appear to - the mesh with the first, every other face of the conductor with
 equal is one assertion. And **a surprising difference is a finding before it is an answer**:
 the interior volts were two things, neither the one being measured, and one of them is now an
 open item of its own.
+
+## A change that streams less memory can still be slower, by moving what the JIT inlines
+
+The cut links on #57 stopped storing every arm of every node - 96 bytes a node the smoother
+streamed on every sweep and almost never used - and measured faster on the Astral and the
+C-trap. An outside measurement then found **a whole solve 10 to 12 percent slower** on a
+four-rod quadrupole of 1.09 M nodes, three alternated pairs in a row. Both were right.
+
+**Timed per sweep, the two builds disagree about which is faster depending on the JIT tier.**
+With full optimization from the first call (`DOTNET_TieredCompilation=0`) the branch's
+smoother took 58 to 62 ms against main's 80 to 91. Under normal running, warmed up through
+dynamic PGO, main's took **37 ms and the branch's 51**: the profile-guided tier doubled main's
+speed and did almost nothing for the branch. The listing says why. Main's optimized `Smooth`
+had everything inlined, 151 inlinees and no calls in the loop; the branch's had **six calls to
+`Arm`** per free node, each passing thirteen arguments and returning two through references.
+The packed store made the cut arm's read a rank over an eight-node block, which made `Arm`
+bigger, and the inliner stopped taking it - for the common case, where no arm is cut and the
+rank never runs. The bytes saved were real and smaller than the frames added.
+
+Fixed by making the shape say what is hot: `Arm` is inlined by instruction and everything about
+a cut arm is a call to a method that never is. **29 ms against main's 38 on the quadrupole and
+24 to 25 against 36 on the linear ion trap**, the JIT listing showing `Arm` inlined and only the
+cold call left, and the potentials identical to main's to the SHA-256 on both channels of both.
+
+The rules. **A microbenchmark has to run at the tier the code runs at.** Fifteen calls through
+reflection measured on-stack-replacement code and gave a third answer; eighty warm calls gave
+the one a solve sees. **When two careful measurements disagree, look for the variable neither
+controlled** - here the inliner, which neither alternated pair could see. And **a whole-solve
+comparison on a loaded machine cannot resolve ten percent**: on this one the same work took 7.5
+to 18 s across a few minutes, while the minimum over eighty sweeps was steady to a millisecond.
+`DOTNET_JitDisasm` with `DOTNET_JitStdOutFile` works on a release runtime and takes a minute.
 
 ## A fix reaches the function it was made in, and the construction lives in several
 
@@ -5397,3 +5439,27 @@ had already decided. And **before scoping a uniqueness rule, enumerate the docum
 refuse**: two shipped templates said where the boundary was. The export fix (PR #56) met the
 same dictionary in the static channel and wrote the first half of this - a display name is not
 a key - and left the driven path for its own change, which this is.
+
+## A timeout on a shared runner measures the runner, and a fixed wait looks like work
+
+The live-session tests failed on the Windows CI runner with "Initialization timed out",
+twice on one PR and once on another, neither of which touched the server. Two things were
+going on, and only one was the failure.
+
+**The failure was a starved process start.** The tests that passed in the same run took 8 to
+17 seconds and one a full minute, against 5 on a workstation: a distribution, where a
+deadlock is a wall. Oversubscribing a workstation reproduced the shape - the handshake went
+from 0.3 s to 3.3 s at twice the cores and 15 s at six times - and a trivial Python
+subprocess had once taken over thirty seconds in the same CI phase. The test is about the
+protocol, so its start-up allowance is now three minutes rather than the client library's
+sixty seconds. **Before raising a timeout, establish that the slow cases finish**: here they
+visibly did, and that is what separates starvation from a hang that a longer timeout would
+only hide.
+
+**The other was a fixed wait that looked like the cost of the test.** Every test took five
+seconds even idle, and almost all of it was disposal: the client library waits for the
+server to exit before closing the server's input, and this server exits when its input
+closes, so the wait always ran out and the server was killed. Varying the library's
+shutdown timeout moved disposal exactly with it - 1.06, 2.06, 5.05 s - which is the
+signature of a wait rather than of work. **A duration that does not move with the work and
+does move with a timeout is a timeout.**

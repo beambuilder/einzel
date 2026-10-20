@@ -48,13 +48,13 @@ public sealed class SolveMemoryEstimateTests(ITestOutputHelper output) : IDispos
     }
 
     /// <summary>
-    /// A static volume geometry on the Galerkin hierarchy: 240 bytes a node, with its first coarse
-    /// level charged at its real size.
+    /// A static volume geometry on the Galerkin hierarchy: 149.5 bytes a node, with its first
+    /// coarse level charged at its real size.
     /// </summary>
     /// <remarks>
     /// The Astral's 17-node axis coarsens to 9, so its first level is 0.1334 of the fine grid
-    /// rather than an eighth: 241.8 bytes a node, against 241.3 measured, where the flat eighth
-    /// said 240.0.
+    /// rather than an eighth: 151.3 bytes a node, against 150.8 measured, where the flat eighth
+    /// said 149.5. With the cut links stored densely these were 241.8, 241.3 and 240.0.
     /// </remarks>
     [Fact]
     public void AStaticVolumeSolveIsBilledTheGalerkinWorkingSet()

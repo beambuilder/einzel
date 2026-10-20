@@ -160,7 +160,7 @@ public static class GeometryBuilder3D
     /// fixes a node away from the faces, which only rasterizing can answer; this assumes it
     /// does whenever there are electrodes. A geometry whose every conductor is thinner than a
     /// cell, or lies on a face, then reads as taking the Galerkin hierarchy when it will not,
-    /// and is costed at 240 bytes a node where it needs 142.
+    /// and is costed at 149.5 bytes a node where it needs about 51.
     /// </para>
     /// </remarks>
     public static SolveMemory Memory(Geometry3D geometry)
@@ -1117,13 +1117,16 @@ public static class GeometryBuilder3D
     /// ever put in a temporary reachable until the slot is reused or the method returns.
     /// Written inline in the channel loop, the temporary behind <c>mask.Cuts</c> held the
     /// previous channel's cut links through the next channel's whole solve - 96 bytes a
-    /// node, measured on the linear ion trap as 344 bytes a node for two channels against
-    /// the 248 that one working set and one kept potential account for. Setting the local
-    /// to null would not have reached it: the reference was in a slot with no name.
+    /// node while every arm was stored, measured on the linear ion trap as 344 bytes a node
+    /// for two channels against the 248 that one working set and one kept potential then
+    /// accounted for. Setting the local to null would not have reached it: the reference was
+    /// in a slot with no name.
     /// </para>
     /// <para>
     /// Before that, the loop kept each mask in the <see cref="ChannelSolve"/> it returned,
-    /// which cost 105 bytes a node a channel for the same reason at a larger scale.
+    /// which cost 105 bytes a node a channel for the same reason at a larger scale. Both are
+    /// smaller now that the cut links hold their cut arms alone - a kept mask about 11 - and
+    /// both are still wrong.
     /// </para>
     /// </remarks>
     private static ChannelSolve SolveGroup(
@@ -1400,6 +1403,8 @@ public static class GeometryBuilder3D
 
         if (cuts.CutCount > 0)
         {
+            // The packed arms grew by doubling, and are held for the whole solve.
+            cuts.TrimExcess();
             mask.Cuts = cuts;
         }
     }
@@ -1539,6 +1544,8 @@ public static class GeometryBuilder3D
 
         if (cuts.CutCount > 0)
         {
+            // The packed arms grew by doubling, and are held for the whole solve.
+            cuts.TrimExcess();
             mask.Cuts = cuts;
         }
     }

@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Einzel.Fields.Solved;
 
 /// <summary>
@@ -644,12 +646,16 @@ public static class PoissonSolver3D
     {
         var cuts = mask.Cuts;
 
-        Arm(potential, mask, cuts, i, j, k, 1, 0, 0, Arm3D.East, out var east, out var fEast);
-        Arm(potential, mask, cuts, i, j, k, -1, 0, 0, Arm3D.West, out var west, out var fWest);
-        Arm(potential, mask, cuts, i, j, k, 0, 1, 0, Arm3D.North, out var north, out var fNorth);
-        Arm(potential, mask, cuts, i, j, k, 0, -1, 0, Arm3D.South, out var south, out var fSouth);
-        Arm(potential, mask, cuts, i, j, k, 0, 0, 1, Arm3D.Up, out var up, out var fUp);
-        Arm(potential, mask, cuts, i, j, k, 0, 0, -1, Arm3D.Down, out var down, out var fDown);
+        // One read for all six arms: almost every node has none cut, and the arms that are
+        // cut are the only ones worth asking the cut links about.
+        var cut = cuts?.CutArms(i, j, k) ?? 0;
+
+        Arm(potential, mask, cuts, cut, i, j, k, 1, 0, 0, Arm3D.East, out var east, out var fEast);
+        Arm(potential, mask, cuts, cut, i, j, k, -1, 0, 0, Arm3D.West, out var west, out var fWest);
+        Arm(potential, mask, cuts, cut, i, j, k, 0, 1, 0, Arm3D.North, out var north, out var fNorth);
+        Arm(potential, mask, cuts, cut, i, j, k, 0, -1, 0, Arm3D.South, out var south, out var fSouth);
+        Arm(potential, mask, cuts, cut, i, j, k, 0, 0, 1, Arm3D.Up, out var up, out var fUp);
+        Arm(potential, mask, cuts, cut, i, j, k, 0, 0, -1, Arm3D.Down, out var down, out var fDown);
 
         // Each axis is in cell units of its own spacing, so the y and z halves are
         // scaled into x units. Those factors are exactly one on a cubic grid, and
@@ -667,10 +673,30 @@ public static class PoissonSolver3D
             + (alongZ * ((1.0 / fDown) + (1.0 / fUp)));
     }
 
+    /// <summary>One arm of the stencil: the neighbour, or the surface part of the way there.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Inlined by instruction, and the cut arm is a call.</b> Six of these run for every free
+    /// node of every sweep, and as calls they cost more than the stencil's arithmetic: thirteen
+    /// arguments and two results through references, a frame each. While the cut links were dense
+    /// the JIT inlined all six of its own accord. Once the cut arm's read became a rank over packed
+    /// arrays, the profile-guided tier stopped inlining any of them and left six calls in the
+    /// smoother's loop: <b>51 ms a sweep against main's 37</b> on a quadrupole of 1.09 M nodes, which
+    /// is the whole-solve regression reported on #57. Without the profile-guided tier the same branch
+    /// was faster than main, so the bytes it stopped streaming were never the problem.
+    /// </para>
+    /// <para>
+    /// So the common case - an arm nothing cuts - is a test of one bit and a neighbour read, and
+    /// everything about a cut arm is behind <see cref="CutArm"/>, which is never inlined: a few
+    /// percent of arms, and they should not make the other ninety-odd percent bigger.
+    /// </para>
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Arm(
         ScalarField3D potential,
         DirichletMask3D mask,
         CutLinks3D? cuts,
+        int cutArms,
         int i,
         int j,
         int k,
@@ -681,16 +707,9 @@ public static class PoissonSolver3D
         out double value,
         out double fraction)
     {
-        if (cuts is not null)
+        if ((cutArms & (1 << (int)arm)) != 0 && CutArm(cuts!, i, j, k, arm, out value, out fraction))
         {
-            var cut = cuts.Fraction(i, j, k, arm, out var surface);
-
-            if (cut < 1.0)
-            {
-                value = surface;
-                fraction = cut;
-                return;
-            }
+            return;
         }
 
         var grid = mask.Grid;
@@ -717,6 +736,17 @@ public static class PoissonSolver3D
 
         value = potential[ni, nj, nk];
         fraction = 1.0;
+    }
+
+    /// <summary>A cut arm's surface, when it lies short of the neighbour.</summary>
+    /// <returns>True with the surface's potential and fraction; false when the arm reaches the neighbour.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool CutArm(
+        CutLinks3D cuts, int i, int j, int k, Arm3D arm, out double value, out double fraction)
+    {
+        fraction = cuts.Fraction(i, j, k, arm, out value);
+
+        return fraction < 1.0;
     }
 
     /// <summary>Projects a mask onto a coarser grid, when geometry cannot be re-read.</summary>

@@ -38,6 +38,16 @@ become a feature release without being renamed twice.
   and a validity violation hatches the bottom of the picture.
 - **`einzel export` carries a solve's warnings** into each field file's header and into its
   `--json` output, and prints them on stderr.
+- **Volume solves hold far less memory, and smooth faster.** Where a conductor's surface
+  crosses between two mesh nodes, the solve records how far along and at what potential - a
+  cut link. These were stored for all six arms of every node, 96 bytes a node, although about
+  4 percent of arms are cut; they are now stored for the cut arms alone, 1.5 bytes a node and
+  16 a cut arm. A volume solve's peak falls from about 240 bytes a node to 150 on the Galerkin
+  multigrid hierarchy and from 142 to 51 on the rediscretized one, so `astral-3d` at a 1 mm
+  cell needs 9.5 GiB where it needed 15.3. The smoother runs 1.2 to 1.5 times faster on the three
+  shipped volume templates timed, and every solve gives the same potentials to the last bit.
+  `einzel estimate` bills a quarter of a cut arm a node, above every shipped template; a
+  geometry with more cut arms than that is under-billed by 16 bytes for each one past it.
 - **A scale in every 3D picture.** Stills and the cross-platform viewport carry a ruler in
   whichever corner the instrument covers least: one arm along each model axis, all the same
   round length (`10 mm`, `500 µm`),
@@ -87,9 +97,11 @@ become a feature release without being renamed twice.
   funnel's two channels looked like one solve printed twice. Each is now labeled
   `field 0 channel 0`, `field 0 channel 1`, matching the `channel` field in `--json`.
 - **`einzel estimate`'s memory figure was a fifth of the truth.** It billed every solve 48
-  bytes a node; a volume solve holds about 240 on the Galerkin multigrid hierarchy, 142 on the
-  rediscretized one and 143 on a plane, measured against real builds. `astral-3d` at a 1 mm
-  cell was quoted 3.1 GiB and needs 15.3. The estimate now counts basis channels, charges a
+  bytes a node, where a volume solve held about 240 on the Galerkin multigrid hierarchy, 142 on
+  the rediscretized one and 143 on a plane, measured against real builds: `astral-3d` at a 1 mm
+  cell was quoted 3.1 GiB and needed 15.3. The volume figures are now about 150 and 51, and
+  that `astral-3d` 9.5 GiB, since the cut links are stored for the cut arms alone (above). The
+  estimate now counts basis channels, charges a
   diffusive mixture once per species, adds what earlier elements keep, says what its figure
   counted, and says so when the peak is more than half of what the process may use on this
   machine - whether or not anything in the model is solved.

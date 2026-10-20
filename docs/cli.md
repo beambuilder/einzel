@@ -1312,10 +1312,10 @@ some restriction buffers, and nothing measured it.
 
 | solve | bytes a node at peak | measured, Release, live set sampled through the build |
 | --- | --- | --- |
-| volume, Galerkin hierarchy | 240 on a deep grid; 241.8 Astral at 1.12 M nodes, 240.9 at 8.68 M | 241.3 and 240.9 |
-| volume, rediscretized hierarchy | 141.7 | 141.9 and 141.8 segmented quadrupole at 1.09 M and 4.28 M; 141.8 C-trap |
+| volume, Galerkin hierarchy | 149.5 on a deep grid; 151.3 Astral at 1.12 M nodes, 150.4 at 8.68 M | 150.8 and 148.2 |
+| volume, rediscretized hierarchy | 51.2 | 48.7 and 48.0 segmented quadrupole at 0.55 M and 4.28 M; 47.8 C-trap at 1.08 M |
 | plane | 143.25 | 143.3 to 143.9 on four templates at 17 k to 1.05 M nodes |
-| each basis channel before the last | + 8 | 248.7 linear ion trap, two channels, against 248.9 |
+| each basis channel before the last | + 8 | 156.1 linear ion trap, two channels, against 158.4 |
 | diffusive run, per density node and per species | 263 | 248 and 259, drift tube at 66 k and 263 k nodes; each added species 248 |
 
 **The coarse levels are charged at their real size.** A grid coarsens by halving each axis's
@@ -1325,7 +1325,8 @@ axis makes it much more: 32769 by 5 by 5 coarsens to 16385 by 3 by 3, which is 0
 statement charged an eighth, 240 bytes a node on the Galerkin hierarchy; charged at the real
 size it is 241.8 on the Astral at 4 mm and 240.9 at 2 mm, against 241.3 and 240.9 measured, and
 251.9 on that thin grid. The rediscretized sum runs over the levels the solve will actually
-build, by the descent the solver itself takes, rather than over eighths all the way down.
+build, by the descent the solver itself takes, rather than over eighths all the way down. Those
+figures are from before the cut links were stored over their cut arms; each is 90.5 lower now.
 
 **The plane figure was 153.3 and is 143.25, and the sampler that checked it hid the
 difference.** The plane's peak is the instant the first coarse level replaces its cut links
@@ -1347,21 +1348,64 @@ density, next step and seed, its coefficients, its face operator and, cycle-aver
 machine is made whatever holds the peak**: it was the tail of the solved-field explanation, so a
 diffusive run through analytic fields, with no solve, was never compared at all.
 
-**The fields the old comment listed are 24 of the 240.** On the Galerkin hierarchy the peak is
-while the first coarse level is being formed: the conductor mask (9), six cut-link arms of two
-doubles each (96, allocated in full though 3 to 4 per cent of arms are cut), the potential,
-right-hand side and residual (24), the fine operator as a stored stencil (64), the forming
-scratch over the fine grid (20) and the first coarse level itself (27). **The Astral at a 1 mm
-cell was billed 3.1 GiB and needs 15.3.** A plane solve was short for the same reason, by a
-factor of three: its mask and four cut-link arms were not in the 48 either. The one plane geometry measured well
+**The fields the old comment listed are 24 of the 149.5.** On the Galerkin hierarchy the peak
+is while the first coarse level is being formed: the conductor mask (9), the cut links (5.5,
+below), the potential, right-hand side and residual (24), the fine operator as a stored
+stencil (64), the forming scratch over the fine grid (20) and the first coarse level itself
+(27). **The Astral at a 1 mm cell was billed 3.1 GiB, measured to need 15.3, and needs 9.5
+now that the cut links are sparse.** A plane solve was short for the same reason, by a factor
+of three: its mask and four cut-link arms were not in the 48 either. The one plane geometry measured well
 under its statement is the mirror pair, whose boards are edge profiles with no cut cells - 73
 bytes a node at its shipped 17 k nodes, over-billed in the safe direction.
 
 **Which hierarchy is asked of the solver**, by `PoissonSolver3D.UsesGalerkin` - the same
 function the solve calls, on what the geometry declares rather than on a rasterized mask. It
 cannot know whether an electrode fixes an interior node without rasterizing, so it assumes one
-does; a geometry whose every conductor is thinner than a cell can be billed the Galerkin 240
-where it will use 142. That is the safe direction.
+does; a geometry whose every conductor is thinner than a cell can be billed the Galerkin 149.5
+where it will use 51. That is the safe direction.
+
+**The cut links are stored over the cut arms alone.** They were the largest single term when
+first measured: a fraction and a potential for each of six arms of every node, 96 bytes a node,
+allocated whatever was cut - and 3.6 percent of arms are cut on the Astral at 4 mm, 1.0 on the
+C-trap. A node now carries a byte naming its cut arms, every eight nodes share an `int`
+counting the cut arms before them, and the fractions and potentials are packed in node order:
+**1.5 bytes a node and 16 a cut arm**, 5.0 a node on the Astral and 2.4 to 3.2 on the other
+shipped volume templates. The Galerkin peak fell from 240 to 149.5 and the rediscretized one from
+141.7 to 51.2.
+
+*How many arms are cut is a property of the geometry, and the statement does not rasterize*, so
+it bills an allowance: a quarter of a cut arm a node, 4 bytes, against the densest shipped
+template's 0.217 (the Astral at its shipped mesh, and the compact Astral, which is the same
+mesh scaled; the linear ion trap 0.106, the segmented quadrupole 0.077, the C-trap 0.058). `CutArmAllowanceTests` measures every shipped volume
+template against it. The density falls as the mesh refines - cut arms lie on surfaces, so they
+go as one over the cell size squared while nodes go as one over its cube - so the allowance is
+tightest where a solve is smallest and over-bills a fine mesh. A geometry denser than a quarter
+of a cut arm a node is under-billed by 16 bytes for each one past it, and that is the one way
+this statement can now run under.
+
+*The design question was the read, not the saving.* The smoother asks about every arm of every
+free node on every sweep, and almost none are cut, so the uncut case is one byte read for all six
+arms; a cut arm costs a rank (the block's count and a population count over its eight bytes) and
+two reads. It made the smoother **faster**, because a sweep no longer streams 96 bytes a node it
+does not need: 34 to 36 million node-sweeps a second became 43 to 44 on the Astral at 4 mm, and
+30 to 32 became 42 to 43 on the C-trap, Release, old and new binaries alternated. **Every solve
+is bit-identical**: the same SHA-256 over every node's potential, the same cycles, sweeps and
+residual bits, on all seven channels of the six shipped volume models.
+
+*And for a while it was slower, which an outside measurement found.* A whole solve of a four-rod
+quadrupole at 1.09 M nodes ran 10 to 12 percent longer than on `main`. The bytes were not the
+cause: the packed read made the per-arm helper `Arm` bigger, and the profile-guided tier of the
+JIT stopped inlining it, leaving six calls of thirteen arguments in the loop for every free node
+where `main`'s smoother had none. Fully optimized from the first call the branch was the faster
+one (58 to 62 ms a sweep against 80 to 91); warmed up, as a solve runs, it was 51 against 37.
+`Arm` is now inlined by instruction and everything about a cut arm is behind a call that never
+is, so the common case is one bit test and a neighbor read: **29 ms a sweep against `main`'s 37
+to 38 on that quadrupole, and 24 to 25 against 36 to 37 on the linear ion trap** at the same
+node count, minimum over eighty warm sweeps, bit-identical to `main` on both channels of both.
+Whole builds by process CPU time, best of three: 8.4 to 9.0 s against 8.9 to 9.8 on the
+quadrupole, 12.6 to 15.1 against 17.0 to 22.2 on the trap. Which of two careful timings to
+believe turned on a variable neither controlled - the inliner - and a timing of the smoother
+alone has to run at the tier a solve runs at; `docs/lessons.md`.
 
 **Channels are solved one at a time**, each keeping only its potential, so a driven geometry
 costs one working set plus 8 bytes a node for each channel before the last. That was not true
@@ -1389,20 +1433,25 @@ if it is over.
 `ScalarField3D` refuses a grid past 64 M nodes as "about half a gigabyte per field and three
 fields to a solve", which is 1.5 GB; `fix/grid-too-large-is-a-refusal`, pending when this was
 measured and since merged (#48), moved the same number into `VolumeMesh.MaximumNodes` and
-refuses it at validation, calling it a judgment resting on the fields alone. At 240 bytes a node a 64 M-node volume solve holds
-**14.3 GiB** live, ten times what the message says.
+refuses it at validation, calling it a judgment resting on the fields alone. At 240 bytes a
+node a 64 M-node volume solve held **14.3 GiB** live, ten times what the message says; with the
+cut links stored over their cut arms it holds **8.9 GiB** on the Galerkin hierarchy, still six
+times.
 
 *Conclusion: as a memory limit it is the wrong kind of rule.* Memory is a property of the
 machine, and validation is a property of the document - a model that validates on one machine
-must validate on every machine. 14.3 GiB fits on this 64 GB workstation with room to spare and
-leaves a 16 GB laptop almost nothing, so no single node count is right for both. What the *code*
-cannot hold is much further out: cut-link and stencil offsets are `node * 6` in an `int`, and a
-`double[]` holds at most 2,147,483,591 elements, and both stop at about **358 M nodes**, 5.6x
-the limit. The recommendation for when that branch lands is to refuse at validation only what
+must validate on every machine. 8.9 GiB fits on this 64 GB workstation with room to spare and
+fills most of a 16 GB laptop, so no single node count is right for both. What the *code*
+cannot hold is much further out: the Galerkin hierarchy's stored stencil is `node * 6` in an
+`int` and a `double[]` of six entries a node, which holds at most 2,147,483,591 elements, and
+both stop at about **358 M nodes**, 5.6x the limit. The cut links stopped there too until they
+were stored over their cut arms; the rediscretized hierarchy now runs to an array's two billion
+nodes. The recommendation for when that branch lands is to refuse at validation only what
 the code cannot index, and leave memory to the estimate, which now states the live peak and
-compares it with what this machine offers. Keeping 64 M is defensible as a judgement - "about
-15 GiB, a workstation's worth" - but it should say that rather than quote three fields. The
-Astral at 1 mm is 68.3 M nodes, 6.7 percent over, and needs 15.3 GiB. Not changed when this
+compares it with what this machine offers. Keeping 64 M is defensible as a judgment - "about
+9 GiB, a workstation's worth" - but it should say that rather than quote three fields. The
+Astral at 1 mm is 68.3 M nodes, 6.7 percent over, and needs 9.5 GiB (15.3 while the cut links
+stored every arm). Not changed when this
 was measured, because the limit then lived on an unmerged branch; that branch has landed, and
 restating the limit is item 10 of SPEC.md's "What to do next".
 

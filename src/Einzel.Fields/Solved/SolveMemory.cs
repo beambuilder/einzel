@@ -35,11 +35,17 @@ public sealed record SolveMemory(
 /// <para>
 /// <b>Measured, then written as arithmetic over the arrays.</b> The estimate this replaces
 /// quoted 48 bytes a node for every solve - potential, right-hand side, residual and "the
-/// correction and restriction buffers" - and a volume solve holds five times that. What it
-/// left out is the geometry: a conductor mask, and six cut-link arms of two doubles a node,
-/// which is 96 bytes before a single field is allocated. The Galerkin hierarchy then
+/// correction and restriction buffers" - and a volume solve held five times that. What it
+/// left out is the geometry: a conductor mask, and cut links that were six arms of two
+/// doubles a node, 96 bytes before a single field was allocated. The Galerkin hierarchy then
 /// assembles the fine operator as a stored stencil of eight doubles a node, and forms the
 /// first coarse level from it with three scratch arrays over the fine grid.
+/// </para>
+/// <para>
+/// <b>The cut links are now stored over the cut arms alone</b>, which took them from 96 bytes
+/// a node to 1.5 and 16 a cut arm, and the volume peaks down by 90.5 with them. That term is
+/// the one here that depends on the geometry, so it is billed as an allowance; see
+/// <see cref="VolumeCutArmsPerNode"/>.
 /// </para>
 /// <para>
 /// Peak live set measured by forcing full collections through a build, Release, on the shipped
@@ -48,11 +54,13 @@ public sealed record SolveMemory(
 /// </para>
 /// <list type="table">
 /// <item><description>
-/// volume, Galerkin: astral-3d at 1.12 M nodes, <b>241.8</b> bytes a node
+/// volume, Galerkin: astral-3d at 1.12 M and 8.68 M nodes, <b>150.8</b> and <b>148.2</b> bytes
+/// a node; <b>241.8</b> and <b>240.9</b> with dense cut links
 /// </description></item>
 /// <item><description>
-/// volume, rediscretized: segmented-quadrupole at 1.09 M and 4.28 M nodes, <b>141.9</b> and
-/// <b>141.8</b> - flat, so no fixed cost is hiding in the per-node figure
+/// volume, rediscretized: segmented-quadrupole at 0.55 M and 4.28 M nodes, <b>48.7</b> and
+/// <b>48.0</b>, C-trap at 1.08 M, <b>47.8</b>; <b>141.9</b>, <b>141.8</b> and <b>141.8</b> with
+/// dense cut links
 /// </description></item>
 /// <item><description>
 /// plane: quadrupole at 0.26 M and 1.05 M nodes, <b>143.4</b> and <b>143.3</b>; einzel-lens
@@ -63,8 +71,10 @@ public sealed record SolveMemory(
 /// </description></item>
 /// </list>
 /// <para>
-/// The arithmetic below reproduces both to 1 percent. It is the arithmetic that is used,
-/// rather than the measurements, so that each term names the array responsible for it.
+/// The arithmetic below reproduces the Galerkin and plane figures to 1 percent and the
+/// rediscretized ones to about 7, conservatively - the cut-arm allowance those geometries do not
+/// use. It is the arithmetic that is used, rather than the measurements, so that each term names
+/// the array responsible for it.
 /// </para>
 /// <para>
 /// <b>Not counted: an instant.</b> A sampler this dense now and then reads about 7 bytes a node
@@ -79,12 +89,38 @@ public static class SolveMemoryModel
     /// <summary>A volume conductor mask: a fixed flag and a held potential per node.</summary>
     public const double VolumeMask = sizeof(bool) + sizeof(double);
 
-    /// <summary>Volume cut links: six arms, each a fraction and a surface potential.</summary>
+    /// <summary>Volume cut links per node: a byte naming the cut arms, and a running count per eight nodes.</summary>
+    public const double VolumeCutIndex = sizeof(byte) + (sizeof(int) / 8.0);
+
+    /// <summary>One cut arm, packed: its fraction and its surface potential.</summary>
+    public const double VolumeCutArm = 2 * sizeof(double);
+
+    /// <summary>Cut arms billed per node, since how many there are is not known without rasterizing.</summary>
     /// <remarks>
-    /// The largest single term, and allocated in full whatever fraction of arms is cut - on
-    /// the Astral at 4 mm, 244,664 cut arms among 6.7 million.
+    /// <para>
+    /// Above the densest shipped geometry: the Astral at its 4 mm cell has 0.217 cut arms a node
+    /// (3.6 percent of arms) and the compact Astral, the same mesh scaled, the same; the linear ion
+    /// trap 0.106, the segmented quadrupole 0.077, the C-trap 0.058 and the parallel-plate
+    /// example 0.045, each at its shipped mesh.
+    /// </para>
+    /// <para>
+    /// <b>The density falls as the mesh refines</b>, because cut arms lie on surfaces: their
+    /// number goes as one over the cell size squared and the node count as one over its cube.
+    /// So the allowance is tightest at the coarse meshes, where the whole solve is small, and
+    /// over-bills a fine one - the Astral at 1 mm has about a quarter of its 4 mm density. A
+    /// geometry denser than this is under-billed by 16 bytes for each cut arm past a quarter a
+    /// node.
+    /// </para>
     /// </remarks>
-    public const double VolumeCutLinks = 6 * 2 * sizeof(double);
+    public const double VolumeCutArmsPerNode = 0.25;
+
+    /// <summary>Volume cut links: the per-node index, and the billed cut arms packed beside it.</summary>
+    /// <remarks>
+    /// Was 96 bytes a node - six arms of two doubles each, allocated for every node although
+    /// 3.6 percent of arms are cut on the Astral at 4 mm - and the largest single term. Now
+    /// 5.5: the store holds the cut arms alone, and is 5.0 on that same Astral.
+    /// </remarks>
+    public const double VolumeCutLinks = VolumeCutIndex + (VolumeCutArmsPerNode * VolumeCutArm);
 
     /// <summary>The potential, the right-hand side and the residual.</summary>
     public const double Fields = 3 * sizeof(double);
@@ -114,8 +150,8 @@ public static class SolveMemoryModel
     /// being formed from the fine stencil.
     /// </summary>
     /// <remarks>
-    /// 240 bytes a node, against a measured 241.8. After the hierarchy is built the stencil and
-    /// the scratch are garbage and the solve holds about 170.
+    /// 149.5 bytes a node, against a measured 150.8; 240 with the cut links stored densely. After
+    /// the hierarchy is built the stencil and the scratch are garbage and the solve holds about 80.
     /// </remarks>
     public const double VolumeGalerkinPeak =
         VolumeMask + VolumeCutLinks + Fields + VolumeStencil + GalerkinForming + GalerkinFirstLevel;
@@ -126,8 +162,8 @@ public static class SolveMemoryModel
     /// <remarks>
     /// The fine level's mask, cut links and fields, a fine residual, and on each coarse level a
     /// mask, a restricted residual, a correction and a residual of its own - 33 bytes a coarse
-    /// node, summed over levels an eighth the size of the one above. 141.7 bytes a node, against
-    /// a measured 141.9.
+    /// node, summed over levels an eighth the size of the one above. 51.2 bytes a node, against
+    /// 47.8 to 48.7 measured; 141.7 with the cut links stored densely.
     /// </remarks>
     public const double VolumeRediscretizedPeak =
         VolumeMask + VolumeCutLinks + Fields + sizeof(double)

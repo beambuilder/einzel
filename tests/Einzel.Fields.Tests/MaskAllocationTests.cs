@@ -123,18 +123,30 @@ public sealed class MaskAllocationTests(ITestOutputHelper output)
     /// node besides.
     /// </summary>
     /// <remarks>
-    /// What the mask keeps is asked of <see cref="SolveMemoryModel"/>, the statement the
-    /// memory estimate bills against, so a change to how cut links are stored moves this bound
-    /// with it rather than leaving it to pass or fail on a number written here. The allowance
-    /// on top is per-mask bookkeeping - the bounding-box ranges and the cull's candidate lists -
-    /// spread over the nodes, and is 0.37 of a byte a node here. The old entry tests allocated
-/// 12,588 bytes a node on this geometry.
+    /// <para>
+    /// What the mask keeps is read off the mask: nine bytes a node of its own and what its cut
+    /// links hold, which the statement the memory estimate bills against must cover. The
+    /// allowance on top is per-mask bookkeeping - the bounding-box ranges and the cull's
+    /// candidate lists - spread over the nodes, and is 0.37 of a byte a node here. The old
+    /// entry tests allocated 12,588 bytes a node on this geometry.
+    /// </para>
+    /// <para>
+    /// <b>And the cut links' growth, which is per cut arm rather than per node.</b> They are
+    /// packed as they are found and grow by doubling, so the arrays they outgrow and the copy a
+    /// trim makes come to less than four times what they finally hold: under twice the last
+    /// capacity, which is under twice the count, plus the count again. On this geometry that is
+    /// 3.1 times. When the cut links held every arm of every node there was nothing to grow and
+    /// the bound was what the statement billed.
+    /// </para>
     /// </remarks>
     [Fact]
     public void AVolumeMaskAllocatesOnlyWhatItKeeps()
     {
         var geometry = new Geometry3D(-8.0 * Mm, -8.0 * Mm, -8.0 * Mm, 8.0 * Mm, 8.0 * Mm, 8.0 * Mm, 0.5 * Mm, Curved());
         var grid = GeometryBuilder3D.BuildGrid(geometry);
+
+        var kept = 0.0;
+        var packed = 0.0;
 
         double PerNode()
         {
@@ -145,17 +157,21 @@ public sealed class MaskAllocationTests(ITestOutputHelper output)
             Assert.True(built.Cuts?.CutCount > 0, "no arm was cut, so no entry test was run");
             Assert.True(built.InteriorFixedCount > 0, "no node is inside metal");
 
+            kept = SolveMemoryModel.VolumeMask + (built.Cuts.Bytes / (double)grid.NodeCount);
+            packed = built.Cuts.CutCount * SolveMemoryModel.VolumeCutArm / grid.NodeCount;
+
             return allocated / (double)grid.NodeCount;
         }
 
         var cheapest = Enumerable.Range(0, 5).Select(_ => PerNode()).Min();
-        var kept = SolveMemoryModel.VolumeMask + SolveMemoryModel.VolumeCutLinks;
 
         output.WriteLine(
             $"{grid.CountX}x{grid.CountY}x{grid.CountZ} nodes: {cheapest:F2} bytes a node allocated, "
-            + $"against {kept} the mask keeps");
+            + $"against {kept:F2} the mask keeps, {packed:F2} of it packed cut arms; "
+            + $"{SolveMemoryModel.VolumeMask + SolveMemoryModel.VolumeCutLinks} billed");
 
-        Assert.InRange(cheapest, kept, kept + 1.0);
+        Assert.InRange(kept, 0.0, SolveMemoryModel.VolumeMask + SolveMemoryModel.VolumeCutLinks);
+        Assert.InRange(cheapest, kept, kept + (4.0 * packed) + 1.0);
     }
 
     /// <summary>Four curved electrodes, disjoint, two of them long enough to borrow from the pool.</summary>

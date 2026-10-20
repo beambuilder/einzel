@@ -26,10 +26,11 @@ public sealed record ElementEstimate
     /// <summary>The most this element's solve holds live at once, in mebibytes.</summary>
     /// <remarks>
     /// The solver's own statement of what it allocates (<c>SolveMemoryModel</c>), measured
-    /// against real builds: about 240 bytes a node for a volume solve on the Galerkin
-    /// hierarchy, 142 on the rediscretized one, 153 for a plane solve, plus 8 a node for each
+    /// against real builds: about 150 bytes a node for a volume solve on the Galerkin
+    /// hierarchy, 51 on the rediscretized one, 153 for a plane solve, plus 8 a node for each
     /// basis channel solved before the last. It was 48 for all three, which put the Astral at
-    /// a 1 mm cell at 3.1 GiB where it needs 15.4.
+    /// a 1 mm cell at 3.1 GiB where it needed 15.3, and needs 9.5 now that the cut links hold
+    /// their cut arms alone.
     /// </remarks>
     public required double MemoryMiB { get; init; }
 
@@ -734,11 +735,12 @@ public static class EstimateCommand
 
                 // THE SOLVER'S OWN STATEMENT OF WHAT IT HOLDS, not a constant here. This was
                 // 48 bytes a node - three fields and some restriction buffers - and a volume
-                // solve holds five times that: the conductor mask and its six cut-link arms
-                // are 105 bytes before a field is allocated, and the Galerkin hierarchy then
-                // stores the fine operator and forms its first coarse level from it. Measured
-                // at 241.8 bytes a node on the Astral; the Astral at a 1 mm cell was billed
-                // 3.1 GiB and needs about 15.
+                // solve held five times that: the conductor mask and cut links storing all
+                // six arms of every node were 105 bytes before a field was allocated, and the
+                // Galerkin hierarchy then stores the fine operator and forms its first coarse
+                // level from it. Measured at 241.8 bytes a node on the Astral then, and 150.8
+                // with the cut links stored over their cut arms; the Astral at a 1 mm cell was
+                // billed 3.1 GiB and needs about 9.5.
                 var volumePlan = Fields.Solved.GeometryBuilder3D.Memory(declared);
                 var volumeMemory = volumePlan.PeakBytes / Mebibyte;
 

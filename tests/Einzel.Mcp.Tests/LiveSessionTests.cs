@@ -91,14 +91,35 @@ public sealed class LiveSessionTests(ITestOutputHelper output) : IDisposable
     }
 
     /// <summary>The server as a client actually reaches it: a launched process.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Three minutes to initialize, not the client library's sixty seconds.</b> These
+    /// failed on the Windows CI runner with "Initialization timed out" on PRs that did not
+    /// touch the server, and the timings say why: the tests that passed in the same run took
+    /// 8 to 17 seconds against 5 on an idle workstation, and one took a full minute. A hang
+    /// does not finish at all; that is a spread of slow process starts. A cold server start
+    /// is a few hundred milliseconds of JIT and reflection, and on four cores shared with a
+    /// dozen test hosts it gets a sliver of a core: oversubscribing a workstation twice over
+    /// took the handshake from 0.3 s to 3.1-3.5 s, and in the same CI phase a trivial Python
+    /// subprocess once took over thirty. What these tests are about is the protocol, not how
+    /// fast a starved process starts.
+    /// </para>
+    /// <para>
+    /// <b>One second to shut down, not five.</b> The client library (ModelContextProtocol
+    /// 2.2.0) waits for the server to exit <i>before</i> it closes the server's input, and
+    /// this server exits when its input closes - so every disposal waited the whole
+    /// <see cref="StdioClientTransportOptions.ShutdownTimeout"/> and then killed it: 5.05 s
+    /// at the default, 1.06 s at one second, 2.06 at two. That was half of every test's time
+    /// here. The server's own side of shutdown is <see cref="TheServerLeavesWhenItsInputCloses"/>,
+    /// because this path never exercises it.
+    /// </para>
+    /// </remarks>
     private static async Task<McpClient> JoinAsync(string modelPath, string as_, string version)
     {
         // The apphost the build produces, not "dotnet <dll>": under `dotnet test` the
         // running process is the test host, which is itself an apphost, so handing it a
         // dll makes it try to launch as a self-contained app and fail.
-        var server = Path.Combine(
-            AppContext.BaseDirectory,
-            OperatingSystem.IsWindows() ? "einzel-mcp.exe" : "einzel-mcp");
+        var server = ServerPath();
 
         Assert.True(File.Exists(server), $"the server was not copied to {server}");
 
@@ -107,12 +128,74 @@ public sealed class LiveSessionTests(ITestOutputHelper output) : IDisposable
             Name = "einzel",
             Command = server,
             Arguments = [modelPath, "--human", "mike"],
+            ShutdownTimeout = TimeSpan.FromSeconds(1),
         });
 
         return await McpClient.CreateAsync(transport, new McpClientOptions
         {
             ClientInfo = new Implementation { Name = as_, Version = version },
+            InitializationTimeout = TimeSpan.FromMinutes(3),
         });
+    }
+
+    /// <summary>The launched server, as <see cref="JoinAsync"/> finds it.</summary>
+    private static string ServerPath() => Path.Combine(
+        AppContext.BaseDirectory,
+        OperatingSystem.IsWindows() ? "einzel-mcp.exe" : "einzel-mcp");
+
+    /// <summary>The server goes away when its client does: its input closes and it exits, cleanly.</summary>
+    /// <remarks>
+    /// The client library never lets this happen - it kills the server after waiting, see
+    /// <see cref="JoinAsync"/> - so without this nothing checks the server's half of the
+    /// shutdown that the stdio transport defines. Measured at 0.02 to 0.06 s; the bound is
+    /// generous because a loaded runner starts processes slowly, and a server that ignored
+    /// the end of its input would never exit at all.
+    /// </remarks>
+    [Fact]
+    public async Task TheServerLeavesWhenItsInputCloses()
+    {
+        var model = WriteModel();
+        var start = new System.Diagnostics.ProcessStartInfo(ServerPath())
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        start.ArgumentList.Add(model);
+        start.ArgumentList.Add("--human");
+        start.ArgumentList.Add("mike");
+
+        using var server = System.Diagnostics.Process.Start(start)!;
+
+        // Drained so neither pipe can fill and block the server on a write.
+        var stdout = server.StandardOutput.ReadToEndAsync();
+        var stderr = server.StandardError.ReadToEndAsync();
+
+        // Closed at once: a server that has not reached its first read meets the same end
+        // of input when it gets there.
+        server.StandardInput.Close();
+
+        var exited = true;
+
+        try
+        {
+            using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+
+            await server.WaitForExitAsync(limit.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            exited = false;
+            server.Kill(entireProcessTree: true);
+        }
+
+        output.WriteLine($"stderr: {(await stderr).Trim()}");
+
+        Assert.True(exited, "the server did not exit after its input closed");
+        Assert.Equal(0, server.ExitCode);
+        Assert.Equal(string.Empty, await stdout);
     }
 
     private static JsonElement Result(CallToolResult call)

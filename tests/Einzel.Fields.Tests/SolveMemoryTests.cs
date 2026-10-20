@@ -21,10 +21,11 @@ public sealed class MemoryMeasurement;
 /// <remarks>
 /// <para>
 /// <c>einzel estimate</c> reported 48 bytes a node for every solve, from a comment listing
-/// three fields and some restriction buffers, and nothing measured it. A volume solve holds
-/// five times that: the conductor mask and its six cut-link arms are 105 bytes a node before a
-/// field is allocated, and the Galerkin hierarchy stores the fine operator and forms its first
-/// coarse level from it. The Astral at a 1 mm cell was billed 3.1 GiB and needs 15.
+/// three fields and some restriction buffers, and nothing measured it. A volume solve held
+/// five times that: the conductor mask and cut links storing all six arms of every node were
+/// 105 bytes a node before a field was allocated, and the Galerkin hierarchy stores the fine
+/// operator and forms its first coarse level from it. The Astral at a 1 mm cell was billed
+/// 3.1 GiB and needed 15. With the cut links stored over the cut arms alone it needs about 9.5.
 /// </para>
 /// <para>
 /// <b>Measured as a slope between two mesh sizes</b>, so that whatever the process holds
@@ -32,6 +33,13 @@ public sealed class MemoryMeasurement;
 /// is bytes a node. The live set is sampled by forcing a full collection every few
 /// milliseconds through the build and keeping the largest; a sample can only miss the peak and
 /// read low, which is why the band below is wider under the prediction than over it.
+/// </para>
+/// <para>
+/// <b>Against the arithmetic with the geometry's real cut arms</b>, not the billed quarter of
+/// an arm a node: the allowance is 5.5 bytes a node where a sphere or two slabs store under 2,
+/// and on the rediscretized hierarchy's 51 that is 7 percent of a 10 percent band. The sphere
+/// read 0.92 to 0.93 of the billed figure on an idle twenty-core machine and 0.896 on a CI
+/// runner, with the solver holding exactly what it held on the dense store, which read 1.00.
 /// </para>
 /// <para>
 /// <b>The upper edge is the one that matters.</b> An estimate that runs under is discovered by
@@ -54,10 +62,16 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     }
 
     /// <summary>The rediscretized hierarchy's peak, per node, against a fat sphere at two meshes.</summary>
+    /// <remarks>
+    /// At 35,937 and 274,625 nodes rather than 4,913 and 35,937. The smaller pair's larger
+    /// build is 1.6 MiB, and its slope read 0.87 to 0.93 of the statement from one process to
+    /// the next on one idle machine, and 0.90 on a CI runner: 50 kB of scatter in a 1.3 MiB
+    /// difference. On the larger pair the three readings of a build agree to a byte a node.
+    /// </remarks>
     [Fact]
     public void ARediscretizedBuildHoldsWhatItsStatementSays()
     {
-        var (predicted, measured, galerkin) = Slope(Sphere, 0.00125, 0.000625);
+        var (predicted, measured, galerkin) = Slope(Sphere, 0.000625, 0.0003125);
 
         Assert.False(galerkin, "a fat sphere coarsens to a small bottom and keeps the cheap hierarchy");
         Assert.InRange(measured / predicted, 0.90, 1.02);
@@ -74,18 +88,31 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     /// that was removed, a temporary in the loop still held the previous channel's cut links,
     /// because a method run once executes as first-tier JIT code and first-tier code keeps
     /// every temporary reachable until its slot is reused. The linear ion trap measured 353,
-    /// then 344, bytes a node for two channels, against 248.
+    /// then 344, bytes a node for two channels, against 248 - when the cut links stored every
+    /// arm.
     /// </para>
     /// <para>
     /// Asserted as the difference between a two-channel build and the same geometry with its
     /// drive removed, at one mesh: everything else is the same build, so what is left is what
     /// the second channel costs.
     /// </para>
+    /// <para>
+    /// <b>At 275 thousand nodes, after a warm-up build of each kind.</b> With the cut links
+    /// stored over their cut arms a kept mask is 11 bytes a node rather than 105, and at the
+    /// 36 thousand nodes this ran at, that is 400 kB - the size of what a first build allocates
+    /// for itself and charges to whichever measurement comes first. Restoring the kept mask read
+    /// 11.4 there, under the bound, because the one-channel reference had read 8 high.
+    /// </para>
     /// </remarks>
     [Fact]
     public void ASecondChannelCostsAPotentialNotAMask()
     {
-        const double cell = 0.0005;
+        const double cell = 0.00025;
+
+        // Each path built once, small, so the first measurement is not charged for the
+        // allocations a first call makes.
+        GeometryBuilder3D.BuildField(Plates(0.001));
+        GeometryBuilder3D.BuildField(TwoChannelPlates(0.001));
 
         var one = Plates(cell);
         var two = TwoChannelPlates(cell);
@@ -106,9 +133,12 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
             + $"two {peakTwo / planOne.Nodes:F1}; the second costs {extra:F1} "
             + $"(predicted {(planTwo.PeakBytes - planOne.PeakBytes) / planOne.Nodes:F1})");
 
-        // A kept mask would be 105 and a kept set of cut links 96, so anything past a few
-        // tens is one of them back.
-        Assert.InRange(extra, 0.0, 30.0);
+        // A kept mask is the conductor mask's 9 bytes a node and its cut links' 2 - an index
+        // of 1.5 and these slabs' cut arms - so 11 on top of the potential's 8, and the bound
+        // sits between. It was 30 while a kept mask was 105. Kept cut links alone are 2 now,
+        // inside this measurement's noise: the defect that held them is defused by the store
+        // shrinking rather than caught here.
+        Assert.InRange(extra, 0.0, 14.0);
     }
 
     /// <summary>
@@ -136,7 +166,9 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
         Assert.True(plan.Galerkin, "a 147,465-node bottom is above the rediscretized limit");
 
         const double firstLevel = (16385.0 * 3 * 3) / (32769.0 * 5 * 5);
-        const double expected = 9 + 96 + 24 + 64 + 20 + (27.0 * 8 * firstLevel);
+        // The mask 9; the cut links' index 1.5 and a quarter of a 16-byte cut arm billed; the
+        // fields 24, the stored stencil 64 and the forming scratch 20.
+        const double expected = 9 + 1.5 + (0.25 * 16) + 24 + 64 + 20 + (27.0 * 8 * firstLevel);
 
         output.WriteLine(
             $"first level {firstLevel:F4} of the fine grid: {plan.PeakBytes / plan.Nodes:F2} B/node, "
@@ -291,21 +323,44 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
         var planSmall = GeometryBuilder3D.Memory(small);
         var planLarge = GeometryBuilder3D.Memory(large);
 
+        // The statement bills a quarter of a cut arm a node for every geometry, since it does
+        // not rasterize; these geometries have a hundredth. What a build holds is the arithmetic
+        // over its arrays with the cut arms it really has, so that is what the slope is held
+        // to, and the allowance over the real count is CutArmAllowanceTests' claim.
+        var armsSmall = WithRealCutArms(small, planSmall);
+        var armsLarge = WithRealCutArms(large, planLarge);
+
         var peakSmall = PeakLive(() => GeometryBuilder3D.BuildField(small).Field);
         var peakLarge = PeakLive(() => GeometryBuilder3D.BuildField(large).Field);
 
         var nodes = (double)(planLarge.Nodes - planSmall.Nodes);
-        var predicted = (planLarge.PeakBytes - planSmall.PeakBytes) / nodes;
+        var billed = (planLarge.PeakBytes - planSmall.PeakBytes) / nodes;
+        var predicted = (armsLarge - armsSmall) / nodes;
         var measured = (peakLarge - peakSmall) / nodes;
 
         output.WriteLine(
             $"{planSmall.Nodes:N0} -> {planLarge.Nodes:N0} nodes, {(planLarge.Galerkin ? "galerkin" : "rediscretized")}: "
-            + $"predicted {predicted:F1} B/node, measured {measured:F1} "
+            + $"billed {billed:F1} B/node, predicted with the real cut arms {predicted:F1}, measured {measured:F1} "
             + $"(peaks {peakSmall / 1048576.0:F1} and {peakLarge / 1048576.0:F1} MiB)");
 
         Assert.Equal(planSmall.Galerkin, planLarge.Galerkin);
 
         return (predicted, measured, planLarge.Galerkin);
+    }
+
+    /// <summary>
+    /// The statement's peak with this geometry's cut arms in place of the billed allowance.
+    /// </summary>
+    /// <remarks>
+    /// A quarter of a cut arm a node is 5.5 bytes a node; a 3 mm sphere at these meshes stores
+    /// 1.6 to 1.9, and two slabs less. Over the rediscretized hierarchy's 51 that is 7 percent
+    /// of the band, spent before a build is sampled.
+    /// </remarks>
+    private static double WithRealCutArms(Geometry3D geometry, SolveMemory plan)
+    {
+        var cuts = GeometryBuilder3D.BuildMask(geometry, GeometryBuilder3D.BuildGrid(geometry)).Cuts;
+
+        return plan.PeakBytes - (SolveMemoryModel.VolumeCutLinks * plan.Nodes) + (cuts?.Bytes ?? 0);
     }
 
     /// <summary>The most a build holds reachable at once, above what was live before it.</summary>
@@ -328,13 +383,21 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     /// </para>
     /// <para>
     /// <b>The middle of three, not the largest.</b> Sampled this densely a build's peak is
-    /// caught nearly every time, and what is left are outliers in both directions: a build
-    /// whose samples miss its peak, and, now and then, one that reads about 7 bytes a node
-    /// over the statement - once on the Linux CI runner in the Galerkin build, once in WSL in
-    /// the two-channel plane, never on demand. That is about one grid-sized array, consistent
-    /// with catching the instant a new array exists beside the one it replaces. The largest of
-    /// three kept that outlier and failed CI on it; the middle discards a lone outlier either
-    /// way, while an array a build really keeps is in all three readings and still fails.
+    /// caught nearly every time, and what is left is a build whose samples miss its peak. The
+    /// middle discards a lone outlier either way, while an array a build really keeps is in all
+    /// three readings and still fails.
+    /// </para>
+    /// <para>
+    /// <b>What survived the collection, not the heap after it.</b> This read
+    /// <see cref="GC.GetTotalMemory(bool)"/> after the forced collection, which counts everything
+    /// allocated since - and the build thread does not stop while the sampler reads. A sampler
+    /// descheduled between the two calls came back to find the next V-cycle's residual allocated,
+    /// eight bytes a node of garbage, and reported it as held: about 7 bytes a node over the
+    /// statement, once on the Linux CI runner and once in WSL before the middle of three, and in
+    /// two readings of three on PR #57's Linux run, where the middle of three could not discard
+    /// it. Reproduced in WSL by loading the four cores a test was pinned to: 153.4 and 153.7
+    /// against 147.0 in two runs of five, never unloaded. The collector's own account of the
+    /// collection it just finished has no such window.
     /// </para>
     /// </remarks>
     private static double PeakLive(Func<object> build)
@@ -345,7 +408,22 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
             GC.WaitForPendingFinalizers();
             GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
 
-            return GC.GetTotalMemory(forceFullCollection: false);
+            return SurvivedLastFullCollection();
+        }
+
+        // What the last full blocking collection left live, read from that collection's own
+        // record: the generations' sizes after it, less the free space between their objects.
+        static long SurvivedLastFullCollection()
+        {
+            var info = GC.GetGCMemoryInfo(GCKind.FullBlocking);
+            var live = 0L;
+
+            foreach (var generation in info.GenerationInfo)
+            {
+                live += generation.SizeAfterBytes - generation.FragmentationAfterBytes;
+            }
+
+            return live;
         }
 
         static double Once(Func<object> build)
@@ -364,7 +442,7 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
 
                     GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: false);
 
-                    peak = Math.Max(peak, GC.GetTotalMemory(forceFullCollection: false));
+                    peak = Math.Max(peak, SurvivedLastFullCollection());
 
                     // As long again as the collection took: the build runs at least half the time.
                     var resume = clock.Elapsed + (clock.Elapsed - started);
