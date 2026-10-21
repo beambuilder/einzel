@@ -19,6 +19,14 @@ public sealed class ScalarField2D
         _values = new double[grid.NodeCount];
     }
 
+    /// <summary>Wraps values already in <c>Grid.Index</c> order, as a store hands them back.</summary>
+    internal ScalarField2D(Grid2D grid, double[] values)
+    {
+        ArgumentOutOfRangeException.ThrowIfNotEqual(values.Length, grid.NodeCount, nameof(values));
+        Grid = grid;
+        _values = values;
+    }
+
     /// <summary>The grid these values live on.</summary>
     public Grid2D Grid { get; }
 

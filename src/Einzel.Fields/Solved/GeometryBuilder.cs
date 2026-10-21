@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using Einzel.Fields.Analytic;
 using Einzel.Core.Model;
@@ -885,6 +886,7 @@ public static class GeometryBuilder
 
     /// <summary>Solves a geometry channel by channel, and hands back the diagnostics.</summary>
     /// <param name="solve">The compiled solve.</param>
+    /// <param name="store">Where to load each channel from or keep it, or null to solve them all.</param>
     /// <returns>One entry per basis channel; exactly one for a static geometry.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
     /// <remarks>
@@ -904,19 +906,20 @@ public static class GeometryBuilder
     /// code review; this is the half that was left.
     /// </para>
     /// </remarks>
-    public static IReadOnlyList<ChannelSolve> SolveChannels(CompiledSolvedField solve)
+    public static IReadOnlyList<ChannelSolve> SolveChannels(CompiledSolvedField solve, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(solve);
 
         var grid = BuildGrid(solve);
         var patterns = Patterns(solve);
+        var keyed = Keyed(solve, store);
         var solves = new List<ChannelSolve>(patterns.Count);
         IReadOnlyList<Core.Results.ValidityWarning>? warnings = null;
 
         for (var index = 0; index < patterns.Count; index++)
         {
             var potentialOf = patterns[index];
-            var channel = SolvePattern(solve, grid, potentialOf, askMesh: index == 0);
+            var channel = SolvePattern(solve, grid, potentialOf, askMesh: index == 0, keyed);
 
             // Every channel carries the same finding, because every channel solves on the
             // same mesh round the same conductors; einzel solve reports it once per element.
@@ -956,6 +959,10 @@ public static class GeometryBuilder
         CompiledSolvedField solve, Func<CompiledElectrode, double>? potentialOf) =>
         [.. solve.Electrodes.Select(e => Held(e, potentialOf))];
 
+    /// <summary>A store with the geometry hash its channels are keyed under, worked out once per element.</summary>
+    private static (ISolveStore Store, string GeometryHash)? Keyed(CompiledSolvedField solve, ISolveStore? store) =>
+        store is null ? null : (store, SolveHash.Geometry(solve));
+
     /// <summary>Solves one channel's pattern, and lets go of everything but its potential.</summary>
     /// <param name="solve">The declared geometry.</param>
     /// <param name="grid">The finest grid.</param>
@@ -963,6 +970,7 @@ public static class GeometryBuilder
     /// What each electrode holds in this channel, or null for every electrode as declared.
     /// </param>
     /// <param name="askMesh">Whether to ask, while the mask is in hand, where the mesh samples a shared face.</param>
+    /// <param name="keyed">The store and the element's geometry hash, or null to solve.</param>
     /// <remarks>
     /// <para>
     /// <b>A method of its own so that the mask dies with its frame</b>, which is the volume
@@ -977,8 +985,36 @@ public static class GeometryBuilder
     /// </remarks>
     private static (ScalarField2D Potential, SolveReport Report, int FixedNodes, int CutLinks,
         IReadOnlyList<Core.Results.ValidityWarning>? MeshWarnings) SolvePattern(
-        CompiledSolvedField solve, Grid2D grid, Func<CompiledElectrode, double>? potentialOf, bool askMesh)
+        CompiledSolvedField solve,
+        Grid2D grid,
+        Func<CompiledElectrode, double>? potentialOf,
+        bool askMesh,
+        (ISolveStore Store, string GeometryHash)? keyed)
     {
+        SolveEntry? entry = null;
+
+        if (keyed is var (store, geometryHash))
+        {
+            var (left, right, bottom, top) = Edges(solve, grid);
+            entry = SolveEntry.Of(geometryHash, grid, [left, right, bottom, top], HoldingOf(solve, potentialOf));
+
+            if (store.TryLoad(entry, out var values, out var record))
+            {
+                // No mask on a hit: asked without one, the shared-face question builds one only
+                // where a pair of conductors could share a face, and answers the same.
+                return (
+                    new ScalarField2D(grid, values)
+                    {
+                        LeftEdge = left, RightEdge = right, BottomEdge = bottom, TopEdge = top,
+                    },
+                    record.Report with { Warnings = [] },
+                    record.FixedNodes,
+                    record.CutLinks,
+                    askMesh ? SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid)) : null);
+            }
+        }
+
+        var started = Stopwatch.GetTimestamp();
         var mask = BuildMask(solve, grid, potentialOf);
 
         var (potential, report) = PoissonSolver2D.Solve(
@@ -986,6 +1022,9 @@ public static class GeometryBuilder
             solve.Tolerance,
             maximumCycles: 400,
             coarsen: coarse => BuildMask(solve, coarse, potentialOf));
+
+        keyed?.Store.Save(entry!, potential.Values, new SolveRecord(
+            report, mask.FixedCount, mask.Cuts?.CutCount ?? 0, Stopwatch.GetElapsedTime(started).TotalSeconds));
 
         var warnings = askMesh ? SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid, mask)) : null;
 
@@ -1069,23 +1108,25 @@ public static class GeometryBuilder
 
     /// <summary>Builds, solves, and wraps a declared geometry as a field.</summary>
     /// <param name="solve">The declared geometry.</param>
+    /// <param name="store">Where to load each channel from or keep it, or null to solve them all.</param>
     /// <returns>The field, and how the solve went.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
-    public static (IElectrostaticField Field, SolveReport Report) Build(CompiledSolvedField solve)
+    public static (IElectrostaticField Field, SolveReport Report) Build(
+        CompiledSolvedField solve, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(solve);
 
         if (solve.Drives.Count > 0 || solve.Stages.Count > 0)
         {
-            return BuildDriven(solve);
+            return BuildDriven(solve, store);
         }
 
+        // The static solve is the one channel holding every electrode as declared.
         var grid = BuildGrid(solve);
-        var mask = BuildMask(solve, grid);
-        var (potential, report) = PoissonSolver2D.Solve(
-            mask, solve.Tolerance, maximumCycles: 400, coarsen: coarse => BuildMask(solve, coarse));
+        var (potential, report, _, _, warnings) =
+            SolvePattern(solve, grid, null, askMesh: true, Keyed(solve, store));
 
-        report = report with { Warnings = SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid, mask)) };
+        report = report with { Warnings = warnings! };
 
         IElectrostaticField field = new SolvedField2D(
             potential,
@@ -1130,9 +1171,11 @@ public static class GeometryBuilder
     /// channel; add a grounded housing and it is two.
     /// </para>
     /// </remarks>
-    private static (IElectrostaticField Field, SolveReport Report) BuildDriven(CompiledSolvedField solve)
+    private static (IElectrostaticField Field, SolveReport Report) BuildDriven(
+        CompiledSolvedField solve, ISolveStore? store)
     {
         var grid = BuildGrid(solve);
+        var keyed = Keyed(solve, store);
         var (frequencies, waveforms, quadrature) = Clocks(solve.Drives);
 
         // The same channels, in the same order, that the solve key and einzel solve name.
@@ -1155,7 +1198,7 @@ public static class GeometryBuilder
             // back on the weight, so this solve is in units of that weight. Solved in a
             // frame of its own, which lets go of the mask - see SolvePattern.
             var (potential, report, _, _, warnings) =
-                SolvePattern(solve, grid, Weighted(group.Pattern), askMesh: index == 0);
+                SolvePattern(solve, grid, Weighted(group.Pattern), askMesh: index == 0, keyed);
 
             meshWarnings ??= warnings;
 
