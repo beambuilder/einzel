@@ -98,6 +98,9 @@ public sealed class ProjectLayout
     /// <summary>Field caches, trajectories, frames. Large, binary, regenerable, ignored.</summary>
     public string Scratch => Path.Combine(Root, ScratchDirectoryName);
 
+    /// <summary>Solved basis channels kept between runs (<see cref="Project.FieldCache"/>). Safe to delete.</summary>
+    public string FieldCache => Path.Combine(Scratch, "cache");
+
     /// <summary>Every tracked directory, in the order <c>einzel init</c> creates them.</summary>
     public IReadOnlyList<string> TrackedDirectories => [Models, Extensions, Studies, Figures, Results, Tests];
 
@@ -143,6 +146,12 @@ public static class EngineBuild
     /// Bumped only when numerical behaviour changes. Part of the field-cache key
     /// (FLD-3) and recorded in every manifest.
     /// </summary>
+    /// <remarks>
+    /// <b>A change to what a solver computes must bump this</b>, or the field cache keeps serving
+    /// fields the new solver would not produce. <c>SolverBehaviourTripwireTests</c> pins a small
+    /// plane and a small volume solve beside this number and fails when the numbers move, so the
+    /// bump and the new pins land in the same change.
+    /// </remarks>
     public const int SolverBehaviourVersion = 2;
 
     /// <summary>The engine version string.</summary>

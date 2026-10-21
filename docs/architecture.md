@@ -13,7 +13,7 @@ Engine outward. Each references only what is above it in this list.
 | `Einzel.Library` | Device templates as data, and the loader that enumerates them |
 | `Einzel.Sweeps` | Tolerance Monte Carlo, sensitivity fields, Nelder-Mead and CMA-ES |
 | `Einzel.Io` | Model JSON, VTU export, the wire form of a result |
-| `Einzel.Project` | Project layout, run manifests, content hashing |
+| `Einzel.Project` | Project layout, run manifests, content hashing, the field cache |
 | `Einzel.Extensions` | Extension manifest, schema check, and the sandboxed subprocess runner |
 | `Einzel.Render` | Projection, contouring, decimation, and the SVG and PDF writers |
 | `Einzel.Commands` | Command objects: every operation as one serialisable thing |
@@ -182,6 +182,12 @@ AGENTS.md                                       generated + hand-written guidanc
 Everything defining a modelling effort is small, text, and diffable; everything
 large is derived and discardable. `.einzel/` can be deleted without losing
 anything, because the run manifest fully determines the run.
+
+The field cache is the largest thing in it: `.einzel/cache/solver-<version>-<compute path>/`
+holds each solved basis channel under its channel hash, so the next run of the
+same geometry loads it instead of solving. The engine asks for it through
+`ISolveStore`, an interface in `Einzel.Fields`; `Einzel.Project` implements it on
+disk; the commands hand it down. The solvers never see a path.
 
 Nothing touches version control. A plain folder is the default and fully
 supported; `--vcs git` writes an ignore file and changes no behaviour anywhere
