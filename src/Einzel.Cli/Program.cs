@@ -2252,7 +2252,7 @@ public static class Program
         {
             Console.Error.WriteLine(
                 "usage: einzel run <model.json> [--vtu] [--json] [--project <dir>] "
-                + "[--progress <seconds>]");
+                + "[--progress <seconds>] [--no-cache]");
             return (int)ExitCode.ValidationFailure;
         }
 
@@ -2289,7 +2289,11 @@ public static class Program
 
             // Diagnostics on stderr (CLI-2), so a caller piping `--json` gets the result
             // document and nothing else however long the run took to produce it.
-            progress: new RunProgress(interval, Console.Error.WriteLine));
+            progress: new RunProgress(interval, Console.Error.WriteLine),
+
+            // On by default: a second run of an unchanged geometry loads its solved channels
+            // from .einzel/cache instead of solving them again (FLD-3).
+            fieldCache: CacheFor(project, options));
 
         if (run is null)
         {
@@ -2721,6 +2725,11 @@ public static class Program
 
         return directory?.FullName ?? Directory.GetCurrentDirectory();
     }
+
+    /// <summary>The project's field cache, or null when asked <c>--no-cache</c>.</summary>
+    /// <remarks>Its notices - an entry not used, a cache not writable - go to stderr (CLI-2).</remarks>
+    private static FieldCache? CacheFor(ProjectLayout project, CommandLine options) =>
+        options.Has("no-cache") ? null : new FieldCache(project, announce: Console.Error.WriteLine);
 
     private const string Usage =
         """

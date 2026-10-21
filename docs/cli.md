@@ -91,7 +91,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel validate <model.json>` | Units, bounds, dimensions, regime validity. Instant |
 | `einzel estimate <model.json\|study.json>` | What a run or a whole study will cost, before starting it (GRD-8) |
 | `einzel solve <model.json>` | Solve the fields only, and report how they went |
-| `einzel run <model.json>` | Run; writes a manifest and a result. Reports the ensemble too when the model declares a source cloud, and says where it has got to every 30 s (`--progress`) |
+| `einzel run <model.json>` | Run; writes a manifest and a result. Reports the ensemble too when the model declares a source cloud, and says where it has got to every 30 s (`--progress`). Loads solved channels from `.einzel/cache` and keeps the ones it solves (`--no-cache` to solve everything) |
 | `einzel sweep <study.json>` | Tolerance Monte Carlo, and which parameter binds first |
 | `einzel scan <study.json>` | One parameter across a range: one row per point, and a curve |
 | `einzel boundary <study.json>` | Bisect onto a stability boundary, to ACC-6 (Class B) |
@@ -118,6 +118,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `--see-through` | `render still` only: draw the conductors translucent, as the window's toggle does |
 | `--no-scale` | `render still` only: leave out the ruler, which is drawn by default in the corner the instrument covers least (and left out anyway when the picture is too small to hold it) |
 | `--progress <seconds>` | `run` and both render verbs: how often to say where the transport has got to, on stderr. Thirty seconds by default, `0` for silence |
+| `--no-cache` | `run`: neither load solved channels from `.einzel/cache` nor keep them; the manifest then records no `fieldCache` |
 | `--project <dir>` | Project root; otherwise inferred by walking up from the model |
 
 Not yet built: `self-update`, which needs `Einzel.Update`. Of the render verbs
@@ -785,8 +786,9 @@ keys, as they are different solves to the last bit. What is applied to
 a solved field afterwards - the mirror plane, the extrusion tilt - is not in them, so one
 solve can be placed several ways. Neither includes the solver-behaviour version, printed
 on the last line beside the time: a cache needs the hashes to know what was asked and the
-version to know how it was answered. Nothing caches on them yet; the run manifest records
-them too (`solves`), so a result can be matched to the solve it came from.
+version to know how it was answered. The field cache is keyed on them, under a directory
+per version and compute path; the run manifest records them too (`solves`), so a result
+can be matched to the solve it came from.
 
 ### Why `export` writes ImageData
 
@@ -1021,18 +1023,54 @@ would be refused. They pass the whole list now, and the CLI prints one line per 
 
 | Path | Contents |
 | --- | --- |
-| `results/<name>.manifest.json` | Model hash, engine version, solver-behaviour version, solve keys (geometry and channel hashes per solved element), transport mode, compute path, machine, timestamp |
+| `results/<name>.manifest.json` | Model hash, engine version, solver-behaviour version, solve keys (geometry and channel hashes per solved element), what the field cache did with each channel (`fieldCache`), transport mode, compute path, machine, timestamp |
 | `results/<name>.result.json` | The figures of merit, each as a full envelope |
 | `results/<name>.progress.json` | **Only while the run is going** - where it has got to, and the phases that finished. Removed when the run writes its answer, so finding one means the run did not |
 | `.einzel/<name>.trajectory.vtu` | The sampled trajectory, with provenance in a comment block |
 | `.einzel/<name>.density.vti` | The density on the tracked grid, with the run's caveats and their severities in a comment block. Written for a diffusive run, and for a **sequenced** run whose last phase was diffusive - a sequence ending as trajectories has no density, which is a different fact from an empty one, so none is written |
 | `results/<name>.arrivals.csv` | The arrival profile, where enough arrived to be one. See the note on `sequence.nothing-eluted` below |
+| `.einzel/cache/solver-<v>-<path>/<hash>.f64`, `.json` | One solved basis channel and its record, kept for the next run; see below |
 
 The manifest fully determines the run, which is what makes `.einzel/` safe to
 delete and results regenerable rather than precious. It is also what lets drift be
 detected in both directions: a stored result can be checked against both the
 current model and the currently installed engine, in a plain folder, with no
 repository involved.
+
+### A second run of the same geometry loads its field
+
+**The solve is most of a run of a large geometry, and it is the same every time.** The
+task-10 quadrupole solves for 45 s at 8.54 M nodes; loading one of its channels takes
+30 ms and checking its SHA-256 another 43. So `run` keeps every basis channel it solves
+under `.einzel/cache/solver-<solver-behaviour version>-<compute path>/` (`solver-2-scalar`
+today), named by its channel hash
+(the key `solve` prints): the potential as raw little-endian doubles, eight bytes a
+node, and a JSON record beside it written last - hashes, grid, edge conditions, what
+each electrode held, the solve report's numbers, the payload's length and SHA-256, the
+solve time, engine, machine. The next run of a geometry with the same key loads it
+instead of solving. One entry per channel rather than per element, so a sequence whose
+one stage pattern changed reloads the others.
+
+**A load is checked, and a failed check is a solve, never a failed run.** The record
+must name the same channel, solver-behaviour version, compute path and grid, and the
+payload must have its recorded length and SHA-256. Anything else is a miss, a line on
+stderr saying why, a solve, and the entry written over. A cache that cannot be written
+is said once and the run goes on. Writes go to a temporary file renamed into place, so
+a run killed half way leaves no entry. What is not kept is the warnings: whether the
+mesh samples a face two conductors share depends on the stage states, which the key
+does not cover, so a hit asks the geometry again; the report's residuals are kept, so
+an unconverged solve warns on every reuse exactly as it did the first time.
+
+**What a run says, and what it records.** One line on stderr, `field: 1 channel(s) from
+the cache, 0 solved`, and a `fieldCache` list in the manifest: per channel its field,
+index, channel hash, `hit`, `stored`, `replaced` or `unwritable`, and the SHA-256 of the
+potential the run used. The figure-of-merit flights a cloud run makes rebuild the field
+through the same cache, and so does the shell's results view, whose CLI spelling is this
+verb. Bits are reproducible on one machine, not across machines, so a cache copied to
+another one serves the field solved on the original machine: as accurate, not the bits
+this one would produce, and the record says where it was solved. Another compute path
+gets a directory of its own rather than writing over this one's. `--no-cache` neither
+reads nor writes.
 
 ### A run measured in hours says something before it ends
 

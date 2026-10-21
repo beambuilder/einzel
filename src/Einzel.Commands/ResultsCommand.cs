@@ -254,8 +254,12 @@ public static class ResultsCommand
         var project = ProjectLayout.Find(modelPath)
             ?? new ProjectLayout(Path.GetDirectoryName(modelPath)!);
 
+        // Through the project's field cache, as `einzel run` goes: the shell and the CLI are
+        // peers, and the figures below rebuild the field the run just loaded or kept.
+        var cache = new FieldCache(project);
+
         var (run, validation) = RunCommand.Execute(
-            modelPath, project, exportVtu: false, timestampUtc);
+            modelPath, project, exportVtu: false, timestampUtc, fieldCache: cache);
 
         if (run is null)
         {
@@ -275,7 +279,7 @@ public static class ResultsCommand
 
         foreach (var figure in FiguresOfMerit.All)
         {
-            if (FiguresOfMerit.Measure(figure.Name, model) is { } measured)
+            if (FiguresOfMerit.Measure(figure.Name, model, store: cache) is { } measured)
             {
                 figures[figure.Name] = MeasuredJson.From(measured, figure.Unit);
             }
