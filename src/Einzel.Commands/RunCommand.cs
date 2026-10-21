@@ -626,9 +626,9 @@ public static class RunCommand
 {
     /// <summary>Flies the declared cloud and reports what it did.</summary>
     private static EnsembleOutcome? Ensemble(
-        CompiledModel model, IReadOnlyList<ValidityWarning> fieldWarnings)
+        CompiledModel model, IReadOnlyList<ValidityWarning> fieldWarnings, Fields.Solved.ISolveStore? store)
     {
-        var flight = FiguresOfMerit.FlyCloud(model);
+        var flight = FiguresOfMerit.FlyCloud(model, store: store);
 
         // Null when fewer than two ions arrived: an arrival peak needs two points to
         // have a width. The flight is still a result, and this used to return null
@@ -657,7 +657,7 @@ public static class RunCommand
             ? Emittance.FromPacket(flight.Arrived)
             : ((Emittance Wider, Emittance Narrower)?)null;
 
-        var turnAround = FiguresOfMerit.Evaluator("turnAroundTime")(model) ?? 0.0;
+        var turnAround = FiguresOfMerit.Evaluator("turnAroundTime", store: store)(model) ?? 0.0;
 
         var species = IonSpecies.FromModel(model);
 
@@ -1322,6 +1322,7 @@ public static class RunCommand
         ProjectLayout project,
         DateTimeOffset timestampUtc,
         IReadOnlyDictionary<string, string> inputHashes,
+        IReadOnlyList<FieldCacheUse>? fieldCache,
         bool exportVtu,
         RunProgress? progress)
     {
@@ -1355,6 +1356,7 @@ public static class RunCommand
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
             Solves = Fields.Solved.SolveHash.Of(model),
+            FieldCache = fieldCache,
 
             // Every mode the run used, in the order the phases used them. One mode
             // recorded here would make a manifest claim to determine a run it does not
@@ -1589,6 +1591,7 @@ public static class RunCommand
         ProjectLayout project,
         DateTimeOffset timestampUtc,
         IReadOnlyDictionary<string, string> inputHashes,
+        IReadOnlyList<FieldCacheUse>? fieldCache,
         bool exportVtu,
         RunProgress? progress)
     {
@@ -1613,6 +1616,7 @@ public static class RunCommand
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
             Solves = Fields.Solved.SolveHash.Of(model),
+            FieldCache = fieldCache,
             TransportMode = model.TransportMode,
             ComputePath = EngineBuild.ComputePath,
             Machine = Environment.MachineName,
@@ -1825,6 +1829,7 @@ public static class RunCommand
         ProjectLayout project,
         DateTimeOffset timestampUtc,
         IReadOnlyDictionary<string, string> inputHashes,
+        IReadOnlyList<FieldCacheUse>? fieldCache,
         bool exportVtu,
         RunProgress? progress)
     {
@@ -1834,7 +1839,7 @@ public static class RunCommand
         {
             return Mixture(
                 model, field, fieldWarnings, validation, project, timestampUtc, inputHashes,
-                exportVtu, progress);
+                fieldCache, exportVtu, progress);
         }
 
         // The one place that knows where the model file is, so the one place that can
@@ -1886,6 +1891,7 @@ public static class RunCommand
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
             Solves = Fields.Solved.SolveHash.Of(model),
+            FieldCache = fieldCache,
             TransportMode = model.TransportMode,
             ComputePath = EngineBuild.ComputePath,
             Machine = Environment.MachineName,
@@ -2174,6 +2180,11 @@ public static class RunCommand
     /// before it ends - and one that stores nothing until then loses everything to a
     /// reboot, which is how three attempts at the TIMS front-end sequence were lost.
     /// </param>
+    /// <param name="fieldCache">
+    /// The project's field cache, to load solved channels from and keep the ones solved
+    /// (FLD-3) - for this build and for the figure-of-merit flights that rebuild the field - or
+    /// null to solve everything. The CLI passes one unless asked <c>--no-cache</c>.
+    /// </param>
     /// <returns>The run outcome, or the validation failure that prevented it.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     public static (RunOutcome? Run, ValidateOutcome Validation) Execute(
@@ -2181,7 +2192,8 @@ public static class RunCommand
         ProjectLayout project,
         bool exportVtu,
         DateTimeOffset timestampUtc,
-        RunProgress? progress = null)
+        RunProgress? progress = null,
+        FieldCache? fieldCache = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -2213,8 +2225,22 @@ public static class RunCommand
         // Reported, not bare. A solve that missed its tolerance produces a field
         // indistinguishable from one that met it, so the evidence has to travel
         // alongside and land on every number computed through it (GRD-2).
-        var (field, built) = FieldAssembly.BuildReported(model);
+        var (field, built) = FieldAssembly.BuildReported(model, fieldCache);
         var fieldWarnings = built;
+
+        // What the manifest records and the one line a person sees: whether this run started
+        // from the cache. The figure-of-merit flights below rebuild the field through the same
+        // cache and find it there; the first use of each channel is the one that counts. Null,
+        // and absent from the manifest, when the run used no cache or solved nothing.
+        var cacheUses = fieldCache?.Uses(Fields.Solved.SolveHash.Of(model)) is { Count: > 0 } used
+            ? used
+            : null;
+
+        if (cacheUses is not null)
+        {
+            var loaded = cacheUses.Count(use => use.Status == FieldCacheUse.Hit);
+            announce?.Invoke($"  field: {loaded} channel(s) from the cache, {cacheUses.Count - loaded} solved");
+        }
 
         announce?.Invoke(string.Format(
             System.Globalization.CultureInfo.InvariantCulture,
@@ -2237,7 +2263,7 @@ public static class RunCommand
             return (
                 Sequenced(
                     model, field, fieldWarnings, validation, project, timestampUtc, inputHashes,
-                    exportVtu, progress),
+                    cacheUses, exportVtu, progress),
                 validation);
         }
 
@@ -2250,7 +2276,7 @@ public static class RunCommand
             return (
                 Diffusive(
                     model, field, fieldWarnings, validation, project, timestampUtc, inputHashes,
-                    exportVtu, progress),
+                    cacheUses, exportVtu, progress),
                 validation);
         }
 
@@ -2355,6 +2381,7 @@ public static class RunCommand
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
             Solves = Fields.Solved.SolveHash.Of(model),
+            FieldCache = cacheUses,
             TransportMode = model.TransportMode,
             ComputePath = EngineBuild.ComputePath,
             Machine = Environment.MachineName,
@@ -2461,7 +2488,7 @@ public static class RunCommand
         // measured uncertainty for a sampled one.
         if (model.Cloud.IsCloud)
         {
-            run = run with { Ensemble = Ensemble(model, fieldWarnings) };
+            run = run with { Ensemble = Ensemble(model, fieldWarnings, fieldCache) };
         }
 
         var resultPath = Path.Combine(project.Results, $"{stem}.result.json");

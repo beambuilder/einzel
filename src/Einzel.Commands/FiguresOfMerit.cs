@@ -4,6 +4,7 @@ using Einzel.Core.Errors;
 using Einzel.Core.Geometry;
 using Einzel.Core.Model;
 using Einzel.Fields;
+using Einzel.Fields.Solved;
 using Einzel.Transport;
 using Einzel.Transport.Integration;
 
@@ -266,6 +267,7 @@ public static class FiguresOfMerit
     /// <param name="energySpread">Fractional energy spread for the ensemble figures.</param>
     /// <param name="ions">How many ions the ensemble figures launch.</param>
     /// <param name="report">Where the warnings the evaluation earns are sent, or null.</param>
+    /// <param name="store">Where solved field channels are loaded from and kept, or null to solve them.</param>
     /// <returns>The figure with its interval, or null where this build has no envelope for it.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <exception cref="EinzelException">No figure of merit by that name.</exception>
@@ -299,7 +301,8 @@ public static class FiguresOfMerit
         CompiledModel model,
         double energySpread = DefaultEnergySpread,
         int ions = DefaultIons,
-        Action<Core.Results.ValidityWarning>? report = null)
+        Action<Core.Results.ValidityWarning>? report = null,
+        ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(model);
 
@@ -310,28 +313,28 @@ public static class FiguresOfMerit
             // The arrival-time peak's own statistics, resampled over the arrivals that
             // produced it. One flight serves all three.
             "arrivalSpread" => OverArrivals(
-                model, energySpread, ions, report,
+                model, store, energySpread, ions, report,
                 peak => peak.GaussianEquivalentFwhmSeconds * 1e9, "ns"),
 
             "resolvingPower" => OverArrivals(
-                model, energySpread, ions, report,
+                model, store, energySpread, ions, report,
                 peak => peak.Arrived >= 3 ? Resolving(peak) : null, "1"),
 
             // The fit's own residual is the uncertainty, divided by the span it was fitted
             // over: a coefficient multiplies d, so a relative flight-time residual of r across a
             // scan of half-width s constrains the coefficient to about r/s. GRD-1 wants an
             // envelope and this is the one the fit actually produces.
-            "focusingC1" => FocusingMeasured(model, energySpread, ions, 0, report),
-            "focusingC2" => FocusingMeasured(model, energySpread, ions, 1, report),
-            "focusingC3" => FocusingMeasured(model, energySpread, ions, 2, report),
-            "energyPlateau" => PlateauMeasured(model, energySpread, ions, report),
+            "focusingC1" => FocusingMeasured(model, store, energySpread, ions, 0, report),
+            "focusingC2" => FocusingMeasured(model, store, energySpread, ions, 1, report),
+            "focusingC3" => FocusingMeasured(model, store, energySpread, ions, 2, report),
+            "energyPlateau" => PlateauMeasured(model, store, energySpread, ions, report),
 
-            "turnAroundTime" => TurnAroundMeasured(model, report),
+            "turnAroundTime" => TurnAroundMeasured(model, store, report),
 
             // A fraction, so a binomial standard error rather than a resampling - the
             // closed form is exact and the bootstrap would only approximate it.
             "transmission" => Fraction(
-                model, energySpread, ions, report,
+                model, store, energySpread, ions, report,
                 peak => (peak.Arrived, peak.Launched), "1"),
 
             _ => null,
@@ -370,6 +373,7 @@ public static class FiguresOfMerit
     /// </remarks>
     private static Core.Results.Measured? OverArrivals(
         CompiledModel model,
+        ISolveStore? store,
         double spread,
         int ions,
         Action<Core.Results.ValidityWarning>? report,
@@ -377,7 +381,7 @@ public static class FiguresOfMerit
         string unit)
     {
         if (!model.Cloud.IsCloud
-            || Ensemble(model, spread, ions, report) is not { } peak
+            || Ensemble(model, store, spread, ions, report) is not { } peak
             || peak.Arrived < 2)
         {
             return null;
@@ -396,13 +400,14 @@ public static class FiguresOfMerit
     /// <summary>A fraction of the launched ions, with its binomial error.</summary>
     private static Core.Results.Measured? Fraction(
         CompiledModel model,
+        ISolveStore? store,
         double spread,
         int ions,
         Action<Core.Results.ValidityWarning>? report,
         Func<ArrivalTimePeak, (int Of, int Out)> counts,
         string unit)
     {
-        if (!model.Cloud.IsCloud || Ensemble(model, spread, ions, report) is not { } peak)
+        if (!model.Cloud.IsCloud || Ensemble(model, store, spread, ions, report) is not { } peak)
         {
             return null;
         }
@@ -428,7 +433,7 @@ public static class FiguresOfMerit
     /// report a spread on a quantity that is exactly nought by construction.
     /// </remarks>
     private static Core.Results.Measured? TurnAroundMeasured(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report)
     {
         if (model.Cloud.TemperatureK <= 0.0)
         {
@@ -448,7 +453,7 @@ public static class FiguresOfMerit
 
         var thermalOnly = ThermalOnly(model);
 
-        if (FromCloud(thermalOnly, report) is not { } peak || peak.Arrived < 2)
+        if (FromCloud(thermalOnly, report, store) is not { } peak || peak.Arrived < 2)
         {
             return null;
         }
@@ -471,6 +476,7 @@ public static class FiguresOfMerit
     /// Where the warnings each evaluation earns are sent, or null to refuse rather
     /// than hide them.
     /// </param>
+    /// <param name="store">Where solved field channels are loaded from and kept, or null to solve them.</param>
     /// <returns>A function from a validated model to the figure, or null when it does not arrive.</returns>
     /// <exception cref="EinzelException">No figure of merit by that name.</exception>
     /// <remarks>
@@ -483,39 +489,40 @@ public static class FiguresOfMerit
         string name,
         double energySpread = DefaultEnergySpread,
         int ions = DefaultIons,
-        Action<Core.Results.ValidityWarning>? report = null)
+        Action<Core.Results.ValidityWarning>? report = null,
+        ISolveStore? store = null)
     {
         var info = Describe(name);
 
         return info.Name switch
         {
-            "flightTime" => model => Single(model, report)?.FlightTimeSeconds,
-            "energyDrift" => model => Single(model, report)?.MaximumRelativeEnergyDrift,
-            "resolvingPower" => model => Ensemble(model, energySpread, ions, report) is { Arrived: >= 3 } peak
+            "flightTime" => model => Single(model, store, report)?.FlightTimeSeconds,
+            "energyDrift" => model => Single(model, store, report)?.MaximumRelativeEnergyDrift,
+            "resolvingPower" => model => Ensemble(model, store, energySpread, ions, report) is { Arrived: >= 3 } peak
                 ? Magnitude(peak.ResolvingPower(), report)
                 : null,
-            "transmission" => model => Transmitted(model, energySpread, ions, report),
-            "arrivalSpread" => model => Ensemble(model, energySpread, ions, report) is { Arrived: >= 3 } peak
+            "transmission" => model => Transmitted(model, store, energySpread, ions, report),
+            "arrivalSpread" => model => Ensemble(model, store, energySpread, ions, report) is { Arrived: >= 3 } peak
                 ? peak.GaussianEquivalentFwhmSeconds
                 : null,
-            "focusingC1" => model => Focusing(model, energySpread, ions, 0, report),
-            "focusingC2" => model => Focusing(model, energySpread, ions, 1, report),
-            "focusingC3" => model => Focusing(model, energySpread, ions, 2, report),
-            "energyPlateau" => model => Plateau(model, energySpread, ions, report),
-            "turnAroundTime" => model => TurnAround(model, report),
-            "emittance" => model => PacketEmittance(model, report)?.Wider.GeometricM,
-            "normalisedEmittance" => model => PacketEmittance(model, report)?.Wider.NormalisedM,
-            "confined" => model => Confined(model, energySpread, ions, report),
-            "meanKineticEnergy" => model => MeanKineticEnergy(model, report),
-            "transitTime" => model => Transit(model, report),
-            "radialSpread" => model => RadialSpread(model, report),
-            "mobilityResolvingPower" => model => MobilityResolvingPower(model, report),
-            "oscillationFrequencyX" => model => Oscillation(model, 0, report),
-            "oscillationFrequencyY" => model => Oscillation(model, 1, report),
-            "oscillationFrequencyZ" => model => Oscillation(model, 2, report),
-            "secularFrequencyX" => model => Secular(model, 0, report),
-            "secularFrequencyY" => model => Secular(model, 1, report),
-            "secularFrequencyZ" => model => Secular(model, 2, report),
+            "focusingC1" => model => Focusing(model, store, energySpread, ions, 0, report),
+            "focusingC2" => model => Focusing(model, store, energySpread, ions, 1, report),
+            "focusingC3" => model => Focusing(model, store, energySpread, ions, 2, report),
+            "energyPlateau" => model => Plateau(model, store, energySpread, ions, report),
+            "turnAroundTime" => model => TurnAround(model, store, report),
+            "emittance" => model => PacketEmittance(model, store, report)?.Wider.GeometricM,
+            "normalisedEmittance" => model => PacketEmittance(model, store, report)?.Wider.NormalisedM,
+            "confined" => model => Confined(model, store, energySpread, ions, report),
+            "meanKineticEnergy" => model => MeanKineticEnergy(model, store, report),
+            "transitTime" => model => Transit(model, store, report),
+            "radialSpread" => model => RadialSpread(model, store, report),
+            "mobilityResolvingPower" => model => MobilityResolvingPower(model, store, report),
+            "oscillationFrequencyX" => model => Oscillation(model, store, 0, report),
+            "oscillationFrequencyY" => model => Oscillation(model, store, 1, report),
+            "oscillationFrequencyZ" => model => Oscillation(model, store, 2, report),
+            "secularFrequencyX" => model => Secular(model, store, 0, report),
+            "secularFrequencyY" => model => Secular(model, store, 1, report),
+            "secularFrequencyZ" => model => Secular(model, store, 2, report),
             _ => throw new EinzelException(new EinzelError
             {
                 Code = ErrorCodes.InternalError,
@@ -564,9 +571,9 @@ public static class FiguresOfMerit
 
     /// <summary>One trajectory, with its convergence study.</summary>
     private static TrajectoryResult? Single(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report = null)
     {
-        var (launch, species, field, settings, detector, collisions) = Setup(model, report: report);
+        var (launch, species, field, settings, detector, collisions) = Setup(model, store, report: report);
 
         // The same convergence study 'run' reports from, and the finest level of it,
         // because that is the number 'run' publishes.
@@ -637,11 +644,12 @@ public static class FiguresOfMerit
     /// </para>
     /// </remarks>
     private static List<(double EnergyFraction, double FlightTime)> EnergyScan(
-        CompiledModel model, double spread, int ions, Action<Core.Results.ValidityWarning>? report)
+        CompiledModel model, ISolveStore? store,
+        double spread, int ions, Action<Core.Results.ValidityWarning>? report)
     {
         var samples = new List<(double, double)>(ions);
         var members = Math.Max(3, ions);
-        var (_, species, field, settings, detector, collisions) = Setup(model, report: report);
+        var (_, species, field, settings, detector, collisions) = Setup(model, store, report: report);
 
         for (var k = 0; k < members; k++)
         {
@@ -663,7 +671,7 @@ public static class FiguresOfMerit
 
     /// <summary>Fits the energy scan and returns one coefficient's magnitude.</summary>
     private static double? Focusing(
-        CompiledModel model, double spread, int ions, int index,
+        CompiledModel model, ISolveStore? store, double spread, int ions, int index,
         Action<Core.Results.ValidityWarning>? report)
     {
         if (spread <= 0.0)
@@ -671,7 +679,7 @@ public static class FiguresOfMerit
             return null;
         }
 
-        var samples = EnergyScan(model, spread, ions, report);
+        var samples = EnergyScan(model, store, spread, ions, report);
 
         // A fit needs both signs and more points than coefficients. Fewer means ions were
         // lost across the scan, which is a transmission finding rather than a focusing one.
@@ -689,14 +697,15 @@ public static class FiguresOfMerit
     /// largest adjacent step as a bound on what the grid missed.
     /// </summary>
     private static (double Excursion, double GridBound, int Count)? PlateauScan(
-        CompiledModel model, double spread, int ions, Action<Core.Results.ValidityWarning>? report)
+        CompiledModel model, ISolveStore? store,
+        double spread, int ions, Action<Core.Results.ValidityWarning>? report)
     {
         if (spread <= 0.0)
         {
             return null;
         }
 
-        var samples = EnergyScan(model, spread, ions, report);
+        var samples = EnergyScan(model, store, spread, ions, report);
 
         // The whole scan has to have arrived, or the excursion is over a different population
         // than the one asked about - the incomplete-arrival trap this project already records.
@@ -724,14 +733,16 @@ public static class FiguresOfMerit
 
     /// <summary>The plateau excursion as a bare ordering for the study drivers.</summary>
     private static double? Plateau(
-        CompiledModel model, double spread, int ions, Action<Core.Results.ValidityWarning>? report)
-        => PlateauScan(model, spread, ions, report)?.Excursion;
+        CompiledModel model, ISolveStore? store,
+        double spread, int ions, Action<Core.Results.ValidityWarning>? report)
+        => PlateauScan(model, store, spread, ions, report)?.Excursion;
 
     /// <summary>The plateau excursion with the grid bound as its GRD-1 envelope.</summary>
     private static Core.Results.Measured? PlateauMeasured(
-        CompiledModel model, double spread, int ions, Action<Core.Results.ValidityWarning>? report)
+        CompiledModel model, ISolveStore? store,
+        double spread, int ions, Action<Core.Results.ValidityWarning>? report)
     {
-        var scan = PlateauScan(model, spread, ions, report);
+        var scan = PlateauScan(model, store, spread, ions, report);
         if (scan is null)
         {
             return null;
@@ -748,7 +759,7 @@ public static class FiguresOfMerit
 
     /// <summary>The same with the fit's residual carried as the GRD-1 envelope.</summary>
     private static Core.Results.Measured? FocusingMeasured(
-        CompiledModel model, double spread, int ions, int index,
+        CompiledModel model, ISolveStore? store, double spread, int ions, int index,
         Action<Core.Results.ValidityWarning>? report)
     {
         if (spread <= 0.0)
@@ -756,7 +767,7 @@ public static class FiguresOfMerit
             return null;
         }
 
-        var samples = EnergyScan(model, spread, ions, report);
+        var samples = EnergyScan(model, store, spread, ions, report);
 
         if (samples.Count < 5 || samples[0].EnergyFraction >= 0.0 || samples[^1].EnergyFraction <= 0.0)
         {
@@ -799,11 +810,12 @@ public static class FiguresOfMerit
     }
 
     private static ArrivalTimePeak? Ensemble(
-        CompiledModel model, double spread, int ions, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store,
+        double spread, int ions, Action<Core.Results.ValidityWarning>? report = null)
     {
         if (model.Cloud.IsCloud)
         {
-            return FromCloud(model, report);
+            return FromCloud(model, report, store);
         }
 
         var arrivals = new List<double>(ions);
@@ -824,7 +836,7 @@ public static class FiguresOfMerit
         // a volume geometry whose solve is seconds and whose flight is milliseconds.
         // `FlyCloud` has always shared one field across every ion in a cloud, so this
         // is that established arrangement applied to the sweep beside it.
-        var (_, species, field, settings, detector, collisions) = Setup(model, report: report);
+        var (_, species, field, settings, detector, collisions) = Setup(model, store, report: report);
 
         for (var k = 0; k < members; k++)
         {
@@ -849,10 +861,11 @@ public static class FiguresOfMerit
     /// <returns>The arrival-time peak it forms.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <param name="report">Where the warnings the flight earns are sent, or null.</param>
+    /// <param name="store">Where solved field channels are loaded from and kept, or null to solve them.</param>
     /// <exception cref="ArgumentException">Fewer than two ions arrived.</exception>
     public static ArrivalTimePeak? FromCloud(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null) =>
-        FlyCloud(model, report).Peak;
+        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null, ISolveStore? store = null) =>
+        FlyCloud(model, report, store).Peak;
 
     /// <summary>
     /// Flies the cloud a model declares, keeping both when the ions arrived and
@@ -860,6 +873,7 @@ public static class FiguresOfMerit
     /// </summary>
     /// <param name="model">The validated model.</param>
     /// <param name="report">Where the warnings the flight earns are sent, or null.</param>
+    /// <param name="store">Where solved field channels are loaded from and kept, or null to solve them.</param>
     /// <returns>The arrival-time peak and the arriving ions.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <exception cref="ArgumentException">Fewer than two ions arrived.</exception>
@@ -870,11 +884,11 @@ public static class FiguresOfMerit
     /// ensemble run to recompute something already in hand.
     /// </remarks>
     public static CloudFlight FlyCloud(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(model);
 
-        var (nominal, species, field, settings, detector, _) = Setup(model, report: report);
+        var (nominal, species, field, settings, detector, _) = Setup(model, store, report: report);
         // The declared direction, so a packet at rest still knows which way is
         // downstream. For a moving ion it is redundant and ignored.
         var cloud = IonCloud.Draw(in nominal, species, model.Cloud, model.SourceDirection);
@@ -1174,7 +1188,7 @@ public static class FiguresOfMerit
     /// convention the single-trajectory figures use for an ion that never lands.
     /// </remarks>
     private static (Emittance Wider, Emittance Narrower)? PacketEmittance(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report = null)
     {
         if (!model.Cloud.IsCloud)
         {
@@ -1184,7 +1198,7 @@ public static class FiguresOfMerit
             return null;
         }
 
-        var flight = FlyCloud(model, report);
+        var flight = FlyCloud(model, report, store);
 
         return flight.Arrived.Count >= 3 ? Emittance.FromPacket(flight.Arrived) : null;
     }
@@ -1225,7 +1239,7 @@ public static class FiguresOfMerit
     /// </para>
     /// </remarks>
     private static double? Transit(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report = null)
     {
         // Not a failure to measure - a wrong question. A trajectory run has a
         // flight time, which is a different quantity computed a different way,
@@ -1234,7 +1248,7 @@ public static class FiguresOfMerit
         RefuseUnlessDiffusive(
             model, "transitTime", "the transit of a density", "use 'flightTime' for a trajectory run");
 
-        var run = DiffusiveRun(model, report);
+        var run = DiffusiveRun(model, store, report);
 
         if (run.Arrivals.Count == 0 || run.Collected <= 0.0)
         {
@@ -1321,7 +1335,7 @@ public static class FiguresOfMerit
     /// </para>
     /// </remarks>
     private static DiffusiveArrivals DiffusiveRun(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report)
     {
         // Neither path below knows about `species`, and neither fails when handed one:
         // they would run the FIRST population's mass against a mobility derived from the
@@ -1341,7 +1355,7 @@ public static class FiguresOfMerit
             });
         }
 
-        var (field, fieldWarnings) = Fields.FieldAssembly.BuildReported(model);
+        var (field, fieldWarnings) = Fields.FieldAssembly.BuildReported(model, store);
 
         if (model.Phases.Count > 0)
         {
@@ -1409,7 +1423,7 @@ public static class FiguresOfMerit
     /// </para>
     /// </remarks>
     private static double? MobilityResolvingPower(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report = null)
     {
         RefuseUnlessDiffusive(
             model,
@@ -1500,7 +1514,7 @@ public static class FiguresOfMerit
             });
         }
 
-        var run = DiffusiveRun(model, report);
+        var run = DiffusiveRun(model, store, report);
 
         if (run.Arrivals.Count == 0 || run.Collected <= 0.0)
         {
@@ -1602,7 +1616,7 @@ public static class FiguresOfMerit
     /// </para>
     /// </remarks>
     private static double? RadialSpread(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report = null)
     {
         // The same refusal `transitTime` makes, for the same reason: a trajectory run
         // has a packet width too, computed a different way over particles, and quietly
@@ -1634,7 +1648,7 @@ public static class FiguresOfMerit
             });
         }
 
-        var run = DiffusiveRun(model, report);
+        var run = DiffusiveRun(model, store, report);
 
         // The plain path always ends with a density; only the sequenced path, refused
         // above, does not.
@@ -1735,9 +1749,10 @@ public static class FiguresOfMerit
     /// </para>
     /// </remarks>
     private static double? Oscillation(
-        CompiledModel model, int axis, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store,
+        int axis, Action<Core.Results.ValidityWarning>? report = null)
     {
-        var (launch, species, field, settings, detector, collisions) = Setup(model, report: report);
+        var (launch, species, field, settings, detector, collisions) = Setup(model, store, report: report);
 
         // Finely enough that the line is well inside the band rather than near its edge,
         // and capped so a long record does not cost more samples than it needs.
@@ -1797,9 +1812,10 @@ public static class FiguresOfMerit
     }
 
     private static double? Secular(
-        CompiledModel model, int axis, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store,
+        int axis, Action<Core.Results.ValidityWarning>? report = null)
     {
-        var (launch, species, field, settings, detector, collisions) = Setup(model, report: report);
+        var (launch, species, field, settings, detector, collisions) = Setup(model, store, report: report);
 
         // Gated on having a drive, not on varying in time: a geometry with DC stages and no
         // RF is time-varying and has no secular motion, and its shortest period is infinite.
@@ -1929,11 +1945,12 @@ public static class FiguresOfMerit
 
     private static double? Transmitted(
         CompiledModel model,
+        ISolveStore? store,
         double spread,
         int ions,
         Action<Core.Results.ValidityWarning>? report = null)
     {
-        var (arrived, launched) = Counted(model, spread, ions, report);
+        var (arrived, launched) = Counted(model, store, spread, ions, report);
 
         return launched > 0 ? (double)arrived / launched : null;
     }
@@ -1941,13 +1958,14 @@ public static class FiguresOfMerit
     /// <summary>How many of the ensemble arrived, and how many were launched.</summary>
     private static (int Arrived, int Launched) Counted(
         CompiledModel model,
+        ISolveStore? store,
         double spread,
         int ions,
         Action<Core.Results.ValidityWarning>? report = null)
     {
         if (model.Cloud.IsCloud)
         {
-            return (FlyCloud(model, report).Arrived.Count, model.Cloud.Ions);
+            return (FlyCloud(model, report, store).Arrived.Count, model.Cloud.Ions);
         }
 
         var arrived = 0;
@@ -1957,7 +1975,8 @@ public static class FiguresOfMerit
         {
             var fraction = members == 1 ? 0.0 : (2.0 * k / (members - 1.0)) - 1.0;
 
-            var (launch, species, field, settings, detector, collisions) = Setup(model, spread * fraction, report);
+            var (launch, species, field, settings, detector, collisions) =
+                Setup(model, store, spread * fraction, report);
 
             var result = TrajectoryIntegrator.Integrate(
                 launch, species, field, settings, detector, collisions: collisions?.Invoke());
@@ -2024,11 +2043,11 @@ public static class FiguresOfMerit
     /// </para>
     /// </remarks>
     private static double? MeanKineticEnergy(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report = null)
     {
         var species = IonSpecies.FromModel(model);
 
-        var flight = FlyCloud(model, report);
+        var flight = FlyCloud(model, report, store);
 
         var total = 0.0;
 
@@ -2044,6 +2063,7 @@ public static class FiguresOfMerit
 
     private static double? Confined(
         CompiledModel model,
+        ISolveStore? store,
         double spread,
         int ions,
         Action<Core.Results.ValidityWarning>? report = null)
@@ -2065,7 +2085,7 @@ public static class FiguresOfMerit
         // The example being green is what let this sit.
         if (model.Cloud.IsCloud)
         {
-            var cloud = FlyCloud(model, report);
+            var cloud = FlyCloud(model, report, store);
 
             return model.Cloud.Ions > 0
                 ? (double)cloud.Remaining.Count / model.Cloud.Ions
@@ -2079,7 +2099,8 @@ public static class FiguresOfMerit
         {
             var fraction = members == 1 ? 0.0 : (2.0 * k / (members - 1.0)) - 1.0;
 
-            var (launch, species, field, settings, detector, collisions) = Setup(model, spread * fraction, report);
+            var (launch, species, field, settings, detector, collisions) =
+                Setup(model, store, spread * fraction, report);
 
             var result = TrajectoryIntegrator.Integrate(
                 launch, species, field, settings, detector, collisions: collisions?.Invoke());
@@ -2095,7 +2116,7 @@ public static class FiguresOfMerit
     }
 
     private static double? TurnAround(
-        CompiledModel model, Action<Core.Results.ValidityWarning>? report = null)
+        CompiledModel model, ISolveStore? store, Action<Core.Results.ValidityWarning>? report = null)
     {
         if (model.Cloud.TemperatureK <= 0.0)
         {
@@ -2106,7 +2127,7 @@ public static class FiguresOfMerit
 
         try
         {
-            return FromCloud(ThermalOnly(model), report)?.GaussianEquivalentFwhmSeconds;
+            return FromCloud(ThermalOnly(model), report, store)?.GaussianEquivalentFwhmSeconds;
         }
         catch (ArgumentException)
         {
@@ -2163,6 +2184,7 @@ public static class FiguresOfMerit
         IntegrationSettings Settings, TrajectoryStopFunction Detector,
         Func<Transport.Collisions.CollisionSampler>? Collisions) Setup(
         CompiledModel model,
+        ISolveStore? store,
         double energyOffset = 0.0,
         Action<Core.Results.ValidityWarning>? report = null)
     {
@@ -2173,11 +2195,11 @@ public static class FiguresOfMerit
             // Nowhere to carry a taint onto, so the only honest options are the two
             // FieldAssembly offers - refuse, or hide it - and hiding it is how the
             // segmented quadrupole sat at the wrong working point for a revision.
-            field = FieldAssembly.Build(model);
+            field = FieldAssembly.Build(model, store);
         }
         else
         {
-            var (built, fieldWarnings) = FieldAssembly.BuildReported(model);
+            var (built, fieldWarnings) = FieldAssembly.BuildReported(model, store);
 
             Forward(fieldWarnings, report);
             field = built;

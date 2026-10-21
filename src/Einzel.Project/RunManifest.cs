@@ -119,6 +119,18 @@ public sealed record RunManifest
     /// </remarks>
     public IReadOnlyList<SolveKey>? Solves { get; init; }
 
+    /// <summary>
+    /// What became of each solved channel in the field cache: loaded, stored, replaced, or not
+    /// writable, with the SHA-256 of the potential the run used. Absent when the run did not
+    /// use the cache (<c>--no-cache</c>, a study, a manifest written before the cache existed).
+    /// </summary>
+    /// <remarks>
+    /// The payload hash is what lets <c>einzel verify</c> notice that the cache now holds a
+    /// different field for a channel than this result was computed from, without reading the
+    /// field itself (FLD-3, PRJ-3).
+    /// </remarks>
+    public IReadOnlyList<FieldCacheUse>? FieldCache { get; init; }
+
     /// <summary>The transport mode used.</summary>
     public required string TransportMode { get; init; }
 
