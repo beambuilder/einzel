@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Einzel.Core.Errors;
 using Einzel.Core.Model;
+using Einzel.Fields.Solved;
 using Einzel.Io;
 using Einzel.Project;
 using Einzel.Sweeps;
@@ -321,6 +322,7 @@ public static class StudyCommand
         double energySpread,
         int ions,
         WarningLedger ledger,
+        ISolveStore? store,
         out ExtensionObjective.Provenance? provenance)
     {
         // THE SINK IS PER EVALUATION, NOT PER STUDY. Baking `ledger.Add` into one
@@ -337,13 +339,13 @@ public static class StudyCommand
         {
             provenance = null;
             build = evaluation =>
-                FiguresOfMerit.Evaluator(name, energySpread, ions, evaluation.Add);
+                FiguresOfMerit.Evaluator(name, energySpread, ions, evaluation.Add, store);
         }
         else
         {
             var extension = ExtensionObjective.Evaluator(
                 name, project.Extensions, Path.Combine(project.Scratch, "ext"),
-                out var used, energySpread, ions);
+                out var used, energySpread, ions, store);
 
             provenance = used;
 
@@ -493,11 +495,16 @@ public static class StudyCommand
     /// <param name="studyPath">Path to the study file.</param>
     /// <param name="project">Where artifacts belong.</param>
     /// <param name="dryRun">Report what would be done and compute nothing (CLI-4).</param>
+    /// <param name="store">
+    /// Where each evaluation loads its solved field channels from and keeps them, or null to
+    /// solve every one. A study that varies no geometric parameter solves once and loads after.
+    /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="studyPath"/> is null or blank.</exception>
     /// <exception cref="EinzelException">The study or the model does not validate.</exception>
-    public static SweepOutcome Sweep(string studyPath, ProjectLayout project, bool dryRun = false)
+    public static SweepOutcome Sweep(
+        string studyPath, ProjectLayout project, bool dryRun = false, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -526,7 +533,7 @@ public static class StudyCommand
         var ledger = new WarningLedger();
 
         var evaluate = Evaluate(
-            figure.Name, project, study.EnergySpread, study.Ions, ledger, out var extension);
+            figure.Name, project, study.EnergySpread, study.Ions, ledger, store, out var extension);
 
         var result = ToleranceStudy.Run(
             document,
@@ -579,6 +586,10 @@ public static class StudyCommand
     /// <param name="studyPath">Path to the study file.</param>
     /// <param name="project">Where artifacts belong.</param>
     /// <param name="dryRun">Report what would be done and compute nothing (CLI-4).</param>
+    /// <param name="store">
+    /// Where each evaluation loads its solved field channels from and keeps them, or null to
+    /// solve every one. A study that varies no geometric parameter solves once and loads after.
+    /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="studyPath"/> is null or blank.</exception>
@@ -589,7 +600,8 @@ public static class StudyCommand
     /// scan. Written as a study it gets what those did not - a manifest, a result
     /// file beside the model, and a form an agent can author.
     /// </remarks>
-    public static ScanOutcome Scan(string studyPath, ProjectLayout project, bool dryRun = false)
+    public static ScanOutcome Scan(
+        string studyPath, ProjectLayout project, bool dryRun = false, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -622,7 +634,7 @@ public static class StudyCommand
         var ledger = new WarningLedger();
 
         var evaluate = Evaluate(
-            figure.Name, project, study.EnergySpread, study.Ions, ledger, out var extension);
+            figure.Name, project, study.EnergySpread, study.Ions, ledger, store, out var extension);
 
         var result = ParameterScan.Run(
             document, axis, evaluate, Path.GetDirectoryName(modelPath),
@@ -680,6 +692,10 @@ public static class StudyCommand
     /// <param name="studyPath">Path to the study file.</param>
     /// <param name="project">Where artifacts belong.</param>
     /// <param name="dryRun">Report what would be done and compute nothing (CLI-4).</param>
+    /// <param name="store">
+    /// Where each evaluation loads its solved field channels from and keeps them, or null to
+    /// solve every one. A study that varies no geometric parameter solves once and loads after.
+    /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="studyPath"/> is null or blank.</exception>
@@ -690,7 +706,8 @@ public static class StudyCommand
     /// to ACC-6's one part in five hundred, for about eleven evaluations instead of
     /// five hundred and one.
     /// </remarks>
-    public static BoundaryOutcome Boundary(string studyPath, ProjectLayout project, bool dryRun = false)
+    public static BoundaryOutcome Boundary(
+        string studyPath, ProjectLayout project, bool dryRun = false, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -725,7 +742,7 @@ public static class StudyCommand
         var ledger = new WarningLedger();
 
         var evaluate = Evaluate(
-            figure.Name, project, study.EnergySpread, study.Ions, ledger, out var extension);
+            figure.Name, project, study.EnergySpread, study.Ions, ledger, store, out var extension);
 
         var result = BoundarySearch.Run(
             document,
@@ -774,11 +791,16 @@ public static class StudyCommand
     /// <param name="studyPath">Path to the study file.</param>
     /// <param name="project">Where artifacts belong.</param>
     /// <param name="dryRun">Report what would be done and compute nothing (CLI-4).</param>
+    /// <param name="store">
+    /// Where each evaluation loads its solved field channels from and keeps them, or null to
+    /// solve every one. A study that varies no geometric parameter solves once and loads after.
+    /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="studyPath"/> is null or blank.</exception>
     /// <exception cref="EinzelException">The study or the model does not validate.</exception>
-    public static OptimiseOutcome Optimise(string studyPath, ProjectLayout project, bool dryRun = false)
+    public static OptimiseOutcome Optimise(
+        string studyPath, ProjectLayout project, bool dryRun = false, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -815,7 +837,7 @@ public static class StudyCommand
         var result = Optimiser.Run(
             document,
             variables,
-            Evaluate(figure.Name, project, study.EnergySpread, study.Ions, ledger, out var extension),
+            Evaluate(figure.Name, project, study.EnergySpread, study.Ions, ledger, store, out var extension),
             sense,
             algorithm,
             new OptimisationSettings

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Einzel.Core.Errors;
 using Einzel.Core.Model;
 using Einzel.Core.Units;
+using Einzel.Fields.Solved;
 using Einzel.Project;
 
 namespace Einzel.Commands;
@@ -142,9 +143,14 @@ public static class TestCommand
 
     /// <summary>Runs every test in a project.</summary>
     /// <param name="root">The project root.</param>
+    /// <param name="store">
+    /// Where the tests load their solved field channels from and keep them, or null to solve
+    /// every one. Each expectation flies its model again, so a test file of five figures on one
+    /// geometry solves it once.
+    /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentException"><paramref name="root"/> is null or blank.</exception>
-    public static TestOutcome Execute(string root)
+    public static TestOutcome Execute(string root, ISolveStore? store = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
@@ -165,13 +171,13 @@ public static class TestCommand
 
         foreach (var file in files)
         {
-            tests.Add(RunOne(layout, file));
+            tests.Add(RunOne(layout, file, store));
         }
 
         return new TestOutcome { Root = layout.Root, Tests = tests };
     }
 
-    private static TestResult RunOne(ProjectLayout layout, string path)
+    private static TestResult RunOne(ProjectLayout layout, string path, ISolveStore? store)
     {
         var relative = Path.GetRelativePath(layout.Root, path);
         var name = Path.GetFileNameWithoutExtension(path);
@@ -231,7 +237,7 @@ public static class TestCommand
 
         foreach (var expectation in test.Expect)
         {
-            assertions.Add(Check(model, expectation));
+            assertions.Add(Check(model, expectation, store));
         }
 
         return new TestResult
@@ -242,7 +248,7 @@ public static class TestCommand
         };
     }
 
-    private static Assertion Check(CompiledModel model, ExpectationDocument expectation)
+    private static Assertion Check(CompiledModel model, ExpectationDocument expectation, ISolveStore? store)
     {
         var figure = FiguresOfMerit.Describe(
             expectation.FigureOfMerit ?? throw new EinzelException(new EinzelError
@@ -271,7 +277,8 @@ public static class TestCommand
             });
         }
 
-        var evaluate = FiguresOfMerit.Evaluator(figure.Name, expectation.EnergySpread, expectation.Ions);
+        var evaluate = FiguresOfMerit.Evaluator(
+            figure.Name, expectation.EnergySpread, expectation.Ions, store: store);
         var observed = evaluate(model);
 
         if (observed is not { } value)

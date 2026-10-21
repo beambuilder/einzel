@@ -350,4 +350,60 @@ public sealed class FieldCacheTests : IDisposable
         Assert.Equal((1, 1, b.ChannelHash, FieldCacheUse.Stored), (use.Field, use.Channel, use.ChannelHash, use.Status));
         Assert.StartsWith("sha256:", use.PayloadHash, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// <c>status</c> counts what is there; <c>prune</c> deletes other versions and compute
+    /// paths, files that are half an entry and temporary files, and leaves this build's entries;
+    /// <c>clear</c> deletes everything. A dry run of either deletes nothing and names the same
+    /// files.
+    /// </summary>
+    /// <remarks>
+    /// Mutations: prune keeping orphans, or deleting this version's entries, fails here; a dry
+    /// run that deletes fails here.
+    /// </remarks>
+    [Fact]
+    public void PruneDeletesWhatNoRunWillLoadAndClearDeletesEverything()
+    {
+        Cache().Save(Entry("a"), Potential, Record);
+        Cache().Save(Entry("b"), Potential, Record);
+
+        File.Delete(PathOf(Entry("b"), ".json"));
+        File.WriteAllText(PathOf(Entry("c"), ".1234.tmp"), "partial");
+
+        var old = FieldCache.EntryDirectory(Project, 1, EngineBuild.ComputePath);
+        var simd = FieldCache.EntryDirectory(Project, EngineBuild.SolverBehaviourVersion, "simd");
+
+        foreach (var directory in new[] { old, simd })
+        {
+            Directory.CreateDirectory(directory);
+            File.Copy(PathOf(Entry("a"), ".f64"), Path.Combine(directory, "other.f64"));
+            File.Copy(PathOf(Entry("a"), ".json"), Path.Combine(directory, "other.json"));
+        }
+
+        var status = FieldCache.Status(Project);
+        Assert.Equal((1, 2, 1, 1), (status.Entries, status.OtherVersionEntries, status.Orphans, status.Temporary));
+        Assert.Equal(
+            (EngineBuild.SolverBehaviourVersion, EngineBuild.ComputePath),
+            (status.SolverBehaviourVersion, status.ComputePath));
+
+        var preview = FieldCache.Prune(Project, dryRun: true);
+        Assert.True(preview.DryRun);
+        Assert.Equal(6, preview.Removed.Count);
+        Assert.True(File.Exists(Path.Combine(old, "other.f64")));
+
+        var pruned = FieldCache.Prune(Project, dryRun: false);
+        Assert.Equal(preview.Removed, pruned.Removed);
+        Assert.Equal(preview.Bytes, pruned.Bytes);
+        Assert.False(Directory.Exists(old));
+        Assert.False(Directory.Exists(simd));
+        Assert.True(Cache().TryLoad(Entry("a"), out _, out _));
+
+        var after = FieldCache.Status(Project);
+        Assert.Equal((1, 0, 0, 0), (after.Entries, after.OtherVersionEntries, after.Orphans, after.Temporary));
+
+        Assert.Equal(2, FieldCache.Clear(Project, dryRun: true).Removed.Count);
+        Assert.True(File.Exists(PathOf(Entry("a"), ".f64")));
+        Assert.Equal(2, FieldCache.Clear(Project, dryRun: false).Removed.Count);
+        Assert.False(Directory.Exists(Project.FieldCache));
+    }
 }

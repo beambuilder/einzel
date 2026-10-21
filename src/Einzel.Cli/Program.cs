@@ -130,6 +130,7 @@ public static class Program
             "export" => Export(options),
             "render" => Render(args, options),
             "ext" => Ext(args, options),
+            "cache" => Cache(args, options),
             "compare" => Compare(options),
             "schema" => Schema(options),
             "templates" => Catalog(options, "template"),
@@ -181,14 +182,15 @@ public static class Program
     {
         if (options.Positional.Count == 0)
         {
-            Console.Error.WriteLine("usage: einzel sweep <study.json> [--project <dir>] [--dry-run] [--json]");
+            Console.Error.WriteLine("usage: einzel sweep <study.json> [--project <dir>] [--dry-run] [--no-cache] [--json]");
             Console.Error.WriteLine("run 'einzel schema --study' for the shape of a study file");
             return (int)ExitCode.ValidationFailure;
         }
 
         var studyPath = Path.GetFullPath(options.Positional[0]);
         var root = options.Value("project") ?? InferProjectRoot(studyPath);
-        var outcome = StudyCommand.Sweep(studyPath, new ProjectLayout(root), options.Has("dry-run"));
+        var project = new ProjectLayout(root);
+        var outcome = StudyCommand.Sweep(studyPath, project, options.Has("dry-run"), CacheFor(project, options));
 
         if (options.Has("json"))
         {
@@ -271,14 +273,15 @@ public static class Program
     {
         if (options.Positional.Count == 0)
         {
-            Console.Error.WriteLine("usage: einzel scan <study.json> [--project <dir>] [--dry-run] [--json]");
+            Console.Error.WriteLine("usage: einzel scan <study.json> [--project <dir>] [--dry-run] [--no-cache] [--json]");
             Console.Error.WriteLine("run 'einzel schema --study' for the shape of a study file");
             return (int)ExitCode.ValidationFailure;
         }
 
         var studyPath = Path.GetFullPath(options.Positional[0]);
         var root = options.Value("project") ?? InferProjectRoot(studyPath);
-        var outcome = StudyCommand.Scan(studyPath, new ProjectLayout(root), options.Has("dry-run"));
+        var project = new ProjectLayout(root);
+        var outcome = StudyCommand.Scan(studyPath, project, options.Has("dry-run"), CacheFor(project, options));
 
         if (options.Has("json"))
         {
@@ -359,14 +362,15 @@ public static class Program
         if (options.Positional.Count == 0)
         {
             Console.Error.WriteLine(
-                "usage: einzel boundary <study.json> [--project <dir>] [--dry-run] [--json]");
+                "usage: einzel boundary <study.json> [--project <dir>] [--dry-run] [--no-cache] [--json]");
             Console.Error.WriteLine("run 'einzel schema --study' for the shape of a study file");
             return (int)ExitCode.ValidationFailure;
         }
 
         var studyPath = Path.GetFullPath(options.Positional[0]);
         var root = options.Value("project") ?? InferProjectRoot(studyPath);
-        var outcome = StudyCommand.Boundary(studyPath, new ProjectLayout(root), options.Has("dry-run"));
+        var project = new ProjectLayout(root);
+        var outcome = StudyCommand.Boundary(studyPath, project, options.Has("dry-run"), CacheFor(project, options));
 
         if (options.Has("json"))
         {
@@ -450,14 +454,15 @@ public static class Program
     {
         if (options.Positional.Count == 0)
         {
-            Console.Error.WriteLine("usage: einzel optimise <study.json> [--project <dir>] [--dry-run] [--json]");
+            Console.Error.WriteLine("usage: einzel optimise <study.json> [--project <dir>] [--dry-run] [--no-cache] [--json]");
             Console.Error.WriteLine("run 'einzel schema --study' for the shape of a study file");
             return (int)ExitCode.ValidationFailure;
         }
 
         var studyPath = Path.GetFullPath(options.Positional[0]);
         var root = options.Value("project") ?? InferProjectRoot(studyPath);
-        var outcome = StudyCommand.Optimise(studyPath, new ProjectLayout(root), options.Has("dry-run"));
+        var project = new ProjectLayout(root);
+        var outcome = StudyCommand.Optimise(studyPath, project, options.Has("dry-run"), CacheFor(project, options));
 
         if (options.Has("json"))
         {
@@ -948,11 +953,17 @@ public static class Program
     {
         if (options.Positional.Count == 0)
         {
-            Console.Error.WriteLine("usage: einzel solve <model.json> [--json]");
+            Console.Error.WriteLine("usage: einzel solve <model.json> [--json] [--project <dir>] [--no-cache]");
             return (int)ExitCode.ValidationFailure;
         }
 
-        var outcome = SolveCommand.Execute(options.Positional[0]);
+        // Written, never read: solve exists to measure a solve, and a load would make its
+        // numbers meaningless. What it keeps, the next run of the model loads.
+        var modelPath = Path.GetFullPath(options.Positional[0]);
+        var project = new ProjectLayout(options.Value("project") ?? InferProjectRoot(modelPath));
+        var outcome = SolveCommand.Execute(
+            modelPath,
+            options.Has("no-cache") ? null : new FieldCache(project, read: false, announce: Console.Error.WriteLine));
 
         if (options.Has("json"))
         {
@@ -1086,7 +1097,7 @@ public static class Program
         var root = options.Value("project")
             ?? (options.Positional.Count > 0 ? options.Positional[0] : ".");
 
-        var outcome = TestCommand.Execute(root);
+        var outcome = TestCommand.Execute(root, CacheFor(new ProjectLayout(root), options));
 
         if (options.Has("json"))
         {
@@ -1829,6 +1840,78 @@ public static class Program
         catch (System.Text.Json.JsonException)
         {
             return false;
+        }
+    }
+
+    /// <summary>The field cache: what it holds, and deleting it (FLD-3, PRJ-4).</summary>
+    /// <remarks>
+    /// <c>clear</c> and <c>prune</c> mutate, so both take <c>--dry-run</c> (CLI-4). Deleting
+    /// the cache never loses anything: every entry is a solve the next run can repeat.
+    /// </remarks>
+    private static int Cache(string[] args, CommandLine options)
+    {
+        var action = args.Length > 1 && !args[1].StartsWith('-') ? args[1] : "status";
+
+        // Found as run finds it, by walking up to the directory that holds models/, so the
+        // cache a run in models/ wrote is the cache this sees from there.
+        var start = Path.GetFullPath(options.Positional.Count > 1 ? options.Positional[1] : ".");
+        var project = options.Value("project") is { } named
+            ? new ProjectLayout(named)
+            : ProjectLayout.Find(start) ?? new ProjectLayout(start);
+        var dryRun = options.Has("dry-run");
+        var invariant = CultureInfo.InvariantCulture;
+
+        switch (action)
+        {
+            case "status":
+            {
+                var status = FieldCache.Status(project);
+
+                if (options.Has("json"))
+                {
+                    return Emit(status);
+                }
+
+                Console.Out.WriteLine(string.Create(
+                    invariant,
+                    $"{status.Directory}, solver-behaviour version {status.SolverBehaviourVersion}, {status.ComputePath} path"));
+                Console.Out.WriteLine(string.Create(
+                    invariant, $"  {status.Entries} channel(s), {EstimateCommand.MemorySize(status.Bytes / 1048576.0)}"));
+                var others = EstimateCommand.MemorySize(status.OtherVersionBytes / 1048576.0);
+                Console.Out.WriteLine(string.Create(
+                    invariant,
+                    $"  other versions or paths: {status.OtherVersionEntries} channel(s), {others}; orphaned files {status.Orphans}, temporary files {status.Temporary}"));
+
+                return (int)ExitCode.Success;
+            }
+
+            case "clear":
+            case "prune":
+            {
+                var cleanup = action == "clear"
+                    ? FieldCache.Clear(project, dryRun)
+                    : FieldCache.Prune(project, dryRun);
+
+                if (options.Has("json"))
+                {
+                    return Emit(cleanup);
+                }
+
+                foreach (var file in cleanup.Removed)
+                {
+                    Console.Out.WriteLine($"{(dryRun ? "would delete" : "deleted")} {file}");
+                }
+
+                var size = EstimateCommand.MemorySize(cleanup.Bytes / 1048576.0);
+                var dry = dryRun ? "; nothing deleted (--dry-run)" : string.Empty;
+                Console.Out.WriteLine(string.Create(invariant, $"{cleanup.Removed.Count} file(s), {size}{dry}"));
+
+                return (int)ExitCode.Success;
+            }
+
+            default:
+                Console.Error.WriteLine("usage: einzel cache status|clear|prune [dir] [--dry-run] [--json]");
+                return (int)ExitCode.ValidationFailure;
         }
     }
 
@@ -2767,6 +2850,8 @@ public static class Program
           render section <model.json>   draw a plane through the instrument as SVG or PDF
           render animation <spec.json>  frames on a declared playback mapping (RND-7)
           ext list | test | register    the extension authoring loop
+          cache status [dir]            the solved fields .einzel/cache keeps for the next run
+          cache clear | prune [dir]     delete them all, or only what no run will load
           agents-md [dir]               regenerate the platform layer of AGENTS.md
 
         release tooling:

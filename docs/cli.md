@@ -104,6 +104,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel render section <model.json \| spec.json>` | Draw a plane through the instrument as line work |
 | `einzel render still <model.json>` | Draw the viewport's shaded 3D picture to a PNG, headlessly - the same composition and camera the window uses |
 | `einzel render animation <spec.json>` | Draw a flight as numbered vector frames on the spec's declared time mapping (RND-7) |
+| `einzel cache status\|clear\|prune [dir]` | What the field cache keeps; delete all of it, or only what no run of this build will load (other solver versions or compute paths, half-written and orphaned files). `--dry-run` names the files and deletes nothing |
 | `einzel agents-md [dir]` | Regenerate the platform layer of `AGENTS.md` (PRJ-6) |
 | `einzel --version` | Engine version |
 
@@ -118,7 +119,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `--see-through` | `render still` only: draw the conductors translucent, as the window's toggle does |
 | `--no-scale` | `render still` only: leave out the ruler, which is drawn by default in the corner the instrument covers least (and left out anyway when the picture is too small to hold it) |
 | `--progress <seconds>` | `run` and both render verbs: how often to say where the transport has got to, on stderr. Thirty seconds by default, `0` for silence |
-| `--no-cache` | `run`: neither load solved channels from `.einzel/cache` nor keep them; the manifest then records no `fieldCache` |
+| `--no-cache` | `run`, `test` and the four studies: neither load solved channels from `.einzel/cache` nor keep them; a run's manifest then records no `fieldCache`. `solve`: do not keep what it solves |
 | `--project <dir>` | Project root; otherwise inferred by walking up from the model |
 
 Not yet built: `self-update`, which needs `Einzel.Update`. Of the render verbs
@@ -244,7 +245,7 @@ and asserting the stronger reading in the message would repeat it in words.
 ### What `verify` checks, and what it does not
 
 A manifest fully determines its run (PRJ-3), so a stored result carries enough to
-say whether the world has moved out from under it. Three ways it stops being the
+say whether the world has moved out from under it. Four ways it stops being the
 answer, and they fail differently:
 
 - **The model moved on.** Someone edited the geometry after the run, and the
@@ -263,6 +264,12 @@ answer, and they fail differently:
   exactly this: "after an engine update a cache computed by the previous solver is
   silently wrong and nothing else would catch it", while a release that altered
   nothing physical must not invalidate every result in every project.
+- **The field cache moved on.** A run's manifest records the SHA-256 of every solved
+  potential it used (`fieldCache`). If the cache now holds another field under that
+  channel's key - written by another machine, or put there by hand - the next run
+  would load it, and that is drift. An entry that is simply gone is a **note**: the
+  cache is regenerable and the next run solves it again. Only the records are
+  compared; a payload is hashed by the run that loads it, not here.
 
 A different engine build with the same solver behaviour is a **note**, not drift -
 the numbers still stand. So is a result produced on another machine, since section
@@ -541,6 +548,15 @@ Omit the bounds and the model's own declared bounds are used, which is what sche
 resolving power is better larger, and making the author restate that is an
 invitation to state it wrongly.
 
+**Every evaluation goes through the field cache** (see "A second run of the same
+geometry loads its field"), as does every expectation `einzel test` checks. A study
+whose parameters move no electrode - a supply, an energy, a cloud - solves its field
+once and loads it at every later point, and a second study of the same model loads it
+throughout. One that moves an electrode keeps one entry per geometry it visited, eight
+bytes a node for each channel of each, which is the cost to watch on a large mesh;
+`einzel cache status` says how much is there. A study's manifest does not list the
+cache's use, since its geometry can change from one evaluation to the next.
+
 ### Figures of merit
 
 A study names one out of a registry rather than carrying a function. Section 12's
@@ -789,6 +805,11 @@ on the last line beside the time: a cache needs the hashes to know what was aske
 version to know how it was answered. The field cache is keyed on them, under a directory
 per version and compute path; the run manifest records them too (`solves`), so a result
 can be matched to the solve it came from.
+
+**It always solves, and keeps what it solved.** A load would make the residuals and the
+time it reports describe a solve made earlier, perhaps by another build, so `solve`
+never reads the cache; it writes each channel it solves there, so the `run` after it
+starts from the cache. `--no-cache` keeps nothing. `export` neither reads nor writes it.
 
 ### Why `export` writes ImageData
 

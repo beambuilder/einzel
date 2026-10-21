@@ -167,10 +167,15 @@ public static class SolveCommand
 {
     /// <summary>Solves every solved field element in a model.</summary>
     /// <param name="modelPath">Path to the model file.</param>
+    /// <param name="store">
+    /// Where to keep each channel solved, or null. Handed only what was solved: this verb
+    /// exists to measure and report a solve, so it never loads one, and a store that can load
+    /// should be opened write-only for it. What it keeps, the next <c>run</c> loads.
+    /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentException"><paramref name="modelPath"/> is null or blank.</exception>
     /// <exception cref="Core.Errors.EinzelException">The model does not validate.</exception>
-    public static SolveOutcome Execute(string modelPath)
+    public static SolveOutcome Execute(string modelPath, ISolveStore? store = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
 
@@ -217,7 +222,7 @@ public static class SolveCommand
                 var volumeHash = SolveHash.Geometry(geometry);
 
                 var volume = GeometryBuilder3D.BuildGrid(geometry);
-                var volumeChannels = GeometryBuilder3D.SolveChannels(geometry);
+                var volumeChannels = GeometryBuilder3D.SolveChannels(geometry, store);
 
                 // Guarded as the plane path is: a driven geometry with nothing energised has no
                 // channels, and indexing the first would turn "nothing to solve" into a crash.
@@ -273,7 +278,7 @@ public static class SolveCommand
             // "the field" meant reporting the DC pattern alone - which for the RF
             // quadrupole is a grounded box, and came back converged with a peak
             // potential of zero volts and exit 0.
-            var planeChannels = GeometryBuilder.SolveChannels(solve!);
+            var planeChannels = GeometryBuilder.SolveChannels(solve!, store);
 
             if (planeChannels.Count > 0)
             {
