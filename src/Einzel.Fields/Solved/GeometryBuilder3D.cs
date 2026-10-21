@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Einzel.Core.Model;
 
 namespace Einzel.Fields.Solved;
@@ -417,24 +418,17 @@ public static class GeometryBuilder3D
 
     /// <summary>Builds, solves, and wraps a geometry as a field.</summary>
     /// <param name="geometry">The geometry.</param>
+    /// <param name="store">Where to load the solve from or keep it, or null to solve.</param>
     /// <returns>The field, and how the solve went.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="geometry"/> is null.</exception>
-    public static (SolvedField3D Field, SolveReport Report) Build(Geometry3D geometry)
+    public static (SolvedField3D Field, SolveReport Report) Build(Geometry3D geometry, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(geometry);
 
-        var grid = BuildGrid(geometry);
-        var mask = BuildMask(geometry, grid);
+        // The static solve is the one channel holding every electrode as declared.
+        var solved = SolveGroup(geometry, BuildGrid(geometry), null, 0, Keyed(geometry, store));
 
-        var (potential, report) = PoissonSolver3D.Solve(
-            mask,
-            geometry.Tolerance,
-            maximumCycles: 200,
-            coarsen: Coarsener(geometry));
-
-        return (
-            new SolvedField3D(potential, geometry.Electrodes),
-            report with { Warnings = SharedFaceNodes.Warnings(NodesOnSharedFaces(geometry, grid, mask)) });
+        return (new SolvedField3D(solved.Potential, geometry.Electrodes), solved.Report);
     }
 
     /// <summary>
@@ -861,6 +855,7 @@ public static class GeometryBuilder3D
     /// Builds a geometry as a field, driven or sequenced if it declares either.
     /// </summary>
     /// <param name="geometry">The geometry.</param>
+    /// <param name="store">Where to load each channel from or keep it, or null to solve them all.</param>
     /// <returns>The field, and the worst of the basis solves.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="geometry"/> is null.</exception>
     /// <exception cref="Core.Errors.EinzelException">
@@ -873,7 +868,8 @@ public static class GeometryBuilder3D
     /// are wired, not where they are. A segmented quadrupole with three sections at
     /// different working points is three patterns, whatever the mesh is.
     /// </remarks>
-    public static (IElectrostaticField Field, SolveReport Report) BuildField(Geometry3D geometry)
+    public static (IElectrostaticField Field, SolveReport Report) BuildField(
+        Geometry3D geometry, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(geometry);
 
@@ -885,12 +881,12 @@ public static class GeometryBuilder3D
 
         if (geometry.Drives.Count == 0 && geometry.Stages.Count == 0)
         {
-            var (statik, staticReport) = Build(geometry);
+            var (statik, staticReport) = Build(geometry, store);
             return (Reflected(statik, geometry), staticReport);
         }
 
         var groups = Groups(geometry);
-        var solves = SolveGroups(geometry, groups);
+        var solves = SolveGroups(geometry, groups, store);
 
         // Once per geometry rather than per channel: which nodes sit on a shared face is a
         // property of the mesh and the conductors, and every channel solves on both. The
@@ -1015,6 +1011,7 @@ public static class GeometryBuilder3D
 
     /// <summary>Solves a geometry channel by channel, and hands back the diagnostics.</summary>
     /// <param name="geometry">The geometry.</param>
+    /// <param name="store">Where to load each channel from or keep it, or null to solve them all.</param>
     /// <returns>One entry per basis channel; exactly one for a static geometry.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="geometry"/> is null.</exception>
     /// <remarks>
@@ -1022,32 +1019,18 @@ public static class GeometryBuilder3D
     /// but one per spatial pattern, and a residual quoted for "the field" would be
     /// quoting whichever of them happened to be last.
     /// </remarks>
-    public static IReadOnlyList<ChannelSolve> SolveChannels(Geometry3D geometry)
+    public static IReadOnlyList<ChannelSolve> SolveChannels(Geometry3D geometry, ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(geometry);
 
         if (geometry.Drives.Count == 0 && geometry.Stages.Count == 0)
         {
-            var grid = BuildGrid(geometry);
-            var mask = BuildMask(geometry, grid);
-
-            var (potential, report) = PoissonSolver3D.Solve(
-                mask, geometry.Tolerance, maximumCycles: 200, coarsen: Coarsener(geometry));
-
-            return
-            [
-                new ChannelSolve(
-                    0, mask.FixedCount, mask.Cuts?.CutCount ?? 0, potential,
-                    report with { Warnings = SharedFaceNodes.Warnings(NodesOnSharedFaces(geometry, grid, mask)) })
-                {
-                    Holding = StaticHolding(geometry),
-                },
-            ];
+            return [SolveGroup(geometry, BuildGrid(geometry), null, 0, Keyed(geometry, store))];
         }
 
         // Every channel carries the same finding, because every channel solves on the same
         // mesh round the same conductors; einzel solve reports it once per element.
-        var solves = SolveGroups(geometry, Groups(geometry));
+        var solves = SolveGroups(geometry, Groups(geometry), store);
         var warnings = solves.Count > 0 ? solves[0].Report.Warnings : SharedFaceNodes.Warnings(null);
 
         return [.. solves.Select(channel => channel with { Report = channel.Report with { Warnings = warnings } })];
@@ -1158,14 +1141,15 @@ public static class GeometryBuilder3D
     }
 
     private static List<ChannelSolve> SolveGroups(
-        Geometry3D geometry, List<DriveChannel> groups)
+        Geometry3D geometry, List<DriveChannel> groups, ISolveStore? store)
     {
         var grid = BuildGrid(geometry);
+        var keyed = Keyed(geometry, store);
         var solves = new List<ChannelSolve>(groups.Count);
 
         for (var index = 0; index < groups.Count; index++)
         {
-            solves.Add(SolveGroup(geometry, grid, groups[index], index));
+            solves.Add(SolveGroup(geometry, grid, WeightOf(groups[index].Pattern), index, keyed));
         }
 
         return solves;
@@ -1190,12 +1174,54 @@ public static class GeometryBuilder3D
     /// smaller now that the cut links hold their cut arms alone - a kept mask about 11 - and
     /// both are still wrong.
     /// </para>
+    /// <para>
+    /// <b>A hit builds no mask at all.</b> The shared-face question asked without one gets the
+    /// same answer from the geometry node by node (see <see cref="NodesOnSharedFaces"/>), so a
+    /// stored volume is read and checked and nothing of the mesh is rasterised.
+    /// </para>
     /// </remarks>
+    /// <param name="geometry">The geometry.</param>
+    /// <param name="grid">The finest grid.</param>
+    /// <param name="weight">What each electrode holds in this channel, or null for every electrode as declared.</param>
+    /// <param name="index">Which channel; the first is asked the shared-face question.</param>
+    /// <param name="keyed">The store and the element's geometry hash, or null to solve.</param>
     private static ChannelSolve SolveGroup(
-        Geometry3D geometry, Grid3D grid, DriveChannel group, int index)
+        Geometry3D geometry,
+        Grid3D grid,
+        Func<CompiledElectrode3D, double>? weight,
+        int index,
+        (ISolveStore Store, string GeometryHash)? keyed)
     {
-        var weight = WeightOf(group.Pattern);
+        IReadOnlyList<double> holding =
+            weight is null ? StaticHolding(geometry) : [.. geometry.Electrodes.Select(weight)];
+        SolveEntry? entry = null;
 
+        if (keyed is var (store, geometryHash))
+        {
+            var faces = FacesOf(geometry);
+            entry = SolveEntry.Of(geometryHash, grid, faces, holding);
+
+            if (store.TryLoad(entry, out var values, out var record))
+            {
+                var loaded = new ScalarField3D(grid, values)
+                {
+                    LowerX = faces[0], UpperX = faces[1], LowerY = faces[2],
+                    UpperY = faces[3], LowerZ = faces[4], UpperZ = faces[5],
+                };
+
+                return new ChannelSolve(
+                    index, record.FixedNodes, record.CutLinks, loaded,
+                    record.Report with
+                    {
+                        Warnings = index == 0 ? SharedFaceNodes.Warnings(NodesOnSharedFaces(geometry, grid)) : [],
+                    })
+                {
+                    Holding = holding,
+                };
+            }
+        }
+
+        var started = Stopwatch.GetTimestamp();
         var mask = BuildMask(geometry, grid, weight);
 
         var (potential, report) = PoissonSolver3D.Solve(
@@ -1203,6 +1229,9 @@ public static class GeometryBuilder3D
             geometry.Tolerance,
             maximumCycles: 200,
             coarsen: Coarsener(geometry, weight));
+
+        keyed?.Store.Save(entry!, potential.Values, new SolveRecord(
+            report, mask.FixedCount, mask.Cuts?.CutCount ?? 0, Stopwatch.GetElapsedTime(started).TotalSeconds));
 
         // Asked of the first channel only and while its mask is in hand, because which nodes
         // sit on a shared face is a property of the mesh and the conductors and every channel
@@ -1217,9 +1246,17 @@ public static class GeometryBuilder3D
         // alive through every later channel's solve. See ChannelSolve.
         return new ChannelSolve(index, mask.FixedCount, mask.Cuts?.CutCount ?? 0, potential, report)
         {
-            Holding = [.. geometry.Electrodes.Select(weight)],
+            Holding = holding,
         };
     }
+
+    /// <summary>A store with the geometry hash its channels are keyed under, worked out once per element.</summary>
+    private static (ISolveStore Store, string GeometryHash)? Keyed(Geometry3D geometry, ISolveStore? store) =>
+        store is null ? null : (store, SolveHash.Geometry(geometry));
+
+    /// <summary>The six face conditions a solve leaves on its potential: as declared, or all grounded.</summary>
+    private static EdgeCondition[] FacesOf(Geometry3D geometry) =>
+        geometry.Faces.Count == 6 ? [.. geometry.Faces] : [.. Enumerable.Repeat(EdgeCondition.Dirichlet, 6)];
 
     /// <summary>How a three-dimensional electrode is excited, for the shared decomposition.</summary>
     private static Excitation Excited(CompiledElectrode3D electrode) =>

@@ -27,6 +27,14 @@ public sealed class ScalarField3D
         _values = new double[grid.NodeCount];
     }
 
+    /// <summary>Wraps values already in <c>Grid.Index</c> order, as a store hands them back.</summary>
+    internal ScalarField3D(Grid3D grid, double[] values)
+    {
+        ArgumentOutOfRangeException.ThrowIfNotEqual(values.LongLength, grid.NodeCount, nameof(values));
+        Grid = grid;
+        _values = values;
+    }
+
     /// <summary>The grid these values live on.</summary>
     public Grid3D Grid { get; }
 

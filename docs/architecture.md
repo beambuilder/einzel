@@ -7,7 +7,7 @@ Engine outward. Each references only what is above it in this list.
 | Assembly | Holds |
 | --- | --- |
 | `Einzel.Core` | Units, dimensions, geometry, the result envelope, the error taxonomy, the model format and its validation |
-| `Einzel.Fields` | DC solvers, interpolants, analytic and solved fields, basis superposition |
+| `Einzel.Fields` | DC solvers, interpolants, analytic and solved fields, basis superposition, and the `ISolveStore` seam a field cache implements |
 | `Einzel.Transport` | Integrators, the trajectory recorder, ion species |
 | `Einzel.Analysis` | Figures of merit by accuracy class |
 | `Einzel.Library` | Device templates as data, and the loader that enumerates them |

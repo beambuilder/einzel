@@ -209,6 +209,9 @@ public static class FieldAssembly
 {
     /// <summary>Builds the field described by a compiled model.</summary>
     /// <param name="model">The validated model.</param>
+    /// <param name="store">
+    /// Where each solved channel is loaded from or kept, or null to solve every one.
+    /// </param>
     /// <returns>The assembled field.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <exception cref="Core.Errors.EinzelException">A solved element did not converge.</exception>
@@ -220,9 +223,9 @@ public static class FieldAssembly
     /// attach a taint on a bare field, so the only honest alternatives here are to
     /// throw or to hide it.
     /// </remarks>
-    public static IElectrostaticField Build(CompiledModel model)
+    public static IElectrostaticField Build(CompiledModel model, Solved.ISolveStore? store = null)
     {
-        var (field, warnings) = BuildReported(model);
+        var (field, warnings) = BuildReported(model, store);
 
         // Narrowed from "any warning at all" to "any warning saying the field is WRONG",
         // and the distinction is about WHO KNOWS THE THING, not about how bad it is.
@@ -259,6 +262,11 @@ public static class FieldAssembly
 
     /// <summary>Builds the field, and the warnings its solves earned.</summary>
     /// <param name="model">The validated model.</param>
+    /// <param name="store">
+    /// Where each solved channel is loaded from or kept, or null to solve every one. A channel
+    /// loaded earns the same warnings as one solved: its report is kept, and what the mesh
+    /// samples is asked of the geometry again.
+    /// </param>
     /// <returns>The assembled field, and any non-suppressible warnings.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <remarks>
@@ -268,7 +276,7 @@ public static class FieldAssembly
     /// revision because the report saying so was discarded at this seam.
     /// </remarks>
     public static (IElectrostaticField Field, IReadOnlyList<Core.Results.ValidityWarning> Warnings)
-        BuildReported(CompiledModel model)
+        BuildReported(CompiledModel model, Solved.ISolveStore? store = null)
     {
         ArgumentNullException.ThrowIfNull(model);
 
@@ -324,7 +332,7 @@ public static class FieldAssembly
                 {
                     var geometry = Solved.Geometry3D.Of(element.Solve3D!);
 
-                    var (built, report3d) = Solved.GeometryBuilder3D.BuildField(geometry);
+                    var (built, report3d) = Solved.GeometryBuilder3D.BuildField(geometry, store);
                     elements.Add(built);
                     Note(warnings, report3d, index, "solved3d");
                     break;
@@ -334,7 +342,7 @@ public static class FieldAssembly
                 {
                     // The solve happens here, once per build. Nothing about what
                     // the electrodes add up to is known at this level.
-                    var (plane, report2d) = Solved.GeometryBuilder.Build(element.Solve!);
+                    var (plane, report2d) = Solved.GeometryBuilder.Build(element.Solve!, store);
 
                     // A tilted extrusion axis is applied here rather than baked into the
                     // geometry, because a rotation of a solved field is exact while a
