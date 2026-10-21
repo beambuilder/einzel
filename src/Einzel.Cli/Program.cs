@@ -1023,13 +1023,20 @@ public static class Program
             Console.Out.WriteLine(string.Create(
                 invariant, $"          peak |phi| {element.PeakPotentialVolts:G6} V"));
 
+            // What a cache would key this solve on: the mesh and conductors, then this
+            // channel's pattern on them. Printed in full, since a hash is compared, not read.
+            Console.Out.WriteLine($"          geometry {element.GeometryHash}");
+            Console.Out.WriteLine($"          channel  {element.ChannelHash}");
+
             if (!element.Converged)
             {
                 Console.Error.WriteLine($"{label} did not converge");
             }
         }
 
-        Console.Out.WriteLine(string.Create(invariant, $"solved in {outcome.ElapsedMs:F0} ms"));
+        Console.Out.WriteLine(string.Create(
+            invariant,
+            $"solved in {outcome.ElapsedMs:F0} ms, solver behaviour {outcome.SolverBehaviourVersion}"));
 
         Warn(outcome.Warnings);
 

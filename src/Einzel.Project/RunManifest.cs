@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Einzel.Core.Model;
 
 namespace Einzel.Project;
 
@@ -95,6 +96,28 @@ public sealed record RunManifest
     /// version. Part of the field-cache key (FLD-3).
     /// </summary>
     public required int SolverBehaviourVersion { get; init; }
+
+    /// <summary>
+    /// What each solved field element was solved from: its geometry hash and one hash per
+    /// basis channel. Empty when no element is solved. Absent on manifests written before
+    /// it was recorded, and on study manifests, whose geometry can change from one
+    /// evaluation to the next.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="ModelHash"/> answers "which text"; this answers "which physics". A comment
+    /// edit moves the first and not this, and a tenth of a micron on an electrode moves this
+    /// - which is the distinction a field cache needs, keyed on these together with
+    /// <see cref="SolverBehaviourVersion"/> (FLD-3).
+    /// </para>
+    /// <para>
+    /// Computed from the compiled model by the same decomposition the solve makes, not read
+    /// off the solved channels, so it can be known before a solve - which is what lets a run
+    /// that reuses a cached field record the key it looked up rather than one read off a
+    /// solve that never happened.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<SolveKey>? Solves { get; init; }
 
     /// <summary>The transport mode used.</summary>
     public required string TransportMode { get; init; }

@@ -635,25 +635,15 @@ public static class EstimateCommand
             : CalibrateRate(
                 () =>
                 {
-                    var geometry = new Fields.Solved.Geometry3D(
-                        firstVolume.MinX, firstVolume.MinY, firstVolume.MinZ,
-                        firstVolume.MaxX, firstVolume.MaxY, firstVolume.MaxZ,
-                        firstVolume.CellSize * PilotCoarsening,
-                        firstVolume.Electrodes,
-                        firstVolume.Tolerance)
+                    // THE SAME BOUNDARY-VALUE PROBLEM AS THE RUN. A Neumann face
+                    // constrains fewer nodes and converges differently, so a pilot that
+                    // quietly grounded every face would measure the rate of a problem
+                    // nobody asked about. This pilot was copied field by field, and so
+                    // dropped whatever was added last; it is now the run's own geometry
+                    // with the cell changed, as the plane pilot above always was.
+                    var geometry = Fields.Solved.Geometry3D.Of(firstVolume) with
                     {
-                        Drives = firstVolume.Drives,
-                        Stages = firstVolume.Stages,
-
-                        // THE SAME BOUNDARY-VALUE PROBLEM AS THE RUN. A Neumann face
-                        // constrains fewer nodes and converges differently, so a pilot
-                        // that quietly grounded every face would measure the rate of a
-                        // problem nobody asked about. The plane pilot above escapes this
-                        // by construction - it is `firstPlane with { CellSize = ... }`,
-                        // which carries every other field forward - while this one is
-                        // copied field by field and so drops whatever was added last.
-                        Faces = Fields.Solved.Geometry3D.FacesOf(firstVolume.Faces),
-                        ReflectAboutX = firstVolume.ReflectAboutX,
+                        CellSize = firstVolume.CellSize * PilotCoarsening,
                     };
 
                     var pilot = Fields.Solved.GeometryBuilder3D.BuildGrid(geometry);
@@ -709,18 +699,7 @@ public static class EstimateCommand
                 // solved: BuildGrid is arithmetic on the box, and the memory statement needs
                 // the channel count, which is a decomposition of the drives and the stages. A
                 // geometry copied without them reads as one channel whatever it declares.
-                var declared = new Fields.Solved.Geometry3D(
-                    volume.MinX, volume.MinY, volume.MinZ,
-                    volume.MaxX, volume.MaxY, volume.MaxZ,
-                    volume.CellSize,
-                    volume.Electrodes,
-                    volume.Tolerance)
-                {
-                    Drives = volume.Drives,
-                    Stages = volume.Stages,
-                    Faces = Fields.Solved.Geometry3D.FacesOf(volume.Faces),
-                    ReflectAboutX = volume.ReflectAboutX,
-                };
+                var declared = Fields.Solved.Geometry3D.Of(volume);
 
                 var space = Fields.Solved.GeometryBuilder3D.BuildGrid(declared);
 

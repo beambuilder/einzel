@@ -245,18 +245,7 @@ public static class ExportCommand
 
             if (solve3d is not null)
             {
-                var geometry = new Geometry3D(
-                    solve3d.MinX, solve3d.MinY, solve3d.MinZ,
-                    solve3d.MaxX, solve3d.MaxY, solve3d.MaxZ,
-                    solve3d.CellSize,
-                    solve3d.Electrodes,
-                    solve3d.Tolerance)
-                {
-                    Drives = solve3d.Drives,
-                    Stages = solve3d.Stages,
-                    Faces = Geometry3D.FacesOf(solve3d.Faces),
-                    ReflectAboutX = solve3d.ReflectAboutX,
-                };
+                var geometry = Geometry3D.Of(solve3d);
 
                 element = new Element(
                     index,

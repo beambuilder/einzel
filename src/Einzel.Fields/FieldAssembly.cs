@@ -322,20 +322,7 @@ public static class FieldAssembly
 
                 case CompiledFieldKind.Solved3D:
                 {
-                    var solve = element.Solve3D!;
-
-                    var geometry = new Solved.Geometry3D(
-                        solve.MinX, solve.MinY, solve.MinZ,
-                        solve.MaxX, solve.MaxY, solve.MaxZ,
-                        solve.CellSize,
-                        solve.Electrodes,
-                        solve.Tolerance)
-                    {
-                        Drives = solve.Drives,
-                        Stages = solve.Stages,
-                        Faces = Solved.Geometry3D.FacesOf(solve.Faces),
-                        ReflectAboutX = solve.ReflectAboutX,
-                    };
+                    var geometry = Solved.Geometry3D.Of(element.Solve3D!);
 
                     var (built, report3d) = Solved.GeometryBuilder3D.BuildField(geometry);
                     elements.Add(built);
