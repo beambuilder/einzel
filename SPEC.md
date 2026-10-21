@@ -24,8 +24,8 @@ that has drifted is worse than none, because it is trusted.
 
 | | Requirements |
 | --- | --- |
-| **Met**, with evidence | 82 |
-| **Partial**, with a stated gap | 14 |
+| **Met**, with evidence | 83 |
+| **Partial**, with a stated gap | 13 |
 | **Not built** | 20 |
 | **Unverified** — plausible but unmeasured | 2 |
 | Total tagged in r06 | 118 |
@@ -154,6 +154,42 @@ Einzel. **That, rather than a date, is the trigger.**
 ---
 
 ## Amendments to the specification
+
+### 58 - A field cache keys per basis channel, keeps no warnings, and needs a tripwire on its version
+
+**FLD-3, PRJ-3, PRJ-4.** r06 keys a field cache on geometry, mesh, symmetry, boundary
+conditions and the solver-behaviour version, and says no more. Building one showed three things
+the requirement does not say.
+
+**The unit is a basis channel, not a field.** A driven or sequenced element is one solve per
+spatial pattern, and its patterns change independently: a stage whose pattern moves leaves the
+others' solves valid. Keyed per element, one changed stage would invalidate every channel;
+keyed per channel - the channel hash `SolveHash` already computes, geometry plus what each
+electrode held - the others load. The key is that hash, with the solver-behaviour version and the
+compute path naming the directory, so a second compute path never writes over the first's
+entries, and both checked again from the record; the tolerance is already inside the hash.
+
+**The warnings a solve earns cannot be kept with it.** Whether a mesh samples a face two
+conductors share depends on the stage states, which a channel's key does not cover, so the same
+key can earn a warning in one model and not in another. The report's residuals and cycle count
+are a function of the key and are kept - an unconverged solve warns on every reuse - while the
+shared-face check is asked of the geometry again on every hit, through the overloads that need
+no mask, so a volume hit rasterises nothing.
+
+**The version constant now decides what is served.** Before the cache, a numerics change merged
+without a bump of `solverBehaviourVersion` mislabelled manifests; with it, every project would
+load fields the new solver does not produce. `SolverBehaviourTripwireTests` pins three
+potentials of a small plane and a small volume to 1e-12 relative beside the constant; one more
+pre-smoothing sweep moves them by 2.5e-9 and 4e-10. It pins a cylindrical plane with a mirror
+edge and a volume solved through the Galerkin hierarchy the same way. And bit identity holds on
+one machine, not across machines (section 8): the machine is recorded in each entry, not keyed,
+so a cache carried elsewhere serves the field solved on the original machine - as accurate, not
+the bits the new machine would produce.
+
+Two scope decisions: `einzel solve` writes the cache and never reads it, since it exists to
+measure a solve; `estimate` neither reads nor writes it, so its prediction stays a prediction of
+a solve. Measured on the task-10 quadrupole at 8.54 M nodes: field ready 0.34 s after
+the process starts on the second run against 48.9 s on the first.
 
 ### 57 - The grounded boundary is a conductor, and a conductor flush with it is the same coin toss
 
@@ -2430,7 +2466,7 @@ in a table.
 | --- | --- | --- | --- |
 | `FLD-1` | For each perturbation channel p , cache ∂Φ/∂p by finite difference over a full re-solve. | **Met, with a stated floor** | Cached shape derivatives, validated to 6.5e-6 of the closed form at a 0.11-cell step. **Only after cut cells**: the first spike failed, see Amendment 5. **And cut cells are necessary rather than sufficient.** A perturbation whose own signal is below the solve's field error cannot be differenced for at all - the Astral's 200 micron mirror convergence is an anisotropy of 2.9e-4 against roughly 0.4% of second-order field error, and the solved answer ranged over 3.54, 0.011 and -0.57 of the closed form on gap width alone. Where the perturbation is a **rigid motion** it can be applied as a coordinate transform on the solved field instead, which is exact: 5.4e-20. Two boundary kinds also matter and only one has cut cells - a metal-to-metal edge has Dirichlet nodes both sides and no vacuum node to carry a sub-cell crossing. See Amendment 36. |
 | `FLD-2` | Every sweep runs a stratified validation subset; if the maximum residual exceeds | **Met** | The residual is an ordinary Taylor remainder, quadratic in the perturbation to three figures. The limit is (delta/L)^2, so 1 ppm holds to delta/L about 1e-3. |
-| `FLD-3` | Field caches are keyed by content hash over geometry, mesh, symmetry declaration, boundary conditions, and the solver-behaviour version — the last term is ... | **Partial** | **The key exists; the cache does not.** This row said Met with no field cache anywhere in the engine: `.einzel/` holds trajectories and densities, every run and every figure-of-merit evaluation solves its field, and `BasisFieldSet` is used only by tests. What is now built is the key. `SolveHash` hashes each solved element's compiled geometry - box, cell size, tolerance, symmetry and edge or face conditions, every electrode's shape and geometric properties in declaration order - and each basis channel's pattern on it, which for a static element is its declared potentials. It is taken after compilation, so a comment, a rename or a parameter written another way that evaluates to the same double leaves it alone, while a tenth of a micron on one electrode moves it (`SolveHashTests`, `SolveKeySurfaceTests`, every hashed property checked by mutation). Placement applied to a solved field - the mirror plane, the extrusion tilt - is left out, so one solve can serve several. `einzel solve` prints it per channel with the solver-behaviour version; run manifests record it per element (`solves`). A cache keyed on the two is not built. |
+| `FLD-3` | Field caches are keyed by content hash over geometry, mesh, symmetry declaration, boundary conditions, and the solver-behaviour version — the last term is ... | **Met** | **Keyed, kept and checked.** `SolveHash` hashes each solved element's compiled geometry - box, cell size, tolerance, symmetry and edge or face conditions, every electrode's shape and geometric properties in declaration order - and each basis channel's pattern on it, after compilation, so a comment or a rename leaves it alone and a tenth of a micron on one electrode moves it (`SolveHashTests`, `SolveKeySurfaceTests`). `FieldCache` keeps every channel `run`, the studies, `test` and `solve` solve under `.einzel/cache/solver-<solver-behaviour version>-<compute path>/<channel hash>`: the potential as raw little-endian doubles, 8 B a node, and a record written last with the hashes, grid, edge conditions, holding, report scalars, payload length and SHA-256, engine and machine. The builders ask it per channel before building a mask (`ISolveStore`); a load is checked against the channel's hash, version, compute path and grid and the payload against its SHA-256, and any failure is a miss, a notice and a re-solve. Warnings are not kept - the shared-face check depends on stage states the key does not cover - and are asked of the geometry again on every hit, with no mask in a volume. **Measured on the task-10 quadrupole on this machine: the second `einzel run` of the 8.54 M-node model is field-ready 0.34 s after the process starts against 48.9 s for the first, 0.76 s wall for the whole run against 49.3 s; 0.26 s against 6.2 s at 1.09 M nodes**; 136.6 MB kept for its two channels; the cached potentials are bit-identical to those `be63a4b` exported and both runs store the same result apart from the timestamp. `--no-cache` turns it off; `einzel cache status\|clear\|prune` show and delete it; `verify` notes a missing entry and calls an entry holding another field drift (`SolveStoreTests`, `FieldCacheTests`, `FieldCacheSurfaceTests`, every one checked by mutation). `SolverBehaviourTripwireTests` pins a small plane, a cylindrical plane, a volume and a Galerkin-solved volume beside the version so a numerics change cannot reach the cache unversioned. Not cached yet: `estimate` (deliberately), preview, render, regime, compare, the viewport, `export` and the MCP tools. See Amendment 58. |
 
 ### Gas (§9)
 
@@ -2495,8 +2531,8 @@ in a table.
 | --- | --- | --- | --- |
 | `PRJ-1` | Models, studies, extensions, render specs, and results are text. | **Met** | Models, studies, extensions, render specs and results are all text. |
 | `PRJ-2` | Large artifacts are referenced by content hash, never embedded. | **Met** | Large artifacts live in `.einzel/` and are referenced, never embedded. |
-| `PRJ-3` | A run manifest fully determines its run. Model hash, seeds, engine version, transport mode, solver settings, extension identities. Results are therefore ... | **Met** | Model hash, seeds, engine version, solver-behaviour version, transport mode, compute path, extension identities, interpreter and machine. **And which model, as distinct from which content**: `modelPath` is recorded alongside the hash. PRJ-3's list does not ask for it and by that list does not need to - the hash determines the run - but identity is a second question, and answering it with the hash meant editing a model could make its drift *disappear* onto an identical twin. Recorded with forward slashes because a manifest travels; absent on older manifests, where the hash search remains the fallback. See Amendment 30. Gas imports and study files now carry their own paths and byte hashes; `InputProvenanceTests` checks edits, deletion, relocation and legacy records (Amendment 48). A run manifest also records each solved element's solve key (`solves`, see `FLD-3`): which physics was solved, beside the hash of which text was run. |
-| `PRJ-4` | A plain folder is the default and fully supported. Every feature, guardrail, and agent workflow works in a directory with no repository. Requiring one ... | **Met** | A plain folder is the default. `--vcs git` writes an ignore file and changes no behaviour anywhere else. |
+| `PRJ-3` | A run manifest fully determines its run. Model hash, seeds, engine version, transport mode, solver settings, extension identities. Results are therefore ... | **Met** | Model hash, seeds, engine version, solver-behaviour version, transport mode, compute path, extension identities, interpreter and machine. **And which model, as distinct from which content**: `modelPath` is recorded alongside the hash. PRJ-3's list does not ask for it and by that list does not need to - the hash determines the run - but identity is a second question, and answering it with the hash meant editing a model could make its drift *disappear* onto an identical twin. Recorded with forward slashes because a manifest travels; absent on older manifests, where the hash search remains the fallback. See Amendment 30. Gas imports and study files now carry their own paths and byte hashes; `InputProvenanceTests` checks edits, deletion, relocation and legacy records (Amendment 48). A run manifest also records each solved element's solve key (`solves`, see `FLD-3`): which physics was solved, beside the hash of which text was run; and, when the field cache was used, what it did with each channel and the SHA-256 of the potential the run used (`fieldCache`), which `verify` compares with what the cache now holds. |
+| `PRJ-4` | A plain folder is the default and fully supported. Every feature, guardrail, and agent workflow works in a directory with no repository. Requiring one ... | **Met** | A plain folder is the default. `--vcs git` writes an ignore file and changes no behaviour anywhere else. The field cache lives in `.einzel/cache` and is regenerable: `einzel cache clear` deletes it and the next run solves again. |
 | `PRJ-5` | Version control, where wanted, is scaffolded. einzel init --vcs git writes an ignore file excluding .einzel/ , an AGENTS.md , and a starter layout. | **Met** | `einzel init --vcs git`. |
 | `PRJ-6` | Nothing depends on a hosting provider. Agent instructions in the project An agent needs two distinct things: how to use Einzel (platform knowledge, ... | **Met** | Nothing depends on a hosting provider; the whole loop is files and commands. |
 | `PRJ-7` | A project may declare assertions — expected resolving power, transmission floors, envelope constraints — runnable as einzel test . An agent that edits a ... | **Met** | A test is a file in `tests/` naming a model and a figure of merit with a relative tolerance. `init` ships one whose expectation is a closed form. |

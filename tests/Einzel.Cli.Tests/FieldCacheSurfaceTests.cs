@@ -100,6 +100,17 @@ public sealed class FieldCacheSurfaceTests : IDisposable
         }
     }
 
+    /// <summary>When the one entry in the cache was written; it changes only when the channel is solved.</summary>
+    private string Written()
+    {
+        var status = FieldCache.Status(new ProjectLayout(_root));
+        Assert.Equal(1, status.Entries);
+
+        var record = Directory.GetFiles(Entries(), "*.json");
+
+        return JsonNode.Parse(File.ReadAllText(Assert.Single(record)))!["createdUtc"]!.GetValue<string>();
+    }
+
     private RunManifest Manifest(string stem = "bars") =>
         RunManifest.FromJson(File.ReadAllText(Path.Combine(_root, "results", $"{stem}.manifest.json")))!;
 
@@ -332,5 +343,265 @@ public sealed class FieldCacheSurfaceTests : IDisposable
 
         _ = ResultsCommand.Execute(path);
         Assert.Equal(FieldCacheUse.Hit, Assert.Single(Manifest().FieldCache!).Status);
+    }
+
+    /// <summary>
+    /// <c>solve</c> keeps what it solves for the next run, and never loads: it exists to
+    /// measure a solve. The run after it loads the channel; a second <c>solve</c> solves it
+    /// again and writes it again.
+    /// </summary>
+    /// <remarks>
+    /// Mutations: <c>SolveCommand</c> not handing the store to the builders (nothing is kept,
+    /// and the run solves), and <c>Program</c> opening the cache to read (the second solve
+    /// loads, and the entry is not written again). Each fails here.
+    /// </remarks>
+    [Fact]
+    public void SolveKeepsWhatItSolvesAndNeverLoads()
+    {
+        Assert.Equal(0, Run("init", _root).ExitCode);
+        var path = Write("bars.json", Model());
+
+        Assert.Equal(0, Run("solve", path).ExitCode);
+        var solved = Written();
+
+        Assert.Equal(0, Run("run", path).ExitCode);
+        Assert.Equal(FieldCacheUse.Hit, Assert.Single(Manifest().FieldCache!).Status);
+        Assert.Equal(solved, Written());
+
+        Assert.Equal(0, Run("solve", path).ExitCode);
+        Assert.NotEqual(solved, Written());
+    }
+
+    /// <summary>
+    /// A scan across a parameter that moves no electrode solves the field once: a second scan
+    /// of it loads the channel at every point and writes nothing.
+    /// </summary>
+    /// <remarks>Mutation: <c>StudyCommand</c> not handing the store to its evaluator fails here.</remarks>
+    [Fact]
+    public void AScanThatMovesNoElectrodeLoadsTheFieldAtEveryPoint()
+    {
+        Assert.Equal(0, Run("init", _root).ExitCode);
+        Write("bars.json", Model());
+        var study = Path.Combine(_root, "studies", "energy.json");
+        File.WriteAllText(study, """
+            {
+              "name": "energy-scan",
+              "model": "../models/bars.json",
+              "figureOfMerit": "flightTime",
+              "scan": { "parameter": "energy", "from": 900, "to": 1100, "unit": "V", "points": 3 }
+            }
+            """);
+
+        Assert.Equal(0, Run("scan", study).ExitCode);
+        var first = Written();
+
+        Assert.Equal(0, Run("scan", study).ExitCode);
+        Assert.Equal(first, Written());
+    }
+
+    /// <summary>
+    /// <c>einzel test</c> flies its model once per expectation, and loads the field after the
+    /// first: a second test run writes nothing to the cache.
+    /// </summary>
+    /// <remarks>Mutation: <c>TestCommand</c> not handing the store to the evaluator fails here.</remarks>
+    [Fact]
+    public void ProjectTestsLoadTheFieldTheirFirstFlightSolved()
+    {
+        Assert.Equal(0, Run("init", _root).ExitCode);
+        Write("bars.json", Model());
+
+        foreach (var file in Directory.GetFiles(Path.Combine(_root, "tests")))
+        {
+            File.Delete(file);
+        }
+
+        File.WriteAllText(Path.Combine(_root, "tests", "bars.json"), """
+            {
+              "model": "../models/bars.json",
+              "expect": [
+                { "figureOfMerit": "flightTime", "value": 1.5433, "unit": "us", "tolerance": 1e-3 },
+                { "figureOfMerit": "energyDrift", "value": 0, "unit": "1", "tolerance": 1 }
+              ]
+            }
+            """);
+
+        Assert.Equal(0, Run("test", _root).ExitCode);
+        var first = Written();
+
+        Assert.Equal(0, Run("test", _root).ExitCode);
+        Assert.Equal(first, Written());
+    }
+
+    /// <summary>
+    /// <c>verify</c> reads the cache's records against the manifest and never a payload: an
+    /// entry gone is a note, since the next run solves it again; an entry now holding another
+    /// field - here, another model's channel copied over it - is drift, since the next run
+    /// would load it.
+    /// </summary>
+    /// <remarks>
+    /// Mutations: skipping the check (no note, no drift), and calling a missing entry drift
+    /// (the result goes stale on a regenerable deletion). Each fails here.
+    /// </remarks>
+    [Fact]
+    public void VerifyNotesAMissingEntryAndCallsAnotherFieldDrift()
+    {
+        Assert.Equal(0, Run("init", _root).ExitCode);
+        var path = Write("bars.json", Model());
+        var other = Write("other.json", Model().Replace("\"value\": 200", "\"value\": 210", StringComparison.Ordinal));
+        var project = new ProjectLayout(_root);
+
+        Assert.Equal(0, Run("run", path).ExitCode);
+        var clean = Assert.Single(VerifyCommand.Execute(_root).Results);
+        Assert.True(clean.Current);
+        Assert.DoesNotContain(clean.Notes, n => n.Contains("field cache", StringComparison.Ordinal));
+
+        Directory.Delete(project.FieldCache, recursive: true);
+        var missing = Assert.Single(VerifyCommand.Execute(_root).Results);
+        Assert.True(missing.Current);
+        Assert.Contains(missing.Notes, n => n.Contains("field 0 channel 0 is not in the field cache", StringComparison.Ordinal));
+
+        Assert.Equal(0, Run("run", path).ExitCode);
+        Assert.Equal(0, Run("run", other).ExitCode);
+
+        var directory = Entries();
+        var mine = FieldCache.Stem(Assert.Single(Manifest().FieldCache!).ChannelHash);
+        var theirs = Directory.GetFiles(directory, "*.f64").Select(Path.GetFileNameWithoutExtension).Single(stem => stem != mine)!;
+
+        foreach (var extension in new[] { ".f64", ".json" })
+        {
+            File.Copy(Path.Combine(directory, theirs + extension), Path.Combine(directory, mine + extension), overwrite: true);
+        }
+
+        var swapped = VerifyCommand.Execute(_root).Results.Single(r => r.Manifest.EndsWith("bars.manifest.json", StringComparison.Ordinal));
+        Assert.False(swapped.Current);
+        Assert.Contains(swapped.Drift, d => d.Contains("holds another field for field 0 channel 0", StringComparison.Ordinal));
+        Assert.Equal(1, Run("verify", _root).ExitCode);
+    }
+
+    /// <summary>
+    /// <c>cache status</c> counts what is kept; <c>prune</c> deletes a leftover temporary file
+    /// and keeps the entry; <c>clear</c> deletes everything; and neither deletes anything
+    /// under <c>--dry-run</c>, which names the same files.
+    /// </summary>
+    /// <remarks>
+    /// Mutations: the dry-run flag ignored, and <c>prune</c> dispatched to <c>clear</c>. Each
+    /// fails here; the help line removed fails <c>HelpCoversEveryVerbTests</c>.
+    /// </remarks>
+    [Fact]
+    public void TheCacheVerbsSayWhatIsKeptAndDeleteOnlyWhenNotDry()
+    {
+        Assert.Equal(0, Run("init", _root).ExitCode);
+        Assert.Equal(0, Run("run", Write("bars.json", Model())).ExitCode);
+
+        var project = new ProjectLayout(_root);
+        var directory = Entries();
+        var leftover = Path.Combine(directory, "interrupted.1234.tmp");
+        File.WriteAllText(leftover, "partial");
+
+        static JsonNode Json(string stdout) => JsonNode.Parse(stdout)!;
+
+        var status = Json(Run("cache", "status", _root, "--json").Stdout);
+        Assert.Equal((1, 1), (status["entries"]!.GetValue<int>(), status["temporary"]!.GetValue<int>()));
+
+        var preview = Json(Run("cache", "prune", _root, "--json", "--dry-run").Stdout);
+        Assert.Single(preview["removed"]!.AsArray());
+        Assert.True(File.Exists(leftover));
+
+        Assert.Single(Json(Run("cache", "prune", _root, "--json").Stdout)["removed"]!.AsArray());
+        Assert.False(File.Exists(leftover));
+        Assert.Equal(1, FieldCache.Status(project).Entries);
+
+        Assert.Equal(2, Json(Run("cache", "clear", _root, "--json", "--dry-run").Stdout)["removed"]!.AsArray().Count);
+        Assert.Equal(1, FieldCache.Status(project).Entries);
+
+        Assert.Equal(0, Run("cache", "clear", _root).ExitCode);
+        Assert.False(Directory.Exists(project.FieldCache));
+        Assert.Equal(1, Run("cache", "drop", _root).ExitCode);
+    }
+
+    /// <summary>
+    /// <c>cache</c> finds the project as <c>run</c> does, by walking up to the directory that
+    /// holds <c>models/</c>: asked from inside <c>models/</c>, it sees the cache a run wrote.
+    /// </summary>
+    /// <remarks>Mutation: taking the directory as given, as the verb first did, finds no entry and fails here.</remarks>
+    [Fact]
+    public void TheCacheVerbFindsTheProjectFromInsideIt()
+    {
+        Assert.Equal(0, Run("init", _root).ExitCode);
+        Assert.Equal(0, Run("run", Write("bars.json", Model())).ExitCode);
+
+        var status = JsonNode.Parse(Run("cache", "status", Path.Combine(_root, "models"), "--json").Stdout)!;
+        Assert.Equal(1, status["entries"]!.GetValue<int>());
+    }
+
+    /// <summary>
+    /// A cache record that parses with a part missing does not make <c>verify</c> fail: the
+    /// entry is unreadable, which is the note for an entry gone, and the run after it solves.
+    /// </summary>
+    /// <remarks>
+    /// Mutation: removing the null check in <c>FieldCacheEntry.Read</c> lets <c>verify</c>
+    /// read the null payload, and the exception fails this.
+    /// </remarks>
+    [Fact]
+    public void VerifyOfARecordWithAPartMissingIsANote()
+    {
+        Assert.Equal(0, Run("init", _root).ExitCode);
+        Assert.Equal(0, Run("run", Write("bars.json", Model())).ExitCode);
+
+        var file = Assert.Single(Directory.GetFiles(Entries(), "*.json"));
+        var record = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+        record["payload"] = null;
+        record["grid"] = null;
+        File.WriteAllText(file, record.ToJsonString());
+
+        var result = Assert.Single(VerifyCommand.Execute(_root).Results);
+        Assert.True(result.Current);
+        Assert.Contains(result.Notes, n => n.Contains("field 0 channel 0 is not in the field cache", StringComparison.Ordinal));
+        Assert.Equal(0, Run("verify", _root).ExitCode);
+    }
+
+    /// <summary>
+    /// A study whose figure of merit is an extension hands it built-in figures, and those go
+    /// through the cache like any other evaluation: the first evaluation stores the field, the
+    /// next loads it.
+    /// </summary>
+    /// <remarks>
+    /// The evaluator is called directly: the figures are computed before the extension's
+    /// process starts, so what the process then does - and on a machine whose sandbox cannot
+    /// start Python, it fails - does not decide this test. Mutation: <c>ExtensionObjective</c>
+    /// computing the figures without the store records nothing, and this fails.
+    /// </remarks>
+    [Fact]
+    public void AnExtensionObjectiveComputesItsFiguresThroughTheCache()
+    {
+        Assert.Equal(0, Run("init", _root).ExitCode);
+        var path = Write("bars.json", Model());
+        Assert.Equal(0, Run("ext", "register", "shortest", "--project", _root).ExitCode);
+
+        var project = new ProjectLayout(_root);
+        var model = ModelValidator.Validate(
+            ModelJson.Parse(File.ReadAllText(path)), null, Path.GetDirectoryName(path)).Model!;
+        var keys = SolveHash.Of(model);
+
+        IReadOnlyList<string> Evaluate()
+        {
+            var cache = new FieldCache(project);
+            var objective = ExtensionObjective.Evaluator(
+                "ext:shortest", project.Extensions, Path.Combine(project.Scratch, "ext"), out _, store: cache);
+
+            try
+            {
+                _ = objective(model);
+            }
+            catch (Core.Errors.EinzelException)
+            {
+                // The extension's own process; see the remarks.
+            }
+
+            return [.. cache.Uses(keys).Select(u => u.Status)];
+        }
+
+        Assert.Equal([FieldCacheUse.Stored], Evaluate());
+        Assert.Equal([FieldCacheUse.Hit], Evaluate());
     }
 }

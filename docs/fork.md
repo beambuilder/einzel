@@ -142,6 +142,18 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A second run of an unchanged geometry loads its field instead of solving
+  it.** Each basis channel `run`, the studies, `test` and `solve` solve is
+  kept under `.einzel/cache/solver-<version>-<compute path>/<channel hash>` as raw doubles
+  and a record, checked against its hash, version, compute path, grid and
+  SHA-256 on every load, and solved again on any failure. On the task-10
+  quadrupole (8.54 M nodes, two channels) the second `einzel run` is
+  field-ready 0.34 s after the process starts against
+  48.9 s, 0.76 s against 49.3 s for the whole run,
+  for 136.6 MB of cache; the cached potentials are bit-identical to
+  the `be63a4b` export. `--no-cache`, `einzel cache status|clear|prune`, and
+  `verify` reports a cache entry that no longer holds the field a result
+  used. `SPEC.md` `FLD-3` from Partial to Met; Amendment 58. PRs #4–#7.
 - **A solved element has a key that names its physics, not its text.**
   `SolveHash` hashes each solved element's compiled geometry and each basis
   channel's pattern on it (a static element's declared potentials), after

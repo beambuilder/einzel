@@ -283,6 +283,31 @@ public static class VerifyCommand
             drift.Add("this legacy manifest does not record the study/imported inputs; rerun to establish their provenance");
         }
 
+        // The field cache (FLD-3, D5 of the cache's design): the manifest holds the SHA-256 of
+        // every potential the run used. An entry gone is regenerable and the next run solves
+        // it again; an entry holding another field is drift, because the next run would load
+        // it. Records only: no payload is read, which is the loader's job on every hit. Under
+        // another solver version the solver line below already says everything.
+        if (solverMatches && manifest.FieldCache is { } uses)
+        {
+            foreach (var use in uses.Where(u => u.PayloadHash is not null))
+            {
+                var entry = FieldCache.Find(
+                    layout, manifest.SolverBehaviourVersion, manifest.ComputePath, use.ChannelHash);
+
+                if (entry is null)
+                {
+                    notes.Add($"field {use.Field} channel {use.Channel} is not in the field cache; "
+                        + "the next run solves it again");
+                }
+                else if (entry.Payload.Sha256 != use.PayloadHash)
+                {
+                    drift.Add($"the field cache holds another field for field {use.Field} channel "
+                        + $"{use.Channel} than this run used, and the next run would load it");
+                }
+            }
+        }
+
         if (!solverMatches)
         {
             // The one that would otherwise be silent. An engine update that changed

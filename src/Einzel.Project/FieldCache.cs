@@ -289,6 +289,190 @@ public sealed class FieldCache : ISolveStore
         return uses;
     }
 
+    /// <summary>Reads the record of a stored entry, without touching its payload.</summary>
+    /// <param name="project">The project.</param>
+    /// <param name="solverBehaviourVersion">The version the entry was stored under.</param>
+    /// <param name="computePath">The compute path it was stored under.</param>
+    /// <param name="channelHash">The channel hash.</param>
+    /// <returns>The record, or null when there is none, it cannot be read or it does not parse.</returns>
+    public static FieldCacheEntry? Find(
+        ProjectLayout project, int solverBehaviourVersion, string computePath, string channelHash)
+    {
+        try
+        {
+            var path = Path.Combine(
+                EntryDirectory(project, solverBehaviourVersion, computePath), Stem(channelHash) + ".json");
+
+            return File.Exists(path) ? FieldCacheEntry.Read(path) : null;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>What a project's cache holds.</summary>
+    /// <param name="project">The project.</param>
+    /// <returns>Counts and bytes, for this build's version and for the rest.</returns>
+    public static FieldCacheStatus Status(ProjectLayout project)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+
+        var current = Survey(project);
+        var all = Files(project.FieldCache);
+        var mine = Current(project) + Path.DirectorySeparatorChar;
+        var others = all.Where(f => !f.StartsWith(mine, StringComparison.Ordinal)).ToList();
+
+        return new FieldCacheStatus
+        {
+            Directory = project.FieldCache,
+            SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
+            ComputePath = EngineBuild.ComputePath,
+            Entries = current.Entries,
+            Bytes = all.Where(f => f.StartsWith(mine, StringComparison.Ordinal)).Sum(Length),
+            OtherVersionEntries = others.Count(f => f.EndsWith(".json", StringComparison.Ordinal)),
+            OtherVersionBytes = others.Sum(Length),
+            Orphans = current.Orphans.Count,
+            Temporary = all.Count(f => f.EndsWith(".tmp", StringComparison.Ordinal)),
+        };
+    }
+
+    /// <summary>Deletes the whole cache: it is regenerable (PRJ-4).</summary>
+    /// <param name="project">The project.</param>
+    /// <param name="dryRun">True to say what would go and delete nothing.</param>
+    /// <returns>What was, or would be, deleted.</returns>
+    public static FieldCacheCleanup Clear(ProjectLayout project, bool dryRun)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+
+        var files = Files(project.FieldCache);
+        var cleanup = Cleanup(project, files, dryRun);
+
+        // A recursive delete removes a link or junction inside the cache and not what it points
+        // at; the files named above are the cache's own.
+        if (!dryRun && Directory.Exists(project.FieldCache))
+        {
+            Directory.Delete(project.FieldCache, recursive: true);
+        }
+
+        return cleanup;
+    }
+
+    /// <summary>
+    /// Deletes what no run of this build will load: the directories of other solver-behaviour
+    /// versions or compute paths, files that are not half of an entry, and temporary files left
+    /// by an interrupted write.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="dryRun">True to say what would go and delete nothing.</param>
+    /// <returns>What was, or would be, deleted.</returns>
+    /// <remarks>
+    /// No size or age limit: that is a policy, and nothing has measured the need for one yet.
+    /// </remarks>
+    public static FieldCacheCleanup Prune(ProjectLayout project, bool dryRun)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+
+        var mine = Current(project) + Path.DirectorySeparatorChar;
+        var doomed = Files(project.FieldCache)
+            .Where(f => f.EndsWith(".tmp", StringComparison.Ordinal)
+                || (!f.StartsWith(mine, StringComparison.Ordinal)
+                    && Path.GetFileName(Path.GetDirectoryName(f))!.StartsWith("solver-", StringComparison.Ordinal)))
+            .Concat(Survey(project).Orphans)
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        var cleanup = Cleanup(project, doomed, dryRun);
+
+        if (!dryRun && Directory.Exists(project.FieldCache))
+        {
+            foreach (var directory in Directory.GetDirectories(
+                project.FieldCache, "solver-*", new EnumerationOptions { AttributesToSkip = FileAttributes.ReparsePoint }))
+            {
+                if (Directory.GetFileSystemEntries(directory).Length == 0)
+                {
+                    Directory.Delete(directory);
+                }
+            }
+        }
+
+        return cleanup;
+    }
+
+    private static FieldCacheCleanup Cleanup(ProjectLayout project, IReadOnlyList<string> files, bool dryRun)
+    {
+        var bytes = files.Sum(Length);
+
+        if (!dryRun)
+        {
+            foreach (var file in files)
+            {
+                File.Delete(file);
+            }
+        }
+
+        return new FieldCacheCleanup
+        {
+            DryRun = dryRun,
+            Removed = [.. files.Select(f => RunManifest.Portable(Path.GetRelativePath(project.Root, f)))],
+            Bytes = bytes,
+        };
+    }
+
+    /// <summary>The entries of this build's directory, and its files that are not half of one.</summary>
+    private static (int Entries, List<string> Orphans) Survey(ProjectLayout project)
+    {
+        var directory = Current(project);
+        var files = Directory.Exists(directory)
+            ? Directory.GetFiles(directory).Where(f => !f.EndsWith(".tmp", StringComparison.Ordinal)).ToHashSet()
+            : [];
+
+        var entries = 0;
+        var orphans = new List<string>();
+
+        foreach (var file in files.Order(StringComparer.Ordinal))
+        {
+            var partner = Path.GetExtension(file) switch
+            {
+                ".json" => Path.ChangeExtension(file, ".f64"),
+                ".f64" => Path.ChangeExtension(file, ".json"),
+                _ => null,
+            };
+
+            if (partner is null || !files.Contains(partner))
+            {
+                orphans.Add(file);
+            }
+            else if (file.EndsWith(".json", StringComparison.Ordinal))
+            {
+                entries++;
+            }
+        }
+
+        return (entries, orphans);
+    }
+
+    private static string Current(ProjectLayout project) =>
+        EntryDirectory(project, EngineBuild.SolverBehaviourVersion, EngineBuild.ComputePath);
+
+    /// <summary>
+    /// How the cache is walked: into subdirectories, never through a link or junction, so a
+    /// link planted in the cache cannot make <c>clear</c> or <c>prune</c> delete what it points at.
+    /// </summary>
+    private static readonly EnumerationOptions Walk = new()
+    {
+        RecurseSubdirectories = true,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+    };
+
+    private static List<string> Files(string directory) =>
+        Directory.Exists(directory)
+            ? [.. Directory.GetFiles(directory, "*", Walk).Order(StringComparer.Ordinal)]
+            : [];
+
+    private static long Length(string file) => new FileInfo(file).Length;
+
     private static string Hash(ReadOnlySpan<byte> bytes) => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     /// <summary>Why a stored record is not a solve of this entry, or null when it is.</summary>
@@ -572,4 +756,48 @@ public sealed record FieldCachePayload
 
     /// <summary>Its SHA-256, as <c>sha256:</c> and 64 hex characters.</summary>
     public required string Sha256 { get; init; }
+}
+
+/// <summary>What <c>einzel cache status</c> reports.</summary>
+public sealed record FieldCacheStatus
+{
+    /// <summary>The cache directory, <c>.einzel/cache</c>.</summary>
+    public required string Directory { get; init; }
+
+    /// <summary>This build's solver-behaviour version: with its compute path, the entries it can load.</summary>
+    public required int SolverBehaviourVersion { get; init; }
+
+    /// <summary>This build's compute path.</summary>
+    public required string ComputePath { get; init; }
+
+    /// <summary>Complete entries of this version and compute path.</summary>
+    public required int Entries { get; init; }
+
+    /// <summary>Bytes under this build's directory.</summary>
+    public required long Bytes { get; init; }
+
+    /// <summary>Entries of other solver-behaviour versions or compute paths, which this build never loads.</summary>
+    public required int OtherVersionEntries { get; init; }
+
+    /// <summary>Bytes outside this build's directory.</summary>
+    public required long OtherVersionBytes { get; init; }
+
+    /// <summary>Files in this build's directory that are not half of an entry.</summary>
+    public required int Orphans { get; init; }
+
+    /// <summary>Temporary files left by interrupted writes.</summary>
+    public required int Temporary { get; init; }
+}
+
+/// <summary>What <c>einzel cache clear</c> or <c>prune</c> deleted, or would delete.</summary>
+public sealed record FieldCacheCleanup
+{
+    /// <summary>Whether this was a dry run, which deletes nothing.</summary>
+    public required bool DryRun { get; init; }
+
+    /// <summary>The files, relative to the project root, in ordinal order.</summary>
+    public required IReadOnlyList<string> Removed { get; init; }
+
+    /// <summary>Their total size.</summary>
+    public required long Bytes { get; init; }
 }

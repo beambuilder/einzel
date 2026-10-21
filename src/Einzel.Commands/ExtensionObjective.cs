@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Einzel.Core.Errors;
 using Einzel.Core.Model;
 using Einzel.Extensions;
+using Einzel.Fields.Solved;
 using Einzel.Project;
 
 namespace Einzel.Commands;
@@ -54,6 +55,10 @@ public static class ExtensionObjective
     /// <param name="scratch">A directory the extension may run in.</param>
     /// <param name="energySpread">Fractional energy spread for the ensemble figures.</param>
     /// <param name="ions">How many ions the ensemble figures launch.</param>
+    /// <param name="store">
+    /// Where the built-in figures handed to the extension load their solved field channels
+    /// from and keep them, or null to solve them.
+    /// </param>
     /// <returns>A function from a validated model to the objective.</returns>
     /// <exception cref="ArgumentException">A required path is null or blank.</exception>
     /// <exception cref="EinzelException">
@@ -65,8 +70,9 @@ public static class ExtensionObjective
         string extensionsRoot,
         string scratch,
         double energySpread = FiguresOfMerit.DefaultEnergySpread,
-        int ions = FiguresOfMerit.DefaultIons) =>
-        Evaluator(name, extensionsRoot, scratch, out _, energySpread, ions);
+        int ions = FiguresOfMerit.DefaultIons,
+        ISolveStore? store = null) =>
+        Evaluator(name, extensionsRoot, scratch, out _, energySpread, ions, store);
 
     /// <summary>Builds an evaluator, and says what it will be attributed to.</summary>
     /// <param name="name">The figure-of-merit name, including the prefix.</param>
@@ -75,6 +81,10 @@ public static class ExtensionObjective
     /// <param name="provenance">What to record in a manifest (PRJ-3, GRD-6).</param>
     /// <param name="energySpread">Fractional energy spread for the ensemble figures.</param>
     /// <param name="ions">How many ions the ensemble figures launch.</param>
+    /// <param name="store">
+    /// Where the built-in figures handed to the extension load their solved field channels
+    /// from and keep them, or null to solve them.
+    /// </param>
     /// <returns>A function from a validated model to the objective.</returns>
     /// <exception cref="ArgumentException">A required path is null or blank.</exception>
     /// <exception cref="EinzelException">
@@ -87,7 +97,8 @@ public static class ExtensionObjective
         string scratch,
         out Provenance provenance,
         double energySpread = FiguresOfMerit.DefaultEnergySpread,
-        int ions = FiguresOfMerit.DefaultIons)
+        int ions = FiguresOfMerit.DefaultIons,
+        ISolveStore? store = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(extensionsRoot);
@@ -148,7 +159,7 @@ public static class ExtensionObjective
 
         return model =>
         {
-            var payload = Payload(model, installed.Manifest, energySpread, ions);
+            var payload = Payload(model, installed.Manifest, energySpread, ions, store);
             var result = runner.Run(installed.Manifest, installed.Directory, payload, scratch);
 
             return result.Output is JsonObject document
@@ -170,7 +181,7 @@ public static class ExtensionObjective
     /// that figure".
     /// </remarks>
     private static JsonObject Payload(
-        CompiledModel model, ExtensionManifest manifest, double energySpread, int ions)
+        CompiledModel model, ExtensionManifest manifest, double energySpread, int ions, ISolveStore? store)
     {
         var parameters = new JsonObject();
 
@@ -184,7 +195,7 @@ public static class ExtensionObjective
 
         foreach (var figure in manifest.Figures)
         {
-            var value = FiguresOfMerit.Evaluator(figure, energySpread, ions)(model);
+            var value = FiguresOfMerit.Evaluator(figure, energySpread, ions, store: store)(model);
 
             figures[figure] = value is { } scalar && double.IsFinite(scalar) ? scalar : null;
         }
