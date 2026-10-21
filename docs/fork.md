@@ -142,6 +142,12 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **The task-10 batch driver lives here as `tools/quadbatch`.** Solve once,
+  fly many ions with a per-ion RF phase, in process, until the library's
+  public surface offers the same; listed in `Einzel.slnx` so CI builds it.
+  Input handling hardened on review (gas refusal, warnings in the output,
+  NaN-safe JSON). Re-run on `esibd` `73956dd`, every recorded number of the
+  validation project's task 10 came back bit-identical. PR #2.
 - **Fork work lands on `esibd` by pull request; `main` mirrors upstream.**
   `esibd` branched from upstream `de73ec8`; CI runs on it; this page records
   the branch model, the PR body, the sync routine and what stays out. At
