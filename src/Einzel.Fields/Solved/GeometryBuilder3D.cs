@@ -107,6 +107,34 @@ public sealed record Geometry3D(
 
         return faces;
     }
+
+    /// <summary>The geometry a compiled volume element is solved as.</summary>
+    /// <param name="solve">The compiled element.</param>
+    /// <returns>The geometry, with its drives, stages, faces and mirror plane.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
+    /// <remarks>
+    /// Every caller builds it here - the run, <c>einzel solve</c>, <c>export</c>,
+    /// <c>estimate</c> and <see cref="SolveHash"/> - because they must agree: a key taken
+    /// over a geometry the solve was not handed would name a field nobody computed, and a
+    /// copy made field by field drops whatever field was added last.
+    /// </remarks>
+    public static Geometry3D Of(Core.Model.CompiledSolvedField3D solve)
+    {
+        ArgumentNullException.ThrowIfNull(solve);
+
+        return new Geometry3D(
+            solve.MinX, solve.MinY, solve.MinZ,
+            solve.MaxX, solve.MaxY, solve.MaxZ,
+            solve.CellSize,
+            solve.Electrodes,
+            solve.Tolerance)
+        {
+            Drives = solve.Drives,
+            Stages = solve.Stages,
+            Faces = FacesOf(solve.Faces),
+            ReflectAboutX = solve.ReflectAboutX,
+        };
+    }
 }
 
 
@@ -1012,7 +1040,7 @@ public static class GeometryBuilder3D
                     0, mask.FixedCount, mask.Cuts?.CutCount ?? 0, potential,
                     report with { Warnings = SharedFaceNodes.Warnings(NodesOnSharedFaces(geometry, grid, mask)) })
                 {
-                    Holding = [.. geometry.Electrodes.Select(e => e.Potential)],
+                    Holding = StaticHolding(geometry),
                 },
             ];
         }
@@ -1061,6 +1089,40 @@ public static class GeometryBuilder3D
 
         return (frequencies, waveforms, quadrature);
     }
+
+    /// <summary>What each declared electrode holds in each channel, worked out without solving.</summary>
+    /// <param name="geometry">The geometry.</param>
+    /// <returns>
+    /// One list per basis channel, in the order <see cref="SolveChannels"/> and
+    /// <see cref="BuildField"/> solve them; each the <see cref="ChannelSolve.Holding"/> that
+    /// solve will report.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="geometry"/> is null.</exception>
+    /// <remarks>
+    /// What <see cref="SolveHash"/> keys a channel on, before there is a channel, from the same
+    /// decomposition and the same weights the masks are built with - the plane builder's
+    /// <see cref="GeometryBuilder.Holdings"/>, for a volume.
+    /// </remarks>
+    public static IReadOnlyList<IReadOnlyList<double>> Holdings(Geometry3D geometry)
+    {
+        ArgumentNullException.ThrowIfNull(geometry);
+
+        if (geometry.Drives.Count == 0 && geometry.Stages.Count == 0)
+        {
+            return [StaticHolding(geometry)];
+        }
+
+        return [.. Groups(geometry).Select(group => (IReadOnlyList<double>)
+            [.. geometry.Electrodes.Select(WeightOf(group.Pattern))])];
+    }
+
+    /// <summary>A static solve holds every electrode at its declared potential.</summary>
+    private static IReadOnlyList<double> StaticHolding(Geometry3D geometry) =>
+        [.. geometry.Electrodes.Select(e => e.Potential)];
+
+    /// <summary>A channel's pattern as the function a mask is built with.</summary>
+    private static Func<CompiledElectrode3D, double> WeightOf(Dictionary<string, double> pattern) =>
+        electrode => pattern.GetValueOrDefault(electrode.Name, 0.0);
 
     private static List<DriveChannel> Groups(Geometry3D geometry)
     {
@@ -1132,16 +1194,15 @@ public static class GeometryBuilder3D
     private static ChannelSolve SolveGroup(
         Geometry3D geometry, Grid3D grid, DriveChannel group, int index)
     {
-        var pattern = group.Pattern;
-        double Weight(CompiledElectrode3D e) => pattern.GetValueOrDefault(e.Name, 0.0);
+        var weight = WeightOf(group.Pattern);
 
-        var mask = BuildMask(geometry, grid, Weight);
+        var mask = BuildMask(geometry, grid, weight);
 
         var (potential, report) = PoissonSolver3D.Solve(
             mask,
             geometry.Tolerance,
             maximumCycles: 200,
-            coarsen: Coarsener(geometry, Weight));
+            coarsen: Coarsener(geometry, weight));
 
         // Asked of the first channel only and while its mask is in hand, because which nodes
         // sit on a shared face is a property of the mesh and the conductors and every channel
@@ -1156,7 +1217,7 @@ public static class GeometryBuilder3D
         // alive through every later channel's solve. See ChannelSolve.
         return new ChannelSolve(index, mask.FixedCount, mask.Cuts?.CutCount ?? 0, potential, report)
         {
-            Holding = [.. geometry.Electrodes.Select(Weight)],
+            Holding = [.. geometry.Electrodes.Select(weight)],
         };
     }
 

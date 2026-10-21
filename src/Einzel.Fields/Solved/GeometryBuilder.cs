@@ -329,7 +329,7 @@ public static class GeometryBuilder
             }
 
             nearest = entry;
-            potential = potentialOf?.Invoke(electrode) ?? electrode.Potential;
+            potential = Held(electrode, potentialOf);
             found = true;
         }
 
@@ -925,12 +925,36 @@ public static class GeometryBuilder
             solves.Add(new ChannelSolve(
                 index, channel.FixedNodes, channel.CutLinks, channel.Potential, channel.Report with { Warnings = warnings ?? [] })
             {
-                Holding = [.. solve.Electrodes.Select(e => Held(e, potentialOf))],
+                Holding = HoldingOf(solve, potentialOf),
             });
         }
 
         return solves;
     }
+
+    /// <summary>What each declared electrode holds in each channel, worked out without solving.</summary>
+    /// <param name="solve">The compiled solve.</param>
+    /// <returns>
+    /// One list per basis channel, in the order <see cref="SolveChannels"/> and
+    /// <see cref="Build"/> solve them; each the <see cref="ChannelSolve.Holding"/> that solve
+    /// will report.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
+    /// <remarks>
+    /// What <see cref="SolveHash"/> keys a channel on, before there is a channel. From the same
+    /// <see cref="Patterns"/> and the same <see cref="Held"/> the mask is built with, so the key
+    /// of a channel and the solve it names cannot describe two different problems.
+    /// </remarks>
+    public static IReadOnlyList<IReadOnlyList<double>> Holdings(CompiledSolvedField solve)
+    {
+        ArgumentNullException.ThrowIfNull(solve);
+
+        return [.. Patterns(solve).Select(potentialOf => HoldingOf(solve, potentialOf))];
+    }
+
+    private static IReadOnlyList<double> HoldingOf(
+        CompiledSolvedField solve, Func<CompiledElectrode, double>? potentialOf) =>
+        [.. solve.Electrodes.Select(e => Held(e, potentialOf))];
 
     /// <summary>Solves one channel's pattern, and lets go of everything but its potential.</summary>
     /// <param name="solve">The declared geometry.</param>
@@ -1011,16 +1035,36 @@ public static class GeometryBuilder
             return [null];
         }
 
-        var states = StageStates(solve);
+        return [.. Groups(solve).Select(group => (Func<CompiledElectrode, double>?)Weighted(group.Pattern))];
+    }
 
+    /// <summary>The basis channels of a driven or sequenced geometry, in the order they are solved.</summary>
+    /// <remarks>
+    /// <para>
+    /// Every stage is decomposed on its own and the patterns are then shared, so a pattern
+    /// appearing in two stages is solved once and simply weighted differently in each. A
+    /// trap that fills and then extracts usually shares most of its patterns between the
+    /// two, and paying for them twice would be paying for the sequencer rather than for the
+    /// physics. Decomposing the states <em>together</em> is the one thing that must not
+    /// happen - see <see cref="DriveChannels.DecomposeStates"/>.
+    /// </para>
+    /// <para>
+    /// A sinusoid resolves every phase into two fixed quadrature components, so a structure
+    /// with a phase ramp along it costs two solves rather than one per electrode. Any other
+    /// waveform cannot be decomposed that way and each distinct phase stays its own supply.
+    /// Decided per generator, since an instrument may run a sinusoidal confinement and a
+    /// switched excitation at once and each collapses or does not on its own terms.
+    /// </para>
+    /// <para>
+    /// One function for the run, <c>einzel solve</c> and the solve key, so the channels a
+    /// key names are the channels a run solves, in the same order.
+    /// </para>
+    /// </remarks>
+    private static List<DriveChannel> Groups(CompiledSolvedField solve)
+    {
         var (_, _, quadrature) = Clocks(solve.Drives);
 
-        return
-        [
-            .. DriveChannels
-                .DecomposeStates(States(states), quadrature)
-                .Select(group => (Func<CompiledElectrode, double>?)Weighted(group.Pattern)),
-        ];
+        return DriveChannels.DecomposeStates(States(StageStates(solve)), quadrature);
     }
 
     /// <summary>Builds, solves, and wraps a declared geometry as a field.</summary>
@@ -1091,21 +1135,9 @@ public static class GeometryBuilder
         var grid = BuildGrid(solve);
         var (frequencies, waveforms, quadrature) = Clocks(solve.Drives);
 
-        // Every stage is decomposed on its own and the patterns are then shared, so a
-        // pattern appearing in two stages is solved once and simply weighted differently
-        // in each. A trap that fills and then extracts usually shares most of its patterns
-        // between the two, and paying for them twice would be paying for the sequencer
-        // rather than for the physics. Decomposing the states *together* is what this used
-        // to do and is the one thing that must not happen - see DecomposeStates.
-        var states = StageStates(solve);
-
-        // A sinusoid resolves every phase into two fixed quadrature components, so
-        // a structure with a phase ramp along it costs two solves rather than one
-        // per electrode. Any other waveform cannot be decomposed that way and each
-        // distinct phase stays its own supply. Decided per generator, since an
-        // instrument may run a sinusoidal confinement and a switched excitation at
-        // once and each collapses or does not on its own terms.
-        var groups = DriveChannels.DecomposeStates(States(states), quadrature);
+        // The same channels, in the same order, that the solve key and einzel solve name.
+        // Why stages are decomposed one at a time and sinusoids by quadrature: see Groups.
+        var groups = Groups(solve);
 
         var channels = new List<IElectrostaticField>(groups.Count);
         var direct = new List<double>(groups.Count);

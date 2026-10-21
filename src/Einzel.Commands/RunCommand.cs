@@ -1354,6 +1354,7 @@ public static class RunCommand
             SchemaVersion = ModelJson.Parse(File.ReadAllText(validation.ModelPath)).SchemaVersion,
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
+            Solves = Fields.Solved.SolveHash.Of(model),
 
             // Every mode the run used, in the order the phases used them. One mode
             // recorded here would make a manifest claim to determine a run it does not
@@ -1611,6 +1612,7 @@ public static class RunCommand
             SchemaVersion = ModelJson.Parse(File.ReadAllText(validation.ModelPath)).SchemaVersion,
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
+            Solves = Fields.Solved.SolveHash.Of(model),
             TransportMode = model.TransportMode,
             ComputePath = EngineBuild.ComputePath,
             Machine = Environment.MachineName,
@@ -1883,6 +1885,7 @@ public static class RunCommand
             SchemaVersion = ModelJson.Parse(File.ReadAllText(validation.ModelPath)).SchemaVersion,
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
+            Solves = Fields.Solved.SolveHash.Of(model),
             TransportMode = model.TransportMode,
             ComputePath = EngineBuild.ComputePath,
             Machine = Environment.MachineName,
@@ -2351,6 +2354,7 @@ public static class RunCommand
             SchemaVersion = document.SchemaVersion,
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
+            Solves = Fields.Solved.SolveHash.Of(model),
             TransportMode = model.TransportMode,
             ComputePath = EngineBuild.ComputePath,
             Machine = Environment.MachineName,

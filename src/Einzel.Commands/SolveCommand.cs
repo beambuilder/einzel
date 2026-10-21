@@ -87,6 +87,22 @@ public sealed record SolvedElement
     /// is, and the one that caught interior-electrode coarsening reaching 1e134 V.
     /// </remarks>
     public required double PeakPotentialVolts { get; init; }
+
+    /// <summary>
+    /// The element's mesh and conductors as a content hash, shared by every channel of it.
+    /// </summary>
+    /// <remarks>
+    /// What a field cache keys on, together with the channel's own hash and the
+    /// solver-behaviour version. Unlike the model hash it survives a comment, a rename or
+    /// a parameter written differently, and changes with any edit the solver would see.
+    /// See <see cref="Core.Model.SolveKey"/>.
+    /// </remarks>
+    public required string GeometryHash { get; init; }
+
+    /// <summary>
+    /// This channel's hash: the geometry hash and what each electrode held in the solve.
+    /// </summary>
+    public required string ChannelHash { get; init; }
 }
 
 /// <summary>The outcome of solving a model's fields.</summary>
@@ -100,6 +116,12 @@ public sealed record SolveOutcome
 
     /// <summary>One entry per solved field element, in document order.</summary>
     public required IReadOnlyList<SolvedElement> Elements { get; init; }
+
+    /// <summary>
+    /// The solver-behaviour version the solves ran under, which the geometry and channel
+    /// hashes do not include and a cache key needs beside them (FLD-3).
+    /// </summary>
+    public required int SolverBehaviourVersion { get; init; }
 
     /// <summary>Wall-clock milliseconds spent solving.</summary>
     public required double ElapsedMs { get; init; }
@@ -191,18 +213,8 @@ public static class SolveCommand
 
             if (solve3d is not null)
             {
-                var geometry = new Geometry3D(
-                    solve3d.MinX, solve3d.MinY, solve3d.MinZ,
-                    solve3d.MaxX, solve3d.MaxY, solve3d.MaxZ,
-                    solve3d.CellSize,
-                    solve3d.Electrodes,
-                    solve3d.Tolerance)
-                {
-                    Drives = solve3d.Drives,
-                    Stages = solve3d.Stages,
-                    Faces = Geometry3D.FacesOf(solve3d.Faces),
-                    ReflectAboutX = solve3d.ReflectAboutX,
-                };
+                var geometry = Geometry3D.Of(solve3d);
+                var volumeHash = SolveHash.Geometry(geometry);
 
                 var volume = GeometryBuilder3D.BuildGrid(geometry);
                 var volumeChannels = GeometryBuilder3D.SolveChannels(geometry);
@@ -245,6 +257,8 @@ public static class SolveCommand
                             : 0.0,
                         Converged = channel.Report.Converged,
                         PeakPotentialVolts = volumePeak,
+                        GeometryHash = volumeHash,
+                        ChannelHash = SolveHash.Channel(volumeHash, channel.Holding),
                     });
                 }
 
@@ -252,6 +266,7 @@ public static class SolveCommand
             }
 
             var grid = GeometryBuilder.BuildGrid(solve!);
+            var planeHash = SolveHash.Geometry(solve!);
 
             // One entry per basis channel, the same as the three-dimensional path.
             // A driven structure is one solve per spatial pattern, and reporting
@@ -295,6 +310,8 @@ public static class SolveCommand
                         : 0.0,
                     Converged = channel.Report.Converged,
                     PeakPotentialVolts = peak,
+                    GeometryHash = planeHash,
+                    ChannelHash = SolveHash.Channel(planeHash, channel.Holding),
                 });
             }
         }
@@ -321,6 +338,7 @@ public static class SolveCommand
             ModelPath = absolute,
             ModelHash = Project.ContentHash.OfText(text),
             Elements = elements,
+            SolverBehaviourVersion = Project.EngineBuild.SolverBehaviourVersion,
             ElapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds,
             Warnings = warnings,
         };

@@ -772,6 +772,22 @@ boards, converged, with a peak of 4800 V - the cap's, which looks right. Found w
 moving `export` onto the same function, which every static template had to survive
 unchanged: the mirror pair would not have.
 
+**It prints the key a cache would use.** Each channel carries two hashes: `geometry`,
+over everything the element's solves share - the box, the cell size, the tolerance, the
+symmetry and edge (or face) conditions, and every electrode's shape and geometric
+properties in declaration order - and `channel`, which adds what each electrode held in
+that solve: its pattern for a driven element, its declared potentials for a static one.
+They are taken over the compiled element, after every parameter and unit has been
+evaluated, so a comment, a renamed electrode or a reformatted file changes the model hash
+and not these, while a tenth of a micron on one electrode changes both. Equal means the
+same doubles: 1.1 mm and 0.0011 m evaluate to neighbouring doubles, and so to different
+keys, as they are different solves to the last bit. What is applied to
+a solved field afterwards - the mirror plane, the extrusion tilt - is not in them, so one
+solve can be placed several ways. Neither includes the solver-behaviour version, printed
+on the last line beside the time: a cache needs the hashes to know what was asked and the
+version to know how it was answered. Nothing caches on them yet; the run manifest records
+them too (`solves`), so a result can be matched to the solve it came from.
+
 ### Why `export` writes ImageData
 
 A uniform Cartesian grid *is* VTK image data. An unstructured grid would carry
@@ -1005,7 +1021,7 @@ would be refused. They pass the whole list now, and the CLI prints one line per 
 
 | Path | Contents |
 | --- | --- |
-| `results/<name>.manifest.json` | Model hash, engine version, solver-behaviour version, transport mode, compute path, machine, timestamp |
+| `results/<name>.manifest.json` | Model hash, engine version, solver-behaviour version, solve keys (geometry and channel hashes per solved element), transport mode, compute path, machine, timestamp |
 | `results/<name>.result.json` | The figures of merit, each as a full envelope |
 | `results/<name>.progress.json` | **Only while the run is going** - where it has got to, and the phases that finished. Removed when the run writes its answer, so finding one means the run did not |
 | `.einzel/<name>.trajectory.vtu` | The sampled trajectory, with provenance in a comment block |

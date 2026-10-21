@@ -142,6 +142,17 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A solved element has a key that names its physics, not its text.**
+  `SolveHash` hashes each solved element's compiled geometry and each basis
+  channel's pattern on it (a static element's declared potentials), after
+  compilation, so a comment, a rename or a reformat leave it and a tenth of a
+  micron on one electrode moves it; the mirror plane and the extrusion tilt,
+  applied after the solve, are left out. `einzel solve` prints both hashes
+  per channel with the solver-behaviour version; run manifests record them
+  per element (`solves`). Keys are computed before the solve from the
+  decomposition the solve makes, and a test holds them equal to the keys of
+  the channels actually solved. No numbers change. `SPEC.md` `FLD-3` set
+  from Met to Partial: the key exists, the cache does not. PR #3.
 - **The task-10 batch driver lives here as `tools/quadbatch`.** Solve once,
   fly many ions with a per-ion RF phase, in process, until the library's
   public surface offers the same; listed in `Einzel.slnx` so CI builds it.
