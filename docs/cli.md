@@ -92,6 +92,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel estimate <model.json\|study.json>` | What a run or a whole study will cost, before starting it (GRD-8) |
 | `einzel solve <model.json>` | Solve the fields only, and report how they went |
 | `einzel run <model.json>` | Run; writes a manifest and a result. Reports the ensemble too when the model declares a source cloud, and says where it has got to every 30 s (`--progress`). Loads solved channels from `.einzel/cache` and keeps the ones it solves (`--no-cache` to solve everything) |
+| `einzel fly <model.json> --ions <list>` | Fly an [ion list](ion-lists.md) through the model, one trajectory per row, rows at once on up to `maxParallelism` threads; writes a manifest, a per-ion result and CSV, and the expanded rows. `--ladder` runs the tolerance ladder per row, `--vtu` writes every path to `.einzel/` |
 | `einzel sweep <study.json>` | Tolerance Monte Carlo, and which parameter binds first |
 | `einzel scan <study.json>` | One parameter across a range: one row per point, and a curve |
 | `einzel boundary <study.json>` | Bisect onto a stability boundary, to ACC-6 (Class B) |
@@ -112,14 +113,16 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | --- | --- |
 | `--json` | Machine-readable output, including the full result envelope |
 | `--dry-run` | Say what would be written, and write nothing |
-| `--vtu` | `run` only: write the trajectory for ParaView, or the density for a diffusive model - including a sequenced run that ends in the diffusive description |
+| `--vtu` | `run`: write the trajectory for ParaView, or the density for a diffusive model - including a sequenced run that ends in the diffusive description. `fly`: write every ion's path, one polyline each; with `--ladder` the paths are the first rung's flights, as `run`'s drawn trajectory is |
+| `--ions <list>` | `fly` only: the ion list, `.ions.json` or `.csv` |
+| `--ladder` | `fly` only: fly each row at three tolerances and report the finest with its residual, as `run` does for its one ion |
 | `--at-us <t>` | `render section` only: the instant to draw a driven field, or a diffusive density, at |
 | `--view iso\|side\|top\|front` | `render still` only: the named view, the same names as the window's buttons |
 | `--width-px N`, `--height-px N` | `render still` only: the picture's size, 16 to 8192 pixels; the unit is in the name, as `--width-mm` does it |
 | `--see-through` | `render still` only: draw the conductors translucent, as the window's toggle does |
 | `--no-scale` | `render still` only: leave out the ruler, which is drawn by default in the corner the instrument covers least (and left out anyway when the picture is too small to hold it) |
 | `--progress <seconds>` | `run` and both render verbs: how often to say where the transport has got to, on stderr. Thirty seconds by default, `0` for silence |
-| `--no-cache` | `run`, `test` and the four studies: neither load solved channels from `.einzel/cache` nor keep them; a run's manifest then records no `fieldCache`. `solve`: do not keep what it solves |
+| `--no-cache` | `run`, `fly`, `test` and the four studies: neither load solved channels from `.einzel/cache` nor keep them; a run's manifest then records no `fieldCache`. `solve`: do not keep what it solves |
 | `--project <dir>` | Project root; otherwise inferred by walking up from the model |
 
 Not yet built: `self-update`, which needs `Einzel.Update`. Of the render verbs
@@ -482,6 +485,92 @@ The masthead's headline count moved for the same reason: "runs carrying an unsup
 warning" is nearly every run there is - eleven of this project's thirty-nine corpus examples
 carry one while behaving exactly as designed - so what is counted is runs computed *outside
 validity*.
+
+## Flying an ion list
+
+`einzel fly <model.json> --ions <list>` flies every row of an [ion list](ion-lists.md)
+through one model: the model validated as `run` validates it, the field built
+through the same cache, and each row one independent trajectory from its own launch
+and birth time. It answers a different question from `run` - one row per ion rather
+than one laddered flight time - so it is a verb of its own, and `run`'s result and
+write count do not change.
+
+```
+einzel fly models/quad.json --ions ions/corpus48.ions.json
+  field: 2 channel(s) from the cache, 0 solved
+  flew 48 ions in 0.4 s on up to 20 thread(s)
+flew 48 ion(s): 48 StruckElectrode
+  surfaces: 48 detector
+  wrote results/quad.corpus48.fly.manifest.json
+  ...
+```
+
+| Option | Effect |
+| --- | --- |
+| `--ions <list>` | Required. `.ions.json`, or a `.csv` of expanded rows |
+| `--json` | Print the result document; the bytes are the stored `.fly.json`'s |
+| `--project <dir>` | Project root; otherwise inferred from the model |
+| `--no-cache` | Solve the field rather than load or keep it |
+| `--dry-run` | Validate and expand, print the row count, the seeds and how many of the field's channels the cache holds, write nothing |
+| `--ladder` | Three tolerances per row, the finest reported with its residual. Three flights per row |
+| `--vtu` | Every row's sampled path, one polyline per ion, written to `.einzel/`. With `--ladder` the paths are a fourth flight per row at the model tolerance, the ladder's first rung |
+
+**What it refuses**, each as a validation error at the declaration responsible:
+space charge (`/transport/spaceCharge`: ions that push on each other are not flown
+one at a time), a diffusive model (`/transport/mode`), a sequence with a diffusive
+phase or a mode change (`/sequence`; a sequence that is trajectory throughout flies,
+each row shifted into its timeline by its birth time), a mixture (`/species`), and a
+model whose `source.cloud` is a cloud (`/source/cloud`: the list states the launch,
+so the cloud belongs in it as a `cloud` set). A model with an imported gas flow or
+pressure field flies: each row draws from its own collision stream and the imported
+grids are only read. A list error is reported against the list, by its pointer; a
+row born more than 1000 maximum flight times late is refused at its `birthTime` or
+`rfPhase` (`/<row>/birth_time_s` for a CSV), because its flight time would be
+resolved no better than one unit in the last place of its birth time. A CSV states
+the mass, charge and launch of every ion and nothing in it is defaulted, but it is
+checked against the model as a JSON list is.
+
+**Regime.** In a gas, `fly` measures the regime numbers as `run` does, for the model's
+own ion over one flight at the model tolerance, and carries the same `regime.*`
+warnings (REG-2). A model outside its validity is not refused by validation: as for
+`run`, it is flown, warned about, and exits 2.
+
+**Exit codes** follow `run`'s table. An ion on an electrode or still in flight at
+the time limit is a result, so a completed fly exits 0 whatever its ions did. 1 is a
+validation failure of the model, the list, or a refusal above. 2 is a `regime.*`
+validity violation, which outranks 4. 4 means at least one row's integration gave up
+(step underflow, step budget); the outcome counts those as `integratorFailures` and
+carries a `fly.integrator-failures` warning. A row whose flight throws is a defect,
+not an outcome: the exception is rethrown with its type and stack, nothing is
+written, and the exit code is 6, an internal error.
+
+**The manifest** is a run manifest: model hash and path, solve keys and cache uses,
+and in `inputHashes` the ion list's bytes keyed by its project-relative path, so
+`verify` reports a fly whose list was edited since. `seeds` are the list's set seeds
+in document order, then the gas seed when the model has a gas (a CSV list has no set
+seeds). `maxParallelism` is recorded as what it is, a cost: rows are written by
+index and are the same at any setting.
+
+**The result** (`<model>.<list>.fly.json`) carries the manifest, `launched`, counts
+per outcome and per struck surface, `integratorFailures`, the field-ready and fly
+seconds, the warnings of the field, the model and the regime, and one row per ion
+in list order: `id`, `tag`, `outcome`, `surface`, the final position in mm, the
+flight time in µs **from the ion's birth**, `timeHalfWidthUs` with `--ladder`,
+accepted and rejected steps, `collisions`, the largest relative energy drift and
+the codes of its own warnings. `timeUs` is the flight time in seconds times 10^6, as
+a cloud's events in a `run` result give it; a single-ion `run` converts through the
+unit system and can differ from it in the last place. `report` names it as an
+answer stored and not drawn, as it does a study's.
+
+**One stem per model and list name.** The files are named
+`<model>.<list>.fly.*`, the list's name without `.ions.json`, `.ions.csv`, `.json`
+or `.csv`, so `a.ions.json` and `a.csv` write the same files and the later flight
+replaces the earlier result; `fly` says so on stderr when the manifest it replaces
+recorded another list. A flight without `--vtu` removes a
+`.einzel/<model>.<list>.fly.trajectories.vtu` an earlier `--vtu` flight left, so a
+path on disk is always the result's. Every row's samples (up to 200,000 per row)
+are held in memory until the file is written, so `--vtu` on a long list costs
+memory in proportion to rows times samples.
 
 ## Studies
 
@@ -1050,6 +1139,11 @@ would be refused. They pass the whole list now, and the CLI prints one line per 
 | `.einzel/<name>.trajectory.vtu` | The sampled trajectory, with provenance in a comment block |
 | `.einzel/<name>.density.vti` | The density on the tracked grid, with the run's caveats and their severities in a comment block. Written for a diffusive run, and for a **sequenced** run whose last phase was diffusive - a sequence ending as trajectories has no density, which is a different fact from an empty one, so none is written |
 | `results/<name>.arrivals.csv` | The arrival profile, where enough arrived to be one. See the note on `sequence.nothing-eluted` below |
+| `results/<model>.<list>.fly.manifest.json` | `fly`: the run manifest, with the ion list in `inputHashes`, the seeds and `maxParallelism` |
+| `results/<model>.<list>.fly.json` | `fly`: the per-ion result; `--json` prints the same bytes |
+| `results/<model>.<list>.fly.csv` | `fly`: one line per ion, `id,tag,outcome,surface,x_mm,y_mm,z_mm,time_us,steps,rejected,collisions,warnings` (warning codes joined by `;`), numbers in round-trip (`R`) format |
+| `results/<model>.<list>.fly.ions.csv` | `fly`: the expanded rows in SI; `fly --ions` on this file flies the same ions again |
+| `.einzel/<model>.<list>.fly.trajectories.vtu` | `fly --vtu`: one polyline per ion, cell data `id` and `outcome` (an integer, the codes listed in the file's provenance comment), point data `time_us` from the ion's birth; the provenance names any id whose path was truncated at the sample capacity or had too few samples for a line. With `--ladder`, the first rung's paths |
 | `.einzel/cache/solver-<v>-<path>/<hash>.f64`, `.json` | One solved basis channel and its record, kept for the next run; see below |
 
 The manifest fully determines the run, which is what makes `.einzel/` safe to

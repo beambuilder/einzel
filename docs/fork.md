@@ -145,6 +145,23 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **`einzel fly` flies an ion list through a model, one row per ion, and the
+  expanded rows reproduce it.** `fly <model> --ions <list>` validates the model as
+  `run` does, refuses space charge, diffusion, a sequence with a diffusive phase
+  or a mode change, a mixture and a model cloud by name, builds the field through
+  the cache and flies the rows through the per-row core on up to `maxParallelism`
+  threads. In a gas it carries `run`'s regime warnings and exits 2 on a validity
+  violation, as `run` does; a row that throws is a defect and exits 6. It writes
+  a run manifest with the list's hash in `inputHashes` (so `verify` reports an
+  edited list), its seeds and `maxParallelism`; a per-ion `.fly.json` (`--json`
+  prints the same bytes; `report` names it as not drawn), a `.fly.csv` with each
+  row's collisions, the expanded `.fly.ions.csv`, and with `--vtu` one polyline
+  per ion under `.einzel/`. Measured on the 0.2 mm pixel-rod quadrupole, warm: the
+  48-row corpus list in 1.1 s wall against 4.4 s for a 48-ion cloud through `run`,
+  agreeing with the harness in outcome on 48 of 48 ions with final positions
+  within 1 nm (both matching harness blocks); 480 cloud ions in 2.5 s wall (1.8 s
+  flying) on 20 threads against 31.2 s wall, bit for bit `run`'s events. SPEC
+  Amendment 60; [the CLI](cli.md#flying-an-ion-list), [Ion lists](ion-lists.md). PR #12.
 - **A cloud and an ion list fly through one per-row core, and the answer does
   not depend on how many fly at once.** `IonListFlight.Fly` flies rows of an
   ion list as independent trajectories, written back by index, on up to

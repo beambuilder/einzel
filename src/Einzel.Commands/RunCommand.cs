@@ -933,7 +933,7 @@ public static class RunCommand
     /// line on every model is noise rather than information.
     /// </para>
     /// </remarks>
-    private static List<ValidityWarning> ProvenanceWarnings(CompiledModel model)
+    internal static List<ValidityWarning> ProvenanceWarnings(CompiledModel model)
     {
         var warnings = new List<ValidityWarning>();
 
@@ -995,7 +995,7 @@ public static class RunCommand
     /// range where the effect is a selective loss rather than a total one.
     /// </para>
     /// </remarks>
-    private static List<ValidityWarning> HalfSpaceDepthWarnings(CompiledModel model)
+    internal static List<ValidityWarning> HalfSpaceDepthWarnings(CompiledModel model)
     {
         var warnings = new List<ValidityWarning>();
 

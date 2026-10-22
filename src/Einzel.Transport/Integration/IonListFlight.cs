@@ -28,6 +28,12 @@ public sealed record IonFlight
 
     /// <summary>What the integration threw, or null when it finished.</summary>
     public Exception? Failure { get; init; }
+
+    /// <summary>The sampled path, when one was asked for: the reported flight, or rung 0 with the ladder.</summary>
+    public IReadOnlyList<TrajectorySample>? Trajectory { get; init; }
+
+    /// <summary>Whether the recorder reached its capacity, so the path's tail is missing.</summary>
+    public bool TrajectoryTruncated { get; init; }
 }
 
 /// <summary>Flies the rows of an ion list, one independent trajectory each.</summary>
@@ -64,6 +70,11 @@ public static class IonListFlight
     /// <param name="gasSeed">The declared collision seed; row k draws from <c>gasSeed + k</c>.</param>
     /// <param name="maxParallelism">How many rows may fly at once. One flies them in order on this thread.</param>
     /// <param name="ladder">Whether to run the three-rung tolerance ladder per row.</param>
+    /// <param name="record">
+    /// Makes a recorder per row to sample its path, or null to sample nothing. Recording does
+    /// not change the arithmetic; with the ladder the path is a fourth flight at rung 0, as a
+    /// single-ion run draws its own.
+    /// </param>
     /// <returns>The flights, index for index with <paramref name="rows"/>.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxParallelism"/> is below one.</exception>
@@ -75,7 +86,8 @@ public static class IonListFlight
         BackgroundGas gas,
         int gasSeed,
         int maxParallelism,
-        bool ladder = false)
+        bool ladder = false,
+        Func<TrajectoryRecorder>? record = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(field);
@@ -92,7 +104,7 @@ public static class IonListFlight
         {
             for (var index = 0; index < rows.Count; index++)
             {
-                flights[index] = FlyOne(rows[index], index, field, settings, detector, gas, gasSeed, ladder);
+                flights[index] = FlyOne(rows[index], index, field, settings, detector, gas, gasSeed, ladder, record);
             }
 
             return flights;
@@ -102,7 +114,7 @@ public static class IonListFlight
             0,
             rows.Count,
             new ParallelOptions { MaxDegreeOfParallelism = maxParallelism },
-            index => flights[index] = FlyOne(rows[index], index, field, settings, detector, gas, gasSeed, ladder));
+            index => flights[index] = FlyOne(rows[index], index, field, settings, detector, gas, gasSeed, ladder, record));
 
         return flights;
     }
@@ -115,7 +127,8 @@ public static class IonListFlight
         TrajectoryStopFunction detector,
         BackgroundGas gas,
         int gasSeed,
-        bool ladder)
+        bool ladder,
+        Func<TrajectoryRecorder>? record)
     {
         var flown = row.BirthTimeSeconds > 0.0 && field is ITimeVaryingField driven
             ? new TimeShiftedField(driven, row.BirthTimeSeconds)
@@ -129,11 +142,13 @@ public static class IonListFlight
 
         try
         {
+            var recorder = record?.Invoke();
+
             if (!ladder)
             {
                 var sampler = Sampler();
                 var result = TrajectoryIntegrator.Integrate(
-                    row.Launch, row.Species, flown, settings, detector, collisions: sampler);
+                    row.Launch, row.Species, flown, settings, detector, recorder, sampler);
 
                 return new IonFlight
                 {
@@ -144,6 +159,8 @@ public static class IonListFlight
                         ? []
                         : FlightTimeStudy.CollisionWarnings(
                             sampler.BoundExceeded, sampler.SampledOutsideDensity, sampler.SampledOutsideFlow),
+                    Trajectory = recorder?.Samples,
+                    TrajectoryTruncated = recorder?.Truncated ?? false,
                 };
             }
 
@@ -154,6 +171,11 @@ public static class IonListFlight
                 row.Launch, row.Species, flown, settings, detector,
                 collisions: gas.IsPresent ? () => finest = Sampler()! : null);
 
+            if (recorder is not null)
+            {
+                TrajectoryIntegrator.Integrate(row.Launch, row.Species, flown, settings, detector, recorder, Sampler());
+            }
+
             return new IonFlight
             {
                 Row = row,
@@ -161,6 +183,8 @@ public static class IonListFlight
                 FlightTimeHalfWidthSeconds = FlightTimeStudy.ConvergenceResidual(study.Runs).ResidualSi,
                 Collisions = finest?.Collisions ?? 0,
                 Warnings = study.FlightTime.Warnings,
+                Trajectory = recorder?.Samples,
+                TrajectoryTruncated = recorder?.Truncated ?? false,
             };
         }
         catch (Exception failure) when (failure is not OutOfMemoryException)

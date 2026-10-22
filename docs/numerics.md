@@ -989,11 +989,19 @@ extrapolation of the ghost node took the same case to 1.9e-10.
 
 ## Determinism
 
-Bit-reproducibility across machines is not a requirement; run-to-run
-reproducibility on one machine is. Golden comparisons use documented tolerances
-with stated reasons. `Deterministic` and `InvariantGlobalization` are set in
-`Directory.Build.props` so that number formatting cannot vary with the host
-locale and leak into CLI output or golden files.
+Bit-reproducibility across machines is not a requirement for a computed
+result; run-to-run reproducibility on one machine is. An ion list is input rather
+than output, and its expansion is held to two narrower statements (Amendment 60):
+the expanded `.ions.csv` gives the same starting states on any machine, because
+its rows are round-trip-formatted numbers; and seeded expansion is compared with
+stored golden rows, bit for bit for `uniform`, `sequence` and `linspace` on every
+runner, and for the generators that call `Math.Log`, `Math.Sin` or `Math.Cos` bit
+for bit on Windows and within 1e-12 relative elsewhere. Where a seeded expansion
+differs between machines, the expanded file is the anchor. Golden comparisons use
+documented tolerances with stated reasons. `Deterministic` and
+`InvariantGlobalization` are set in `Directory.Build.props` so that number
+formatting cannot vary with the host locale and leak into CLI output or golden
+files.
 
 ## A parallel-plate capacitor is the worst 3-D case, and that is the wrong way round
 

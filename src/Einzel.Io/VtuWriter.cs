@@ -135,6 +135,80 @@ public static class VtuWriter
         return text.ToString();
     }
 
+    /// <summary>Writes many trajectories as one polyline cell each, with the ion's id and outcome.</summary>
+    /// <param name="trajectories">
+    /// Per ion its id, an integer outcome code and its samples; an ion with fewer than two
+    /// samples has no line and is left out.
+    /// </param>
+    /// <param name="provenance">Provenance lines recorded as an XML comment.</param>
+    /// <returns>The .vtu document text.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="trajectories"/> is null.</exception>
+    /// <remarks>
+    /// One file for a whole list, so ParaView colours a beam by cell data rather than
+    /// opening a file per ion. Point data is <c>time_us</c>, each ion's own flight time.
+    /// </remarks>
+    public static string WriteTrajectories(
+        IReadOnlyList<(int Id, int Outcome, IReadOnlyList<TrajectorySample> Samples)> trajectories,
+        IReadOnlyList<string>? provenance = null)
+    {
+        ArgumentNullException.ThrowIfNull(trajectories);
+
+        var lines = trajectories.Where(t => t.Samples.Count >= 2).ToList();
+        var points = lines.Sum(t => t.Samples.Count);
+        var text = new StringBuilder((points * 64) + 1024);
+        var invariant = CultureInfo.InvariantCulture;
+
+        text.Append("<?xml version=\"1.0\"?>\n");
+
+        if (provenance is { Count: > 0 })
+        {
+            text.Append("<!--\n");
+
+            foreach (var line in provenance)
+            {
+                text.Append("  ").Append(line.Replace("--", "- -", StringComparison.Ordinal)).Append('\n');
+            }
+
+            text.Append("-->\n");
+        }
+
+        text.Append("<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"LittleEndian\">\n  <UnstructuredGrid>\n");
+        text.Append(invariant, $"    <Piece NumberOfPoints=\"{points}\" NumberOfCells=\"{lines.Count}\">\n");
+        text.Append("      <Points>\n        <DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n");
+
+        foreach (var sample in lines.SelectMany(t => t.Samples))
+        {
+            text.Append(invariant, $"          {sample.Position.X:G17} {sample.Position.Y:G17} {sample.Position.Z:G17}\n");
+        }
+
+        text.Append("        </DataArray>\n      </Points>\n      <PointData Scalars=\"time_us\">\n");
+        text.Append("        <DataArray type=\"Float64\" Name=\"time_us\" format=\"ascii\">\n");
+
+        foreach (var sample in lines.SelectMany(t => t.Samples))
+        {
+            text.Append(invariant, $"          {sample.TimeSeconds * 1e6:G17}\n");
+        }
+
+        text.Append("        </DataArray>\n      </PointData>\n      <CellData Scalars=\"id\">\n");
+        text.Append("        <DataArray type=\"Int32\" Name=\"id\" format=\"ascii\">\n          ");
+        text.AppendJoin(' ', lines.Select(t => t.Id.ToString(invariant)));
+        text.Append("\n        </DataArray>\n        <DataArray type=\"Int32\" Name=\"outcome\" format=\"ascii\">\n          ");
+        text.AppendJoin(' ', lines.Select(t => t.Outcome.ToString(invariant)));
+        text.Append("\n        </DataArray>\n      </CellData>\n");
+
+        // One VTK_POLY_LINE cell (type 4) per ion, threading its own points in flight order.
+        text.Append("      <Cells>\n        <DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n          ");
+        text.AppendJoin(' ', Enumerable.Range(0, points).Select(i => i.ToString(invariant)));
+        text.Append("\n        </DataArray>\n        <DataArray type=\"Int64\" Name=\"offsets\" format=\"ascii\">\n          ");
+        var end = 0;
+        text.AppendJoin(' ', lines.Select(t => (end += t.Samples.Count).ToString(invariant)));
+        text.Append("\n        </DataArray>\n        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n          ");
+        text.AppendJoin(' ', lines.Select(_ => "4"));
+        text.Append("\n        </DataArray>\n      </Cells>\n    </Piece>\n  </UnstructuredGrid>\n</VTKFile>\n");
+
+        return text.ToString();
+    }
+
     /// <summary>Writes a solved scalar field as VTK ImageData.</summary>
     /// <param name="field">The field, on its grid.</param>
     /// <param name="name">The name the array takes in ParaView.</param>
