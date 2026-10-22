@@ -119,6 +119,7 @@ public static class Program
             "estimate" => Estimate(options),
             "solve" => Solve(options),
             "run" => Run(options),
+            "fly" => Fly(options),
             "sweep" => Sweep(options),
             "optimise" or "optimize" => Optimise(options),
             "scan" => Scan(options),
@@ -2438,6 +2439,94 @@ public static class Program
         return run.Completed ? (int)ExitCode.Success : (int)ExitCode.ConvergenceFailure;
     }
 
+    private static int Fly(CommandLine options)
+    {
+        if (options.Positional.Count == 0 || options.Value("ions") is not { } ions)
+        {
+            Console.Error.WriteLine(
+                "usage: einzel fly <model.json> --ions <list.ions.json|.csv> [--json] [--project <dir>] "
+                + "[--no-cache] [--dry-run] [--ladder] [--vtu]");
+            return (int)ExitCode.ValidationFailure;
+        }
+
+        var modelPath = Path.GetFullPath(options.Positional[0]);
+        var project = new ProjectLayout(options.Value("project") ?? InferProjectRoot(modelPath));
+
+        var (fly, validation, errorsIn) = FlyCommand.Execute(modelPath, ions, project, new FlyOptions
+        {
+            DryRun = options.Has("dry-run"),
+            Ladder = options.Has("ladder"),
+            ExportVtu = options.Has("vtu"),
+            FieldCache = CacheFor(project, options),
+            TimestampUtc = DateTimeOffset.UtcNow,
+
+            // Diagnostics on stderr (CLI-2), as a run's are.
+            Announce = Console.Error.WriteLine,
+        });
+
+        if (fly is null)
+        {
+            if (options.Has("json"))
+            {
+                Console.Out.Write(CommandJson.Write(validation));
+            }
+            else
+            {
+                Console.Error.WriteLine($"{validation.Errors.Count} problem(s) in {errorsIn}:");
+                Console.Error.WriteLine();
+
+                foreach (var error in validation.Errors)
+                {
+                    WriteError(error);
+                }
+            }
+
+            return (int)validation.ExitCode;
+        }
+
+        if (options.Has("json"))
+        {
+            // The same bytes as the stored result, which lists itself among its artifacts.
+            Console.Out.Write(CommandJson.Write(fly));
+            return (int)fly.ExitCode;
+        }
+
+        var invariant = CultureInfo.InvariantCulture;
+
+        if (fly.DryRun)
+        {
+            Console.Out.WriteLine(string.Create(
+                invariant,
+                $"would fly {fly.Launched} ion(s) from {fly.IonsPath} through {fly.Manifest.ModelPath} on up to {fly.MaxParallelism} thread(s)"));
+            Console.Out.WriteLine(string.Create(
+                invariant,
+                $"  seeds [{string.Join(", ", fly.Manifest.Seeds)}]; field: {fly.CachedChannels} of {fly.Channels} channel(s) in the cache"));
+            return (int)ExitCode.Success;
+        }
+
+        Console.Out.WriteLine(
+            string.Create(invariant, $"flew {fly.Launched} ion(s): ")
+            + string.Join(", ", fly.Outcomes.Select(pair => string.Create(invariant, $"{pair.Value} {pair.Key}"))));
+
+        if (fly.Surfaces.Count > 0)
+        {
+            Console.Out.WriteLine("  surfaces: " + string.Join(", ", fly.Surfaces.Select(pair => string.Create(invariant, $"{pair.Value} {pair.Key}"))));
+        }
+
+        foreach (var warning in fly.Warnings)
+        {
+            var stream = warning.Suppressible ? Console.Out : Console.Error;
+            stream.WriteLine($"  [{warning.Severity}] {warning.Code}: {warning.Message}");
+        }
+
+        foreach (var artifact in fly.Artifacts)
+        {
+            Console.Out.WriteLine($"  wrote {artifact}");
+        }
+
+        return (int)fly.ExitCode;
+    }
+
     private static void WriteRun(RunOutcome run)
     {
         var invariant = CultureInfo.InvariantCulture;
@@ -2836,6 +2925,7 @@ public static class Program
           estimate <model.json>         what a run will cost, without running it
           solve <model.json>            solve the fields only, and report how they went
           run <model.json> [--vtu]      run a model; --vtu also writes a ParaView trajectory
+          fly <model.json> --ions <f>   fly an ion list, one trajectory per row [--ladder] [--vtu]
           preview <model.json>          a fast, deliberately inexact look
           test [dir]                    run the project's tests
           verify [dir]                  are the stored results still the answer?

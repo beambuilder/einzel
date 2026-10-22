@@ -511,10 +511,10 @@ public static class ReportCommand
             // page does not draw it yet - which is a different statement from an answer
             // that was never stored.
             notRendered =
-                $"'{stem}.json' is a study's answer rather than a run's - a sweep, scan, "
-                + "optimisation or boundary search - and this report does not draw one yet. "
-                + "The document is there and complete; `einzel sweep|scan|optimise|boundary "
-                + "--json` reads it";
+                $"'{stem}.json' is a study's or a fly's answer rather than a run's - a sweep, "
+                + "scan, optimisation or boundary search, or an ion-list flight - and this report "
+                + "does not draw one yet. The document is there and complete; `einzel "
+                + "sweep|scan|optimise|boundary|fly --json` reads it";
         }
 
         return new ReportedRun(

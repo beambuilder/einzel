@@ -104,6 +104,7 @@ einzel init <dir> [--vcs git]                 # create a project
 einzel validate models/reflectron.json        # units, bounds, regime validity
 einzel run models/reflectron.json --vtu       # run; --vtu writes a ParaView trajectory
 einzel run models/reflectron.json --json      # machine-readable, for the agent loop
+einzel fly models/quad.json --ions ions/scan.ions.json  # an ion list, one trajectory per row (docs/ion-lists.md)
 ```
 
 **Two numerical rules that cost real accuracy when broken**, both found by tests that failed for the right reason:

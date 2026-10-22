@@ -140,6 +140,13 @@ public sealed record RunManifest
     /// <summary>Random seeds. Empty for a deterministic single-ion run.</summary>
     public IReadOnlyList<long> Seeds { get; init; } = [];
 
+    /// <summary>How many ions could fly at once, for an ion-list flight; absent elsewhere.</summary>
+    /// <remarks>
+    /// A cost and not an input: rows are flown and written by index, so the result is the
+    /// same at any setting. Recorded because it explains the wall time beside it.
+    /// </remarks>
+    public int? MaxParallelism { get; init; }
+
     /// <summary>Extension identities and versions. Empty when none were used (GRD-6).</summary>
     public IReadOnlyList<string> Extensions { get; init; } = [];
 

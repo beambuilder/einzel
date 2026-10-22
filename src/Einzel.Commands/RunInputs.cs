@@ -19,12 +19,13 @@ internal static class RunInputs
         References(document).Select(reference => reference.Path);
 
     internal static IReadOnlyDictionary<string, string> Capture(
-        ModelDocument document, string modelPath, string root, string? studyPath = null)
+        ModelDocument document, string modelPath, string root, string? studyPath = null, string? ionsPath = null)
     {
         var paths = References(document)
             .Select(reference => (Path: Path.GetFullPath(reference.Path, Path.GetDirectoryName(modelPath)!), reference.Pointer));
         if (studyPath is not null) paths = paths.Append((studyPath, "/study"));
-        var hashes = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        if (ionsPath is not null) paths = paths.Append((ionsPath, "/ions"));
+        var hashes = new Captured();
         foreach (var (path, pointer) in paths)
         {
             // PORTABLE, or refused. `GetRelativePath` cannot express a path on another
@@ -54,6 +55,7 @@ internal static class RunInputs
             try
             {
                 hashes[relative] = ContentHash.OfFile(path);
+                hashes.Pointers[relative] = pointer;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -86,14 +88,23 @@ internal static class RunInputs
 
                     // AGT-3's path is a pointer into the DOCUMENT, which is what a caller
                     // follows to find the declaration to change - the file that moved is
-                    // named in the constraint instead. `Capture` a few lines up already
-                    // reports the pointer; the two disagreed about what this field means.
-                    Path = "/transport/gas",
+                    // named in the constraint instead. The pointer is the one `Capture`
+                    // recorded for the file, so a changed study or ion list is not reported
+                    // against the gas.
+                    Path = hashes is Captured captured && captured.Pointers.TryGetValue(relative, out var pointer)
+                        ? pointer
+                        : "/transport/gas",
                     Constraint = $"the input file '{relative}' changed during the calculation; "
                         + "its consumed content cannot be established",
                     Suggestion = "restore stable input files and rerun before publishing a result",
                 });
         }
         return hashes;
+    }
+
+    /// <summary>The hashes, with the pointer that declared each file.</summary>
+    private sealed class Captured() : SortedDictionary<string, string>(StringComparer.Ordinal)
+    {
+        internal Dictionary<string, string> Pointers { get; } = new(StringComparer.Ordinal);
     }
 }

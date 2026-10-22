@@ -266,8 +266,9 @@ that. A `.csv` is also accepted wherever an ion list is (explicit rows only),
 and its errors are addressed as `/<row>/<column>`, rows counted from 0 after the
 header. A CSV row states its mass, charge, launch and birth time in full and
 defaults nothing from the model, but the model is checked as for a JSON list: a
-model with a cloud or a mixture is refused at `/`, and a row born more than 1000
-maximum flight times late at `/<row>/birth_time_s`.
+model with a cloud or a mixture is refused at `/` (and by `fly` before the list
+is read, at the model's own declaration), and a row born more than 1000 maximum
+flight times late at `/<row>/birth_time_s`.
 
 **The expanded `.ions.csv` reproduces the list anywhere.** A seeded set expands
 through `System.Random` and the platform's maths library, which nothing promises
@@ -301,12 +302,66 @@ the cloud of a `run`:
 - **A row that throws** does not stop the others: the core carries the exception
   as that row's failure and flies the rest. The integrator itself throws nothing
   in flight, so a thrown row is a defect, and the caller rethrows the first one
-  with its own type and stack, as the cloud of a `run` does.
+  with its own type and stack, as the cloud of a `run` does; `fly` then exits 6.
+
+## Flying a list
+
+`einzel fly` (see [the CLI](cli.md#flying-an-ion-list)) flies a list through one
+model. The 06c RF validation cases (project side) fly 48 ions per scan point - 8
+birth phases times 6 launch variants - through a model whose rods are driven at
+1.1 MHz with `drivePhase` 0.75:
+
+```json
+{
+  "schemaVersion": "0.1",
+  "ions": [
+    { "id": 1, "rfPhase": 0, "tag": "k0v0",
+      "position": { "value": [0, 0.02, 0.02], "unit": "mm" },
+      "direction": { "value": [1, 0, 0] },
+      "kineticEnergy": { "value": 2, "unit": "eV" } },
+    { "id": 2, "rfPhase": 0, "tag": "k0v1",
+      "position": { "value": [0, 0.05, 0.02], "unit": "mm" },
+      "direction": { "value": [1, 0, 0] },
+      "kineticEnergy": { "value": 2, "unit": "eV" } }
+  ]
+}
+```
+
+(the full file has 48 such rows, `rfPhase` k/8 for k = 0..7). Then
+
+```
+einzel fly models/quad.json --ions ions/corpus48.ions.json --vtu
+```
+
+writes:
+
+| File | Holds |
+| --- | --- |
+| `results/quad.corpus48.fly.manifest.json` | the run manifest: model hash, the list's hash in `inputHashes`, the seeds (none here: nothing is drawn), `maxParallelism` |
+| `results/quad.corpus48.fly.json` | per ion: id, tag, outcome, surface, final position in mm, flight time in µs since birth, steps, rejected steps, collisions, energy drift, warnings; counts per outcome and surface; timings |
+| `results/quad.corpus48.fly.csv` | the same rows as `id,tag,outcome,surface,x_mm,y_mm,z_mm,time_us,steps,rejected,collisions,warnings` |
+| `results/quad.corpus48.fly.ions.csv` | the expanded rows; `fly --ions` on it flies the same ions again |
+| `.einzel/quad.corpus48.fly.trajectories.vtu` | with `--vtu`: every ion's path as one polyline, `id` and `outcome` as cell data, `time_us` as point data; large and regenerable, so beside the cache as `run`'s trajectory is |
+
+The files are named by the model and the list (`a.ions.json` and `a.csv` share a
+name, and the later flight replaces the earlier one, saying so on stderr), and a
+flight without `--vtu` removes a path an earlier `--vtu` flight left. See
+[the CLI](cli.md#flying-an-ion-list) for the exit codes, the regime warnings a gas
+model earns as under `run`, and what a row that throws does.
+
+An ion's RF phase in this list is its birth time: the ion born at `rfPhase` k/8 sees
+the drive's argument `f·(t + k/(8f)) + 0.75`, which is the argument
+`f·t + (k/8 − 1/4)` of the harness (`tools/quadbatch`) modulo one cycle. Flown so,
+the 48 ions agree with the harness in outcome and surface, and their final positions differ by less than a nanometre
+against both matching harness blocks (the two-channel field against the harness's
+four bases). An ion is transmitted, in the 06c cases' terms, when its final x is
+above 90 mm and its outcome is `StruckElectrode` (on the detector disc) or
+`StopConditionMet`.
 
 ## SIMION `.fly2` parity
 
 How the `.fly2` constructs used in this project map onto an ion list in this
-build. "Later" marks what A.4's remaining steps or later milestones add.
+build. "Later" marks what later milestones add.
 
 | `.fly2` | SIMION | Ion list | Status |
 | --- | --- | --- | --- |
@@ -332,4 +387,4 @@ build. "Later" marks what A.4's remaining steps or later milestones add.
 | clock-seeded random | not reproducible | `seed`, and the expanded `.ions.csv` | beyond |
 | `fast_adjust` per ion | per-ion voltages | none; one model per operating point | gap; later (A.5) |
 | grouped flight, repulsion | common time step | none for a list | gap; later (B2.4/B2.5) |
-| `terminate` record | splat per ion | none yet | later in A.4 (`einzel fly`) |
+| `terminate` record | splat per ion | a `fly` row: id, tag, outcome, surface, final position, time since birth, steps | parity |

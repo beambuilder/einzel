@@ -100,7 +100,7 @@ public sealed record VerifyOutcome
 public static class VerifyCommand
 {
     private static readonly string[] StudyManifestSuffixes =
-        [".sweep.manifest.json", ".scan.manifest.json", ".boundary.manifest.json", ".optimise.manifest.json"];
+        [".sweep.manifest.json", ".scan.manifest.json", ".boundary.manifest.json", ".optimise.manifest.json", ".fly.manifest.json"];
 
     /// <summary>Verifies every stored result in a project.</summary>
     /// <param name="root">The project root.</param>

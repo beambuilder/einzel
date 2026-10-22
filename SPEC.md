@@ -155,6 +155,67 @@ Einzel. **That, rather than a date, is the trigger.**
 
 ## Amendments to the specification
 
+### 60 - An ion list is its own document, `fly` flies it, and its expanded rows are the reproducibility anchor
+
+**PRJ-3, CLI-1, CLI-2, CLI-5, GRD-1, GRD-2, AGT-2.** r06 launches one ion per model, or one
+seeded cloud around it, and records the cloud only through the model hash. A validation
+project needed 48 ions per scan point differing in birth phase, position and direction, as
+SIMION states them in `.fly2` and `.ion` files, and found nothing to state them in and
+nothing to fly them with but a loop of single-ion runs at a second each.
+
+**The ion list is a document of its own**, `<name>.ions.json` with its own `schemaVersion`
+`"0.1"`, unknown keys refused with their pointer, beside the model rather than in it: an
+inline list would change the model hash and make `verify` call every `run` of that model
+edited. Rows carry an id, species, launch, energy, birth time (`rfPhase` is sugar for
+`birthTime = rfPhase / f` on a single-frequency model) and a tag; omitted attributes come
+from the model's `ion` and `source` with the validator's own arithmetic. Sets expand rows
+from `run`'s own cloud draw or from seeded generators (`uniform`, `gaussian`, `sequence`,
+`linspace`, `disc`, `cone`). The model schema stays 0.14. `docs/ion-lists.md`.
+
+**`einzel fly <model> --ions <list>` flies it**, one independent trajectory per row through
+the per-row core a cloud now flies through (`IonListFlight.Fly`): written by index, so the
+answer is the same at any `maxParallelism` (CLI-5); collisions seeded with the gas seed plus
+the row's index; a birth time as a `TimeShiftedField`, a row born at 0 bit for bit the
+single-ion flight. It writes a run manifest with the list's bytes in `inputHashes` (so
+`verify` catches an edited list with no change to `verify`), the list's seeds and the gas
+seed in `seeds`, and `maxParallelism` as a cost; a per-ion result whose `--json` is the stored
+bytes (CLI-1, CLI-2), each row a bare number set inside the envelope as a cloud's events are
+(GRD-1's existing precedent) with the field's, the model's and the regime's warnings carried
+at the top (GRD-2, REG-2: in a gas the regime is measured for the model's own ion as `run`
+measures it, and a validity violation exits 2 as `run`'s does); a per-ion CSV; the expanded
+rows as `.ions.csv`; with `--vtu` every path, under `.einzel/` as `run`'s. A row whose flight
+throws is a defect, rethrown with its type and stack (exit 6), not a row of the result. It
+refuses space charge, diffusion, a sequence with a diffusive phase or a mode change, a
+mixture and a model cloud, each by name; a sequence that is trajectory throughout flies, each
+row shifted into its timeline. The list refuses a row born more than 1000 maximum flight
+times late, whose flight time would be resolved only to an ulp of its birth. Not on MCP: the session surface is deliberately not a second CLI (AGT-2); `FlyOutcome`
+is `CommandJson`-serialisable for when it is. `run` is unchanged. `docs/cli.md`.
+
+**Reproducibility is narrowed, and stated for what it now covers.** The numerics page says
+bit-reproducibility across machines is not a requirement. It still is not for a flight; but
+a list is input, not output, and its expansion runs through `System.Random` and the platform
+`Math.Log`, `Math.Sin`, `Math.Cos`. So its expansion is held to two narrower statements:
+**the expanded `.ions.csv` gives the same starting states on any machine**, because its rows
+are round-trip-formatted numbers; and **seeded expansion is compared with stored golden
+rows**, one seeded set per generator, bit for bit for `uniform`, `sequence` and `linspace`
+on every runner, and for the generators that call `Math.Log`, `Math.Sin` or `Math.Cos` bit
+for bit on Windows and within 1e-12 relative elsewhere. Where a seeded expansion differs
+between machines, the expanded file is the anchor. `docs/numerics.md` "Determinism".
+
+**`run` manifests still record no seeds.** PRJ-3 lists seeds and says Met; a cloud or gas seed
+reaches a `run` manifest only through the model hash, and `seeds` is `[]` there. A `fly`
+manifest and a study manifest fill it. Filling it for `run` changes `run`'s output and is
+left for its own decision; the PRJ-3 row says so.
+
+Measured: the 48-row corpus list through the 0.2 mm pixel-rod quadrupole at mass 100 u, warm
+cache, in 1.1 s wall (field ready 0.34 s, 48 ions flown in 0.40 s on 20 threads), against
+4.4 s for a 48-ion cloud through `run`; outcome and surface agree with the harness
+(`tools/quadbatch`) on 48 of 48 ions and final positions within 1 nm (both matching harness
+blocks). The 480-ion cloud as a list flies in 2.5 s wall (1.8 s flying) on 20 threads and
+15.75 s wall (15.0 s flying) on one, against 31.2 s wall for `run`, and its rows equal `run`'s
+events bit for bit. No `schemaVersion` or `solverBehaviourVersion` bump: no model format and
+no number changed.
+
 ### 59 - Solve once, fly many needed one public entry point, and it is the per-ion weighting
 
 **PERF-5, FLD-3.** r06 budgets a stability scan as trajectories through one solved field and
@@ -2563,7 +2624,7 @@ in a table.
 | --- | --- | --- | --- |
 | `PRJ-1` | Models, studies, extensions, render specs, and results are text. | **Met** | Models, studies, extensions, render specs and results are all text. |
 | `PRJ-2` | Large artifacts are referenced by content hash, never embedded. | **Met** | Large artifacts live in `.einzel/` and are referenced, never embedded. |
-| `PRJ-3` | A run manifest fully determines its run. Model hash, seeds, engine version, transport mode, solver settings, extension identities. Results are therefore ... | **Met** | Model hash, seeds, engine version, solver-behaviour version, transport mode, compute path, extension identities, interpreter and machine. **And which model, as distinct from which content**: `modelPath` is recorded alongside the hash. PRJ-3's list does not ask for it and by that list does not need to - the hash determines the run - but identity is a second question, and answering it with the hash meant editing a model could make its drift *disappear* onto an identical twin. Recorded with forward slashes because a manifest travels; absent on older manifests, where the hash search remains the fallback. See Amendment 30. Gas imports and study files now carry their own paths and byte hashes; `InputProvenanceTests` checks edits, deletion, relocation and legacy records (Amendment 48). A run manifest also records each solved element's solve key (`solves`, see `FLD-3`): which physics was solved, beside the hash of which text was run; and, when the field cache was used, what it did with each channel and the SHA-256 of the potential the run used (`fieldCache`), which `verify` compares with what the cache now holds. |
+| `PRJ-3` | A run manifest fully determines its run. Model hash, seeds, engine version, transport mode, solver settings, extension identities. Results are therefore ... | **Met** | Model hash, seeds, engine version, solver-behaviour version, transport mode, compute path, extension identities, interpreter and machine. **And which model, as distinct from which content**: `modelPath` is recorded alongside the hash. PRJ-3's list does not ask for it and by that list does not need to - the hash determines the run - but identity is a second question, and answering it with the hash meant editing a model could make its drift *disappear* onto an identical twin. Recorded with forward slashes because a manifest travels; absent on older manifests, where the hash search remains the fallback. See Amendment 30. Gas imports and study files now carry their own paths and byte hashes; `InputProvenanceTests` checks edits, deletion, relocation and legacy records (Amendment 48). A run manifest also records each solved element's solve key (`solves`, see `FLD-3`): which physics was solved, beside the hash of which text was run; and, when the field cache was used, what it did with each channel and the SHA-256 of the potential the run used (`fieldCache`), which `verify` compares with what the cache now holds. **Seeds are recorded by studies and by `fly` (the list's set seeds and the gas seed); a `run` manifest's `seeds` is still empty, its cloud and gas seeds covered only by the model hash** (Amendment 60). An `einzel fly` manifest also hashes its ion list into `inputHashes`. |
 | `PRJ-4` | A plain folder is the default and fully supported. Every feature, guardrail, and agent workflow works in a directory with no repository. Requiring one ... | **Met** | A plain folder is the default. `--vcs git` writes an ignore file and changes no behaviour anywhere else. The field cache lives in `.einzel/cache` and is regenerable: `einzel cache clear` deletes it and the next run solves again. |
 | `PRJ-5` | Version control, where wanted, is scaffolded. einzel init --vcs git writes an ignore file excluding .einzel/ , an AGENTS.md , and a starter layout. | **Met** | `einzel init --vcs git`. |
 | `PRJ-6` | Nothing depends on a hosting provider. Agent instructions in the project An agent needs two distinct things: how to use Einzel (platform knowledge, ... | **Met** | Nothing depends on a hosting provider; the whole loop is files and commands. |
