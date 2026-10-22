@@ -113,18 +113,21 @@ on Windows those ten tests fail until upstream
 the MCP server `src/Einzel.Mcp/bin/Release/net10.0/einzel-mcp(.exe)`.
 
 Fork-only helpers live under `tools/` and are listed in `Einzel.slnx`, so they
-build in CI and any API drift shows up as a build failure. The first,
-`tools/quadbatch`, arrives with the pull request that follows this page: the
-in-process batch driver (solve once, fly many ions with per-ion RF phase) that
-the validation project uses until the library offers the same through its
-public surface; it is retired then.
+build in CI and any API drift shows up as a build failure. The first is
+`tools/quadbatch`, the in-process batch driver (solve once, fly many ions with
+per-ion RF phase) that the validation project uses. It builds each ion's field
+with the library's own `DrivenSolvedField.Create` rather than a copy of that
+class, and keeps its basis solves in a project's field cache when the job names
+one; [Using Einzel as a library](library.md) shows the same path in one example
+that the test suite runs. It is retired when the library also takes explicit ion
+lists.
 
 ## How the validation project uses this repository
 
 The validation project builds a specific `esibd` commit (or a `base/<sha>` tag)
 from a sibling clone, points its scripts at `src/Einzel.Cli/bin/Release/net10.0`
-and, once merged, `tools/quadbatch/bin/Release/net10.0`, and records the commit
-hash with every result. Nothing from that project is committed here: no SIMION
+and `tools/quadbatch/bin/Release/net10.0`, and records the commit hash with
+every result. Nothing from that project is committed here: no SIMION
 files, no field caches (`.einzel/`), no trajectories, no raw benchmark output,
 no personal paths.
 
@@ -142,6 +145,19 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A host can weight its own basis fields into a driven field, and the batch
+  driver does.** `DrivenSolvedField.Create` is the public, validated way to
+  build the per-ion field, direct plus amplitude times w(f t + phase) over
+  basis fields a host has solved; [Using Einzel as a library](library.md)
+  shows solve once, fly many in an example the test suite runs.
+  `tools/quadbatch` drops its 65-line copy of the class for it and can keep
+  its basis solves in a project's field cache (`cacheRoot`). Rebuilt on
+  `Create`, the harness reproduces its recorded output bit for bit on the 12
+  check ions and on the full `twod` and `main_c0.4` jobs (25,824 ions each),
+  cached or not; its four 1.09 M-node basis fields are ready in 0.21 s from
+  the cache against 11.3 s solved, and a 517-ion job takes 3.0 s against
+  14.4 s. No number on the `einzel run` path changes. `SPEC.md` Amendment 59.
+  PR #8.
 - **A second run of an unchanged geometry loads its field instead of solving
   it.** Each basis channel `run`, the studies, `test` and `solve` solve is
   kept under `.einzel/cache/solver-<version>-<compute path>/<channel hash>` as raw doubles

@@ -155,6 +155,38 @@ Einzel. **That, rather than a date, is the trigger.**
 
 ## Amendments to the specification
 
+### 59 - Solve once, fly many needed one public entry point, and it is the per-ion weighting
+
+**PERF-5, FLD-3.** r06 budgets a stability scan as trajectories through one solved field and
+takes for granted that whatever runs the scan is inside the engine. A host outside it - a
+validation project flying explicit ion lists, every ion with its own voltages and RF birth
+phase, through one solved quadrupole - found everything it needed public but one thing.
+`FieldAssembly.BuildReported` with a `FieldCache` already loads cached basis solves, and the
+integrator, the flight-time study and the species are public; the field each ion needs is
+exactly a `DrivenSolvedField`, whose only constructor was internal, so the fork's batch driver
+carried a 65-line copy of it. A copy drifts: it did not forward the domain edge to the
+integrator as the class does, and needed a caveat saying so.
+
+`DrivenSolvedField.Create` is that entry point, for a field with no sequence: channels, a
+direct weight and drive terms per channel, the drives' frequencies and waveforms. It checks
+what a caller can get wrong and the model path cannot - counts, a term naming a drive that
+does not exist (the weighting would skip it without a word), non-finite weights and phases,
+frequencies - and then calls the internal constructor unchanged. A static factory, not a
+public constructor overload, so the builders keep binding to the internal constructor and the
+run path does not change. The stage and ramp form stays internal (no consumer, and a public
+one would make the stage shape a contract), as does re-weighting a model's own field per ion,
+which needs the channel decomposition and has no consumer yet. No new type: the "basis field
+set" a host holds is its list of fields from `FieldAssembly`; the existing `BasisFieldSet` is
+an unrelated two-dimensional per-electrode solve.
+
+Measured: the batch driver rebuilt on `Create` gives its recorded output bit for bit -
+outcome, struck surface, final position, flight time, accepted and rejected steps - on 12
+check ions and on two full recorded jobs of 25,824 ions each (3D at 1.09 M nodes, and 2D, where
+the domain-edge forwarding it now inherits could have mattered and moved nothing); through the
+cache its four basis fields at 1.09 M nodes are ready in 0.21 s against 11.3 s.
+No register status changes: PERF-5 was already met in process. No `solverBehaviourVersion` or
+`schemaVersion` bump: no number and no format changed. `docs/library.md`.
+
 ### 58 - A field cache keys per basis channel, keeps no warnings, and needs a tripwire on its version
 
 **FLD-3, PRJ-3, PRJ-4.** r06 keys a field cache on geometry, mesh, symmetry, boundary

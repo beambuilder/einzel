@@ -27,6 +27,7 @@ states the intent and these pages state the reality; both are noted.
 | [Agent acceptance](agent-acceptance.md) | The prose-task suite, what it measures, and what gates a release |
 | [Lessons](lessons.md) | Bugs that presented as physics and were arithmetic |
 | [CLI](cli.md) | Command reference, exit codes, and the agent loop |
+| [Using Einzel as a library](library.md) | Solve once and fly many ions in process: the assemblies a host references, an example the test suite runs, a drive per ion with `DrivenSolvedField.Create`, and the time-free trap |
 | [Live session](live-session.md) | The shared attributed journal, and the MCP server over it |
 | [The shell](shell.md) | WPF on Windows: the seven views that exist, and the commands they needed |
 | [Literature targets](literature-targets.md) | Published instruments to reproduce, and what each needs |
