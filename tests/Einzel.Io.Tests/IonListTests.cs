@@ -21,7 +21,7 @@ namespace Einzel.Io.Tests;
 public sealed class IonListTests(ITestOutputHelper output)
 {
     /// <summary>A beam model with no drive and a non-zero energy offset.</summary>
-    private const string Beam = """
+    internal const string Beam = """
         {
           "schemaVersion": "0.14",
           "name": "beam",
@@ -39,7 +39,7 @@ public sealed class IonListTests(ITestOutputHelper output)
         """;
 
     /// <summary>A model with one drive frequency, 1.1 MHz.</summary>
-    private const string Driven = """
+    internal const string Driven = """
         {
           "schemaVersion": "0.14",
           "name": "driven",
@@ -61,7 +61,7 @@ public sealed class IonListTests(ITestOutputHelper output)
         }
         """;
 
-    private static CompiledModel Compile(string json)
+    internal static CompiledModel Compile(string json)
     {
         var validation = ModelValidator.Validate(ModelJson.Parse(json));
         Assert.True(validation.IsValid, string.Join("; ", validation.Errors.Select(e => e.Constraint)));
@@ -212,7 +212,7 @@ public sealed class IonListTests(ITestOutputHelper output)
         { """ "ions": [ { "id": 1, "tag": "a,b" } ] """, Beam, ErrorCodes.SchemaInvalid, "/ions/0/tag" },
         { """ "ions": [ ] """, Beam, ErrorCodes.SchemaInvalid, "/" },
         { """ "ions": [ { "id": 1 } ], "maxParallelism": 0 """, Beam, ErrorCodes.ValueOutOfBounds, "/maxParallelism" },
-        { """ "ionSets": [ { "n": 3 } ] """, Beam, ErrorCodes.SchemaInvalid, "/ionSets/0" },
+        { """ "ionSets": [ { "tag": "t" } ] """, Beam, ErrorCodes.SchemaInvalid, "/ionSets/0/n" },
         { """ "ionSets": [ { "cloud": { "ions": 4 }, "n": 3 } ] """, Beam, ErrorCodes.SchemaInvalid, "/ionSets/0/n" },
         { """ "ionSets": [ { "cloud": { }, "n": 0 } ] """, Beam, ErrorCodes.ValueOutOfBounds, "/ionSets/0/n" },
         { """ "ionSets": [ { "cloud": { "population": 5 } } ] """, Beam, ErrorCodes.SchemaInvalid, "/ionSets/0/cloud/population" },
@@ -570,7 +570,7 @@ public sealed class IonListTests(ITestOutputHelper output)
         Assert.Equal(at, error.Path);
     }
 
-    private static string RepositoryRoot()
+    internal static string RepositoryRoot()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {

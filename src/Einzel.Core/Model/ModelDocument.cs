@@ -315,10 +315,10 @@ public sealed record SourceDocument
 /// turn-around time.
 /// </para>
 /// <para>
-/// There is deliberately no angular-divergence setting. A thermal cloud already
-/// has one - an ion with sideways thermal velocity is an ion launched at an
-/// angle - and offering both would let a document say two things about the same
-/// physics and be believed twice.
+/// A temperature and <see cref="Divergence"/> are separate settings and may be
+/// declared together. A thermal draw moves speed and direction in a fixed ratio;
+/// a divergence tilts the direction and leaves the speed alone, as an aperture
+/// does. (This remark once said there was no divergence setting.)
 /// </para>
 /// </remarks>
 public sealed record CloudDocument

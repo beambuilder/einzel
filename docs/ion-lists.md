@@ -119,6 +119,103 @@ this on every shipped example with a cloud.
 | `firstId` | The first row's id; the rest follow by one |
 | `tag` | Given to every row of the set |
 
+## Generated sets
+
+A set without `cloud` builds its rows from constants and seeded generators:
+
+```json
+{ "n": 48, "seed": 7, "firstId": 1, "tag": "grid",
+  "massToCharge": { "value": 100, "unit": "Da" },
+  "kineticEnergy": { "gaussian": { "mean": 2, "sigma": 0.05 }, "unit": "eV" },
+  "rfPhase": { "sequence": { "first": 0, "step": 0.125 } },
+  "position": { "x": { "value": 0 },
+                "y": { "uniform": { "min": -0.05, "max": 0.05 } },
+                "z": { "gaussian": { "mean": 0, "sigma": 0.02 } }, "unit": "mm" },
+  "direction": { "cone": { "axis": [1, 0, 0], "halfAngle": { "value": 5, "unit": "deg" }, "fill": true } } }
+```
+
+| Key | Means |
+| --- | --- |
+| `n` | Required; how many ions, at least 1 |
+| `seed` | The seed of the set's one `System.Random`. Required when any attribute draws at random (`uniform`, `gaussian`, `disc`, `cone`); recorded in the expansion's seeds. A negative seed draws the same stream as its absolute value (the seeded `Random` takes \|seed\|, as a model's cloud does) and is recorded as written |
+| `firstId`, `tag` | As for a `cloud` set |
+| `chargeNumber` | A constant integer |
+| `massToCharge`, `kineticEnergy` or `accelerationPotential`, `birthTime` or `rfPhase` | A scalar: `{ "value": … }` or one generator, with a `unit` (none for `rfPhase`, which is in cycles) |
+| `position` | `{ "value": [x, y, z] }`, `{ "disc": … }`, or all three of `x`, `y`, `z` as scalars; `unit` applies to all of it and to an axis that names none |
+| `direction` | `{ "value": [x, y, z] }` or `{ "cone": … }` |
+
+Generator parameters (`min`, `max`, `mean`, `sigma`, `first`, `step`, `last`,
+`centre`, `radius`, …) are plain numbers in the attribute's `unit`; unlike a row's
+quantities they take no `expression`. Only `cone.halfAngle` is a quantity with its
+own unit.
+
+An omitted attribute takes the model's value, as in a row, and every generated ion
+is then compiled exactly as a written row: a set of constants gives the same rows
+as the same constants written out, and a drawn value outside an attribute's
+bounds (a negative mass, a negative birth time, a position that overflows) refuses
+the set at that attribute's pointer, such as `/ionSets/0/position`.
+
+### Generators
+
+| Generator | On | Draws per ion | Gives |
+| --- | --- | --- | --- |
+| `uniform { min, max }` | scalars, position axes | 1 | uniform on [min, max); `max` not below `min` |
+| `gaussian { mean, sigma }` | scalars, position axes | 2 per attempt | normal, by the polar Box-Muller method `IonCloud` uses; `sigma` not negative |
+| `sequence { first, step }` | scalars, position axes | 0 | `first + i·step` for the i-th ion of the set |
+| `linspace { first, last }` | scalars, position axes | 0 | `n` values, both ends exact (`first·(1−t) + last·t`, t = i/(n−1)) |
+| `disc { centre, normal, radius }` | `position` | 2 | uniform over the disc's area: radius `R·√u`, then azimuth; `radius` positive, `normal` not zero |
+| `cone { axis, halfAngle, fill }` | `direction` | 2 | `fill: true` (default): uniform in solid angle inside the cone, cos θ uniform; `fill: false`: on the cone's surface, uniform in azimuth. `halfAngle` an angle with a unit, above 0 and at most 90° |
+
+A generator where it does not belong (`cone` on an energy, `disc` on a direction)
+is an unknown key and refused on reading.
+
+A `cone` may open to 90°, where a model's `cloud.divergence` stops short of it: a
+divergence is the spread of a beam, and at 90° it is no longer one, while a cone set
+is a set of directions, and a hemisphere (`fill: true`) or a ring at right angles
+to the axis (`fill: false`) is a legitimate one.
+
+### Draw order
+
+One `System.Random(seed)` per set. Ions are drawn one after another, and within an
+ion the attributes in this order: `massToCharge`, the energy, the birth
+(`birthTime` or `rfPhase`), `position` (x, y, z for a per-axis position),
+`direction`. A constant, `sequence` and `linspace` draw nothing; `cone` draws
+twice whether it fills or not. The first k ions of a set are therefore the same
+whatever its `n` (prefix-stable), except under `linspace`, whose spacing depends
+on `n`.
+
+### A birth-phase grid
+
+The 06c RF validation cases (project side) fly 8 birth phases per launch
+variant. As a set over one launch, that is a `sequence` on `rfPhase`:
+
+```json
+{ "n": 8, "rfPhase": { "sequence": { "first": 0, "step": 0.125 } } }
+```
+
+which gives birth times 0, T/8, …, 7T/8 for the model's one drive period T, and
+needs no seed. The same grid in time is `{ "birthTime": { "sequence": { "first":
+0, "step": 0.11363636363636363 }, "unit": "us" } }` at 1.1 MHz. A grid over phases
+and launch variants together (48 rows) is written as explicit `ions`, as the
+06c cases' list is.
+
+### Reproducibility of seeded sets
+
+`System.Random(seed)` with a fixed seed is the legacy algorithm .NET keeps for
+seeded construction. The test suite compares one seeded 50-ion set per generator
+with stored golden rows (`tests/Einzel.Io.Tests/Golden/ion-sets/`, recorded on
+Windows):
+
+- `uniform`, `sequence` and `linspace` use only IEEE addition, multiplication and
+  division, and are compared bit for bit on every runner;
+- `gaussian`, `disc`, `cone` (filled and surface) and a per-axis position call
+  `Math.Log`, `Math.Sqrt`, `Math.Cos` or `Math.Sin`, which the platform's maths
+  library computes; they are compared bit for bit on Windows and within 1e-12
+  relative elsewhere.
+
+Where a seeded expansion differs between machines, the expanded `.ions.csv` is the
+anchor: it gives the same starting states anywhere.
+
 ## Order and ids
 
 Rows come out in a fixed order: the explicit `ions` as written, then each set's
@@ -146,6 +243,10 @@ reads its defaults from it.
 | `SCHEMA_INVALID` | `/` | empty list; mixture model; model with a cloud |
 | `VALUE_OUT_OF_BOUNDS` | `/ions/0/birthTime` | negative birth time, phase, energy, id; a birth more than 1000 maximum flight times late; zero charge or direction; non-positive mass |
 | `UNITS_INCOMPATIBLE` | `/ions/0/kineticEnergy` | a unit of the wrong dimension |
+| `UNITS_REQUIRED` | `/ionSets/0/birthTime/unit` | a generated attribute without its unit |
+| `VALUE_OUT_OF_BOUNDS` | `/ionSets/0/position` | a generated value the row refuses (a non-positive mass, a negative or late birth, a position that overflows), at the set's attribute |
+| `SCHEMA_INVALID` | `/ionSets/0/seed` | a set that draws at random without a seed; two forms in one attribute; a generator where it does not belong |
+| `VALUE_OUT_OF_BOUNDS` | `/ionSets/0/birthTime/gaussian/sigma` | negative `sigma`, `max` below `min`, `radius` not positive, `halfAngle` outside (0°, 90°], `n` below 1 |
 
 ## The expanded `.ions.csv`
 
@@ -172,3 +273,34 @@ maximum flight times late at `/<row>/birth_time_s`.
 through `System.Random` and the platform's maths library, which nothing promises
 to be identical on every machine or runtime; the expanded rows are numbers, and
 a flight started from them starts from the same states wherever it runs.
+
+## SIMION `.fly2` parity
+
+How the `.fly2` constructs used in this project map onto an ion list in this
+build. "Later" marks what A.4's remaining steps or later milestones add.
+
+| `.fly2` | SIMION | Ion list | Status |
+| --- | --- | --- | --- |
+| `particles{coordinates=0}` | workbench mm | quantities with a unit each | parity |
+| `standard_beam{n}` | n particles | a set's `n` | parity |
+| `mass` (u), `charge` (e) | per beam | `massToCharge` with a unit, `chargeNumber` | parity (m/z rather than mass: `mass = massToCharge × |charge|`) |
+| `ke` (eV) | kinetic energy | `kineticEnergy` | parity |
+| `tob` (µs) | birth time | `birthTime`, or `rfPhase` in cycles | parity in the document; flown from a later step of A.4 |
+| `x, y, z` / `position = vector()` | start | `position` | parity |
+| `direction = vector()` | | `direction` | parity |
+| `az`, `el` | angles | none; convert to `direction` | outside the engine (an importer, project side) |
+| `velocity` | velocity | none; convert to `direction` and `kineticEnergy` | outside the engine |
+| `cwf` | charge weight for repulsion | none | gap; later (B2.4) |
+| `color` | display group | `tag` | parity |
+| `uniform_distribution{min, max}` | uniform | `uniform` | parity |
+| `gaussian_distribution` | normal | `gaussian` | parity |
+| `line_sequence` / `arithmetic_sequence` | deterministic | `sequence`, `linspace` | parity |
+| `disc_distribution` | uniform in a disc | `disc` | parity (SIMION semantics Not verified: its name and any fill or ring option) |
+| `cone_direction_distribution{axis, half_angle, fill}` | cone | `cone` | parity (SIMION semantics Not verified: the list caps the half-angle at 90°, SIMION's range unchecked) |
+| `distribution(fn)` | Lua function | none | gap; expression-defined distributions deferred |
+| Lua loops and tables | a program builds the list | explicit `ions` | parity through rows; no Lua |
+| `.ion` | explicit list | `ions`, or a `.ions.csv` | parity in content; importer project side |
+| clock-seeded random | not reproducible | `seed`, and the expanded `.ions.csv` | beyond |
+| `fast_adjust` per ion | per-ion voltages | none; one model per operating point | gap; later (A.5) |
+| grouped flight, repulsion | common time step | none for a list | gap; later (B2.4/B2.5) |
+| `terminate` record | splat per ion | none yet | later in A.4 (`einzel fly`) |

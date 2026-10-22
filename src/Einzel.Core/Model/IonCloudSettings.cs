@@ -12,11 +12,10 @@ namespace Einzel.Core.Model;
 /// time. Three of those four are this.
 /// </para>
 /// <para>
-/// The knobs are deliberately few, and the one that is missing is missing on
-/// purpose. Angular divergence is <em>not</em> a separate setting, because a
-/// thermal cloud already has one: an ion with a sideways thermal velocity is an
-/// ion launched at an angle, and offering both would let a document say two
-/// things about the same physics and be believed twice.
+/// The knobs are deliberately few. Angular divergence is one of them
+/// (<see cref="DivergenceRadians"/>), separate from the temperature because a
+/// thermal draw moves speed and direction together while a divergence tilts the
+/// direction alone, as an aperture does.
 /// </para>
 /// </remarks>
 public sealed record IonCloudSettings

@@ -145,6 +145,24 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **Seeded generators expand to rows, and a seed gives the same rows.** A
+  set without `cloud` builds its ions from constants and generators
+  - `uniform`, `gaussian`, `sequence`, `linspace` on any scalar, `disc` and
+  per-axis scalars on the position, `cone` with `fill` on the direction - with
+  one `System.Random(seed)` per set and a fixed, documented draw order, so a
+  set is prefix-stable in `n` (except `linspace`); a birth-phase grid is a
+  `sequence` on `rfPhase`. Each generated ion is compiled as a written row, so
+  a set of constants equals the same rows written out, bit for bit. Measured
+  with fixed seeds at n = 10,000: means and variances within four standard
+  errors, a disc uniform in area and a cone uniform in solid angle by
+  chi-square below the 0.1 % point; one expanded set per generator is compared
+  with stored golden rows, bit for bit for `uniform`, `sequence` and `linspace`
+  on every runner and for the five that call the maths library on Windows,
+  within 1e-12 relative elsewhere. `docs/model-format.md`
+  now documents `source.cloud.divergence`, which it had said did not exist;
+  the same remark on `CloudDocument` and `IonCloudSettings` is corrected.
+  [Ion lists](ion-lists.md) gains the generators and a SIMION `.fly2` parity
+  table. PR #10.
 - **An ion list is a document, and its `cloud` set draws what `run` draws.**
   `<name>.ions.json` (schema `0.1`, unknown keys refused with their JSON
   pointer) lists ions as rows - id, mass-to-charge, charge, position,
