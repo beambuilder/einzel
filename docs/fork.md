@@ -145,6 +145,18 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A cloud and an ion list fly through one per-row core, and the answer does
+  not depend on how many fly at once.** `IonListFlight.Fly` flies rows of an
+  ion list as independent trajectories, written back by index, on up to
+  `maxParallelism` threads; a row born later sees a time-shifted field, a row
+  born at 0 the field itself, and row k's collisions draw from the gas seed
+  plus k. `FiguresOfMerit.FlyCloud` now flies its cloud through the same core
+  at one thread, so every caller keeps its flight: `run` on five cloud examples
+  and the 48-ion quadrupole cloud gives the same result document as before, and
+  a test holds the routed cloud equal to the old loop on nine shipped examples,
+  two of them in gas. One thread or eight give the same bits on a 304-row list;
+  every field kind on the evaluation path was read for mutable state and holds
+  none. [Ion lists](ion-lists.md). PR #11.
 - **Seeded generators expand to rows, and a seed gives the same rows.** A
   set without `cloud` builds its ions from constants and generators
   - `uniform`, `gaussian`, `sequence`, `linspace` on any scalar, `disc` and

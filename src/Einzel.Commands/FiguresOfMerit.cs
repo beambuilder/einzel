@@ -908,28 +908,38 @@ public static class FiguresOfMerit
         var remaining = new List<PhaseState>();
         var events = new List<IonEvent>(cloud.Length);
 
+        // One stream per ion, derived from the declared seed and the ion's position in the
+        // cloud, so a run is reproducible from its manifest and raising the ion count does
+        // not change the flight of any ion already drawn. The ion-list core keeps that rule
+        // and flies one at a time here: a figure of merit is evaluated inside a study's own
+        // parallel loop, and a run's cloud stays the flight it always was.
+        var rows = new IonRow[cloud.Length];
+
         for (var index = 0; index < cloud.Length; index++)
         {
-            var start = cloud[index];
+            rows[index] = new IonRow(index, species, cloud[index], 0.0, string.Empty);
+        }
 
-            // One stream per ion, derived from the declared seed and the ion's
-            // position in the cloud, so a run is reproducible from its manifest and
-            // raising the ion count does not change the flight of any ion already
-            // drawn.
-            var sampler = gas.IsPresent
-                ? new Transport.Collisions.CollisionSampler(
-                    gas, species.MassSi, species.ChargeSi, model.Gas.Seed + index)
-                : null;
+        var flights = IonListFlight.Fly(
+            rows, field, settings, detector, gas, model.Gas.Seed, maxParallelism: 1);
 
-            var result = TrajectoryIntegrator.Integrate(
-                start, species, field, settings, detector, collisions: sampler);
+        for (var index = 0; index < cloud.Length; index++)
+        {
+            var flight = flights[index];
+
+            if (flight.Failure is { } failure)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
+            }
+
+            var result = flight.Result!;
             events.Add(new IonEvent(index, result.Outcome.ToString(), result.StruckSurface, result.FlightTimeSeconds) { Position = result.FinalState.Position });
 
-            if (sampler is not null)
+            if (gas.IsPresent)
             {
-                collisions += sampler.Collisions;
+                collisions += flight.Collisions;
 
-                if (sampler.Collisions > 0)
+                if (flight.Collisions > 0)
                 {
                     scattered++;
                 }
