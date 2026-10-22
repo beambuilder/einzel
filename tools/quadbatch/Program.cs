@@ -5,14 +5,14 @@
 //   FieldAssembly.BuildReported(model)  ->  DrivenSolvedField = sum_i (direct_i + amp_i * w(f t + phi_i)) * basis_i
 //   TrajectoryIntegrator.Integrate(launch, species, field, settings, detector)
 // This program does exactly that with Einzel's classes, except that the basis fields are solved once (as static
-// unit-potential models, via FieldAssembly) and re-weighted per ion. The superposition wrapper below mirrors
-// DrivenSolvedField (whose constructor is internal). Checked against `einzel run` on the full driven model; the
+// unit-potential models, via FieldAssembly, through the project field cache when the job names one) and
+// re-weighted per ion with DrivenSolvedField.Create. Checked against `einzel run` on the full driven model; the
 // numbers and the job file format are in README.md beside this file.
 //
 // usage: QuadBatch <job.json> <out.json>
-//   job = { "bases": [model paths], "waveform": "sinusoid"|"rectangular", "dutyCycle": 0.5, "frequencyHz": f,
-//           "relativeTolerance": 1e-11, "ladder": false, "maxFlightUs": 200, "detectorPointMm": [95.25,0,0],
-//           "detectorNormal": [-1,0,0],
+//   job = { "bases": [model paths], ["cacheRoot": project dir,] "waveform": "sinusoid"|"rectangular",
+//           "dutyCycle": 0.5, "frequencyHz": f, "relativeTolerance": 1e-11, "ladder": false, "maxFlightUs": 200,
+//           "detectorPointMm": [95.25,0,0], "detectorNormal": [-1,0,0],
 //           "threads": 16, "ions": [ { "id": n, "mass": u, "direct": [V per basis], "amp": [V per basis],
 //           "phase": cycles, ["waveform": per-ion override,] "pos": [mm], "dir": [..], "ke": eV } ] }
 using System.Diagnostics;
@@ -22,79 +22,15 @@ using Einzel.Core.Geometry;
 using Einzel.Core.Model;
 using Einzel.Fields;
 using Einzel.Fields.Analytic;
+using Einzel.Fields.Solved;
 using Einzel.Io;
+using Einzel.Project;
 using Einzel.Transport;
 using Einzel.Transport.Integration;
 
-internal sealed class WeightedDrivenField : ITimeVaryingField, IConductorBounded
-{
-    private readonly IElectrostaticField[] _basis;
-    private readonly IConductorBounded? _conductors;
-    private readonly double[] _direct;
-    private readonly double[] _amp;
-    private readonly RfWaveform _waveform;
-    private readonly double _f;
-    private readonly double _phase;
-
-    public WeightedDrivenField(IElectrostaticField[] basis, double[] direct, double[] amp, RfWaveform waveform,
-        double frequencyHz, double phase)
-    {
-        _basis = basis;
-        _conductors = basis[0] as IConductorBounded;
-        _direct = direct;
-        _amp = amp;
-        _waveform = waveform;
-        _f = frequencyHz;
-        _phase = phase;
-    }
-
-    public double Drive(double t) => _waveform.At((_f * t) + _phase);
-
-    public Vec3 ElectricFieldAt(in Vec3 position, double timeSeconds)
-    {
-        var w = Drive(timeSeconds);
-        var e = Vec3.Zero;
-        for (var i = 0; i < _basis.Length; i++)
-        {
-            var weight = _direct[i] + (_amp[i] * w);
-            if (weight != 0.0)
-            {
-                e += _basis[i].ElectricFieldAt(in position) * weight;
-            }
-        }
-
-        return e;
-    }
-
-    public double PotentialAt(in Vec3 position, double timeSeconds)
-    {
-        var w = Drive(timeSeconds);
-        var v = 0.0;
-        for (var i = 0; i < _basis.Length; i++)
-        {
-            v += (_direct[i] + (_amp[i] * w)) * _basis[i].PotentialAt(in position);
-        }
-
-        return v;
-    }
-
-    public Vec3 ElectricFieldAt(in Vec3 position) => ElectricFieldAt(in position, 0.0);
-
-    public double PotentialAt(in Vec3 position) => PotentialAt(in position, 0.0);
-
-    public double ShortestPeriodSeconds => 1.0 / _f;
-
-    public double ResolutionLength => _basis[0].ResolutionLength;
-
-    public double SignedDistanceToConductor(in Vec3 position) =>
-        _conductors is null ? double.PositiveInfinity : _conductors.SignedDistanceToConductor(in position);
-
-    public string? ConductorAt(in Vec3 position) => _conductors?.ConductorAt(in position);
-}
-
 internal static class Program
 {
-    private static (IElectrostaticField Field, JsonArray Warnings) BuildBasis(string path)
+    private static (IElectrostaticField Field, JsonArray Warnings) BuildBasis(string path, FieldCache? cache)
     {
         var doc = ModelJson.Parse(File.ReadAllText(path));
         var validation = ModelValidator.Validate(doc, null, Path.GetDirectoryName(Path.GetFullPath(path)));
@@ -110,7 +46,13 @@ internal static class Program
             throw new InvalidOperationException($"{path}: declares a gas; QuadBatch flies in vacuum only");
         }
 
-        var (field, warnings) = FieldAssembly.BuildReported(validation.Model!);
+        var (field, warnings) = FieldAssembly.BuildReported(validation.Model!, cache);
+        if (cache?.Uses(SolveHash.Of(validation.Model!)) is { Count: > 0 } uses)
+        {
+            var loaded = uses.Count(u => u.Status == FieldCacheUse.Hit);
+            Console.Error.WriteLine($"  field: {loaded} channel(s) from the cache, {uses.Count - loaded} solved");
+        }
+
         var reported = new JsonArray();
         foreach (var w in warnings)
         {
@@ -148,15 +90,28 @@ internal static class Program
         }
 
         var job = JsonNode.Parse(File.ReadAllText(args[0]))!;
+        // The one drive every ion follows: refused here, before any solve, rather than as an Error record per ion.
+        var f = job["frequencyHz"]!.GetValue<double>();
+        if (!double.IsFinite(f) || f <= 0.0)
+        {
+            Console.Error.WriteLine($"frequencyHz must be finite and positive, and is {f}");
+            return 2;
+        }
+
         var clock = Stopwatch.StartNew();
         var bases = job["bases"]!.AsArray().Select(p => p!.GetValue<string>()).ToArray();
+        // Optional: an Einzel project directory whose field cache the basis solves are loaded from and kept in,
+        // exactly as `einzel run` keeps them. Absent, every basis is solved as before.
+        var cache = job["cacheRoot"]?.GetValue<string>() is { } cacheRoot
+            ? new FieldCache(new ProjectLayout(cacheRoot), announce: Console.Error.WriteLine)
+            : null;
         var fields = new IElectrostaticField[bases.Length];
         var solveSeconds = new double[bases.Length];
         var basisWarnings = new JsonArray();
         for (var i = 0; i < bases.Length; i++)
         {
             var t = Stopwatch.StartNew();
-            (fields[i], var reported) = BuildBasis(bases[i]);
+            (fields[i], var reported) = BuildBasis(bases[i], cache);
             foreach (var w in reported.ToArray())
             {
                 reported.Remove(w);
@@ -169,7 +124,6 @@ internal static class Program
 
         var dutyCycle = job["dutyCycle"]?.GetValue<double>() ?? 0.5;
         var waveform = ParseWaveform(job["waveform"]?.GetValue<string>() ?? "sinusoid", dutyCycle);
-        var f = job["frequencyHz"]!.GetValue<double>();
         var rtol = job["relativeTolerance"]?.GetValue<double>() ?? 1e-11;
         var ladder = job["ladder"]?.GetValue<bool>() ?? false;
         var maxT = (job["maxFlightUs"]?.GetValue<double>() ?? 200.0) * 1e-6;
@@ -201,8 +155,14 @@ internal static class Program
         JsonObject Fly(JsonNode ion, int id)
         {
             var wf = ion["waveform"] is null ? waveform : ParseWaveform(ion["waveform"]!.GetValue<string>(), dutyCycle);
-            var field = new WeightedDrivenField(fields, Required(ion, "direct", bases.Length), Required(ion, "amp", bases.Length), wf, f,
-                ion["phase"]?.GetValue<double>() ?? throw new InvalidOperationException("missing 'phase'"));
+            // Read in this order (direct, amp, phase) so a malformed ion reports the same first error as before.
+            var direct = Required(ion, "direct", bases.Length);
+            var amp = Required(ion, "amp", bases.Length);
+            var phase = ion["phase"]?.GetValue<double>() ?? throw new InvalidOperationException("missing 'phase'");
+            // One term per basis, on the one drive, even where the amplitude is zero:
+            // weight_i(t) = direct_i + amp_i * w(f t + phase).
+            var field = DrivenSolvedField.Create(
+                fields, direct, [.. amp.Select(a => (IReadOnlyList<WeightTerm>)[new WeightTerm(0, a, phase)])], [f], [wf]);
             var mass = ion["mass"]?.GetValue<double>() ?? throw new InvalidOperationException("missing 'mass'");
             if (!(mass > 0.0))
             {

@@ -18,21 +18,17 @@ TrajectoryIntegrator.Integrate(launch, species, field, settings, detector)
 ```
 
 except that the basis fields come from static unit-potential models solved once
-and are re-weighted per ion. `WeightedDrivenField` mirrors `DrivenSolvedField`,
-whose constructor is internal. The validation project checked it against
-`einzel run` on its full driven 3D quadrupole model: 0.002 µm in final position
-and 3e-8 in flight time over 12 ions, sinusoidal and rectangular drive.
+and are re-weighted per ion: each ion's field is `DrivenSolvedField.Create` over
+the basis fields, the same class `einzel run` builds for a driven solved
+element, with one drive term per basis (`docs/library.md`). The validation
+project checked it against `einzel run` on its full driven 3D quadrupole model:
+0.003 µm in final position and 5.2e-8 in flight time over 12 ions, sinusoidal
+and rectangular drive, measured on `esibd` `78fa733`.
 
 ## What `einzel run` does that this program does not
 
 - **Gas.** A basis model that declares a gas is refused; there is no collision
   path here.
-- **Field discontinuity at the domain edge.** `DrivenSolvedField` forwards
-  `SignedDistanceToDiscontinuity` to its first channel so the integrator lands
-  steps on the domain boundary; `WeightedDrivenField` leaves the default (no
-  discontinuity). The 12-ion check above did not show a difference on the
-  quadrupole models; it is kept this way so that results stay comparable with
-  the validation project's recorded ones until the library replaces this tool.
 - **Tolerance ladder.** With `ladder: true` the ion is flown down the same
   tolerance ladder as `einzel run`, but only the finest run is reported; the
   study's flight-time interval and its warnings are not.
@@ -71,7 +67,8 @@ Job fields:
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `bases` | yes | Einzel model files, one per basis channel, each with one electrode group at unit potential and the rest grounded; no gas |
-| `frequencyHz` | yes | RF frequency, Hz |
+| `cacheRoot` | no, none | an Einzel project directory (it need not exist yet); the basis solves are loaded from and kept in its field cache, `.einzel/cache/`, as `einzel run` keeps them, and stderr says per basis how many channels came from the cache. Absent, every basis is solved |
+| `frequencyHz` | yes | RF frequency, Hz, finite and positive |
 | `detectorPointMm`, `detectorNormal` | yes | a point on the detector plane (mm) and its normal pointing back into the flight volume; the flight stops when the ion crosses it |
 | `waveform` | no, `sinusoid` | `sinusoid` or `rectangular`; any other name is an error |
 | `dutyCycle` | no, `0.5` | fraction of the period at the positive level, rectangular only |
@@ -107,7 +104,10 @@ entry per input ion in input order:
 | `tof_us` | flight time, µs |
 | `steps`, `rejected` | accepted and rejected integrator steps |
 | `wall_s` | seconds for this ion |
-| `error` | with outcome `Error` only: what was wrong with this ion's input (missing field, wrong array length, zero direction, negative energy, unknown waveform). The other ions are unaffected |
+| `error` | with outcome `Error` only: what was wrong with this ion's input (missing field, wrong array length, non-finite voltage or phase, zero direction, negative energy, unknown waveform). The other ions are unaffected |
+
+A job whose `frequencyHz` is not finite and positive is refused before any
+basis is solved: one line on stderr, exit code 2, no output file.
 
 Non-finite numbers are written as `NaN` and `Infinity` literals rather than
 failing the whole file.
@@ -115,6 +115,7 @@ failing the whole file.
 ## Status
 
 Fork-only tool (`beambuilder/einzel`), part of the solution so that it builds in
-CI and API drift fails the build rather than the next validation run. It
-retires when the library offers solve-once / fly-many with explicit ion lists
-through its public surface.
+CI and API drift fails the build rather than the next validation run. The
+per-ion field and the cached basis solves it uses are public library surface
+now (`docs/library.md`); it retires when the library also takes explicit ion
+lists.
