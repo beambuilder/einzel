@@ -274,6 +274,35 @@ through `System.Random` and the platform's maths library, which nothing promises
 to be identical on every machine or runtime; the expanded rows are numbers, and
 a flight started from them starts from the same states wherever it runs.
 
+## How rows are flown
+
+Every row is one independent trajectory, flown by `IonListFlight.Fly` in
+`src/Einzel.Transport/Integration/IonListFlight.cs`, the same loop that flies
+the cloud of a `run`:
+
+- **Birth time.** A row born at `t > 0` flies the model's field through
+  `TimeShiftedField`, so it sees every drive, stage and switch as they stand at
+  its birth plus its own flight time. A row born at 0 flies the field itself,
+  unwrapped, and is the flight a single-ion `run` makes to the bit. A static
+  field has no clock and is flown as it is. Flight times and the model's
+  `maximumFlightTime` count from the row's birth.
+- **Tolerance.** One integration at the model's `relativeTolerance` per row,
+  which is bit for bit the first rung of the three-rung ladder a `run` reports
+  its flight time from. Asked for the ladder, each row runs all three and reports
+  the finest with the residual as its interval.
+- **Parallelism.** Rows fly at once on up to `maxParallelism` threads and are
+  written back by index, so the order they finish in changes nothing and
+  `maxParallelism` is a cost, never an input: a test flies a 304-row list at one
+  thread and at eight, in vacuum and in a gas, and gets the same bits. Every field kind the CLI builds reads only state fixed at
+  construction while an ion is flown.
+- **Seeds.** Row k's collisions are drawn from the gas seed plus k, its index
+  in the list, not its id: row k of a `cloud` set is ion k of the cloud `run`
+  flies, collisions included, and appending rows leaves the earlier ones alone.
+- **A row that throws** does not stop the others: the core carries the exception
+  as that row's failure and flies the rest. The integrator itself throws nothing
+  in flight, so a thrown row is a defect, and the caller rethrows the first one
+  with its own type and stack, as the cloud of a `run` does.
+
 ## SIMION `.fly2` parity
 
 How the `.fly2` constructs used in this project map onto an ion list in this
@@ -285,7 +314,7 @@ build. "Later" marks what A.4's remaining steps or later milestones add.
 | `standard_beam{n}` | n particles | a set's `n` | parity |
 | `mass` (u), `charge` (e) | per beam | `massToCharge` with a unit, `chargeNumber` | parity (m/z rather than mass: `mass = massToCharge × |charge|`) |
 | `ke` (eV) | kinetic energy | `kineticEnergy` | parity |
-| `tob` (µs) | birth time | `birthTime`, or `rfPhase` in cycles | parity in the document; flown from a later step of A.4 |
+| `tob` (µs) | birth time | `birthTime`, or `rfPhase` in cycles | parity; flown through a time-shifted field |
 | `x, y, z` / `position = vector()` | start | `position` | parity |
 | `direction = vector()` | | `direction` | parity |
 | `az`, `el` | angles | none; convert to `direction` | outside the engine (an importer, project side) |
