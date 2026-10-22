@@ -66,7 +66,9 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
         // potential and field this returns NaN - with nothing thrown and nothing warned.
         // This project has four times watched a non-finite double reach a result silently,
         // and once taken a whole --json document down at the serialiser after the run had
-        // succeeded, which is why the public constructors here validate their arguments.
+        // succeeded, which is why this constructor checks its instant and the public factory
+        // `Create` checks every weight it is handed. The internal constructor the builders
+        // call checks nothing: its inputs come from a model the validator has already passed.
         if (!double.IsFinite(operatingPoint))
         {
             throw new ArgumentOutOfRangeException(
@@ -123,6 +125,176 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
         _stageEndHarmonics = stageEndHarmonics is null
             ? new WeightTerm[][]?[_boundaries.Length]
             : [.. stageEndHarmonics.Select(stage => stage?.Select(h => h.ToArray()).ToArray())];
+    }
+
+    /// <summary>
+    /// A driven field over basis fields a host has solved itself: each channel weighted by a
+    /// constant plus a sum of drive terms, with no sequence.
+    /// </summary>
+    /// <param name="channels">
+    /// The basis fields, one per channel, all static and on the same geometry. The first also
+    /// answers for the conductors and the domain edge.
+    /// </param>
+    /// <param name="direct">The constant part of each channel's weight, in volts.</param>
+    /// <param name="harmonics">
+    /// Each channel's drive terms: amplitude in volts, the drive whose clock it follows, and its
+    /// phase in cycles of that drive. A channel with no drive takes an empty list.
+    /// </param>
+    /// <param name="frequenciesHz">Each drive's frequency, in hertz.</param>
+    /// <param name="waveforms">Each drive's waveform, in the order of the frequencies.</param>
+    /// <returns>
+    /// The field whose potential at time t is the sum over channels of
+    /// <c>(direct + sum of Amplitude * waveform.At(f * t + Phase)) * channel</c>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This is what <c>einzel run</c> builds for a driven solved element, without the solve and
+    /// without the decomposition into channels: the caller chooses the basis fields and their
+    /// weights. A solve-once, fly-many host builds its basis fields once with
+    /// <see cref="FieldAssembly.BuildReported"/>, and then one field per ion from here with that
+    /// ion's voltages and phase. The channels are shared, not copied, and every field involved
+    /// is immutable, so many of these may sample the same channels from many threads.
+    /// </para>
+    /// <para>
+    /// The time-free <see cref="ElectricFieldAt(in Vec3)"/> and <see cref="PotentialAt(in Vec3)"/>
+    /// answer at t = 0, as for every driven field; an integrator reads the timed overloads.
+    /// </para>
+    /// <para>
+    /// The arguments are checked here, unlike on the path from a model, because they come from
+    /// a caller rather than from a validated document: a non-finite weight would otherwise
+    /// carry NaN into every potential with nothing raised, and a term naming a drive that does
+    /// not exist would be skipped without a word.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A list argument is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// There are no channels, a channel or a channel's term list or a waveform is null, a channel
+    /// varies in time (a channel must be static, because the weighting reads its time-free arm),
+    /// the counts disagree, or a drive term exists and no drive is given.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A direct weight, amplitude or phase is not finite, a term names a drive outside the
+    /// frequencies given, or a frequency is not finite and positive.
+    /// </exception>
+    public static DrivenSolvedField Create(
+        IReadOnlyList<IElectrostaticField> channels,
+        IReadOnlyList<double> direct,
+        IReadOnlyList<IReadOnlyList<WeightTerm>> harmonics,
+        IReadOnlyList<double> frequenciesHz,
+        IReadOnlyList<RfWaveform> waveforms)
+    {
+        ArgumentNullException.ThrowIfNull(channels);
+        ArgumentNullException.ThrowIfNull(direct);
+        ArgumentNullException.ThrowIfNull(harmonics);
+        ArgumentNullException.ThrowIfNull(frequenciesHz);
+        ArgumentNullException.ThrowIfNull(waveforms);
+
+        if (channels.Count == 0)
+        {
+            throw new ArgumentException("a driven field needs at least one channel", nameof(channels));
+        }
+
+        for (var c = 0; c < channels.Count; c++)
+        {
+            if (channels[c] is null)
+            {
+                throw new ArgumentException($"channel {c} is null", nameof(channels));
+            }
+
+            if (channels[c] is ITimeVaryingField)
+            {
+                throw new ArgumentException(
+                    $"channel {c} varies in time, and a channel must be static: the weighting reads "
+                    + "its time-free arm, which would freeze it at t = 0",
+                    nameof(channels));
+            }
+        }
+
+        if (direct.Count != channels.Count)
+        {
+            throw new ArgumentException(
+                $"a driven field needs one direct weight per channel, and was given {direct.Count} "
+                + $"against {channels.Count} channels",
+                nameof(direct));
+        }
+
+        if (harmonics.Count != channels.Count)
+        {
+            throw new ArgumentException(
+                $"a driven field needs one term list per channel, and was given {harmonics.Count} "
+                + $"against {channels.Count} channels; a channel with no drive takes an empty list",
+                nameof(harmonics));
+        }
+
+        if (waveforms.Count != frequenciesHz.Count)
+        {
+            throw new ArgumentException(
+                $"every drive needs a frequency and a waveform, and was given {frequenciesHz.Count} "
+                + $"frequencies against {waveforms.Count} waveforms",
+                nameof(waveforms));
+        }
+
+        for (var k = 0; k < frequenciesHz.Count; k++)
+        {
+            if (!double.IsFinite(frequenciesHz[k]) || frequenciesHz[k] <= 0.0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(frequenciesHz),
+                    frequenciesHz[k],
+                    $"drive {k}'s frequency must be finite and positive");
+            }
+
+            if (waveforms[k] is null)
+            {
+                throw new ArgumentException($"drive {k}'s waveform is null", nameof(waveforms));
+            }
+        }
+
+        for (var c = 0; c < channels.Count; c++)
+        {
+            if (!double.IsFinite(direct[c]))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(direct),
+                    direct[c],
+                    $"channel {c}'s direct weight must be finite; it would carry NaN into every potential");
+            }
+
+            var terms = harmonics[c]
+                ?? throw new ArgumentException(
+                    $"channel {c}'s term list is null; a channel with no drive takes an empty list",
+                    nameof(harmonics));
+
+            for (var k = 0; k < terms.Count; k++)
+            {
+                var term = terms[k];
+
+                if (frequenciesHz.Count == 0)
+                {
+                    throw new ArgumentException(
+                        $"channel {c} has a drive term and no drive was given", nameof(frequenciesHz));
+                }
+
+                if (term.Drive < 0 || term.Drive >= frequenciesHz.Count)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(harmonics),
+                        term.Drive,
+                        $"channel {c}'s term {k} names drive {term.Drive}, and the drives are 0 to "
+                        + $"{frequenciesHz.Count - 1}; such a term would be skipped without a word");
+                }
+
+                if (!double.IsFinite(term.Amplitude) || !double.IsFinite(term.Phase))
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(harmonics),
+                        term,
+                        $"channel {c}'s term {k} must have a finite amplitude and phase");
+                }
+            }
+        }
+
+        return new DrivenSolvedField(channels, direct, harmonics, frequenciesHz, waveforms);
     }
 
     /// <summary>Whether any stage ramps rather than holds.</summary>
