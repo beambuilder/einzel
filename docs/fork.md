@@ -145,6 +145,22 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **An ion list is a document, and its `cloud` set draws what `run` draws.**
+  `<name>.ions.json` (schema `0.1`, unknown keys refused with their JSON
+  pointer) lists ions as rows - id, mass-to-charge, charge, position,
+  direction, kinetic energy or acceleration potential, birth time or RF phase,
+  tag - and as `cloud` sets; every omitted attribute comes from the model's
+  `ion` and `source`, with the validator's own arithmetic, so a row with only
+  an id is the model's ion to the bit. `IonList.Expand` compiles a list against
+  a model into `IonRow`s, refusing each mistake by code and pointer; a `cloud`
+  set equals `IonCloud.Draw` as `einzel run` calls it, bit for bit, on all 15
+  shipped examples with a cloud. The expanded rows are written as `.ions.csv`
+  in SI with round-trip formatting and read back to the same bits; a CSV is
+  accepted as an ion list too, against the same model checks. A birth more
+  than 1000 maximum flight times late is refused at its row. Nothing flies a
+  list yet, and no existing output changes: five cloud examples and the 48-ion
+  quadrupole cloud give the same `run` result as before.
+  [Ion lists](ion-lists.md). PR #9.
 - **A host can weight its own basis fields into a driven field, and the batch
   driver does.** `DrivenSolvedField.Create` is the public, validated way to
   build the per-ion field, direct plus amplitude times w(f t + phase) over

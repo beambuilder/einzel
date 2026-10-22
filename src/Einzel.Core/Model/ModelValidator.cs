@@ -443,7 +443,7 @@ public static class ModelValidator
             return null;
         }
 
-        var cloud = ValidateCloud(source.Cloud, p, errors);
+        var cloud = ValidateCloud(source.Cloud, "/source/cloud", p, errors);
 
         return cloud is null
             ? null
@@ -461,10 +461,21 @@ public static class ModelValidator
     /// only backward compatibility: a spread that appeared by default would change
     /// every existing result silently, and a resolving power quietly getting worse
     /// is indistinguishable from a bug.
+    /// Public so an ion list's <c>cloud</c> set is held to the same checks and the same
+    /// conversion as <c>source.cloud</c>, and draws exactly what a model's cloud draws.
     /// </remarks>
-    private static IonCloudSettings? ValidateCloud(
-        CloudDocument? cloud, IReadOnlyDictionary<string, Quantity> p, List<EinzelError> errors)
+    /// <param name="cloud">The cloud block, or null for a single ion.</param>
+    /// <param name="path">JSON Pointer to the block, prefixed to every error.</param>
+    /// <param name="p">Resolved parameters its quantities may name.</param>
+    /// <param name="errors">Where the errors go.</param>
+    /// <returns>The settings, or null when the block was refused.</returns>
+    public static IonCloudSettings? ValidateCloud(
+        CloudDocument? cloud, string path, IReadOnlyDictionary<string, Quantity> p, List<EinzelError> errors)
     {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(p);
+        ArgumentNullException.ThrowIfNull(errors);
+
         if (cloud is null)
         {
             return new IonCloudSettings();
@@ -475,7 +486,7 @@ public static class ModelValidator
             errors.Add(new EinzelError
             {
                 Code = ErrorCodes.ValueOutOfBounds,
-                Path = "/source/cloud/ions",
+                Path = $"{path}/ions",
                 Constraint = "a cloud launches at least one ion",
                 Observed = new ObservedValue(cloud.Ions, "1"),
                 Suggestion = "ACC-5 wants a transmission interval within one per cent at 95%, which needs of "
@@ -490,7 +501,7 @@ public static class ModelValidator
             errors.Add(new EinzelError
             {
                 Code = ErrorCodes.ValueOutOfBounds,
-                Path = "/source/cloud/energyFractionSpread",
+                Path = $"{path}/energyFractionSpread",
                 Constraint = "an energy spread is a non-negative fraction of the nominal energy",
                 Observed = new ObservedValue(cloud.EnergyFractionSpread, "1"),
                 Suggestion = "use 0.01 for one per cent, or omit it for a monoenergetic cloud",
@@ -500,19 +511,19 @@ public static class ModelValidator
         }
 
         var temperature = Optional(
-            cloud.Temperature, "/source/cloud/temperature", Dimension.TemperatureDimension, p, errors);
+            cloud.Temperature, $"{path}/temperature", Dimension.TemperatureDimension, p, errors);
 
         var transverse = Optional(
-            cloud.TransverseSpread, "/source/cloud/transverseSpread", Dimension.LengthDimension, p, errors);
+            cloud.TransverseSpread, $"{path}/transverseSpread", Dimension.LengthDimension, p, errors);
 
         var longitudinal = Optional(
-            cloud.LongitudinalSpread, "/source/cloud/longitudinalSpread", Dimension.LengthDimension, p, errors);
+            cloud.LongitudinalSpread, $"{path}/longitudinalSpread", Dimension.LengthDimension, p, errors);
 
         // Dimensionless, because that is what an angle is in SI - `deg` and `mrad` are
         // conversions to radians, not a separate dimension. So the unit is required and
         // is the whole of the meaning: 20 and 20 deg differ by a factor of 57.
         var divergence = Optional(
-            cloud.Divergence, "/source/cloud/divergence", Dimension.Dimensionless, p, errors);
+            cloud.Divergence, $"{path}/divergence", Dimension.Dimensionless, p, errors);
 
         if (temperature is null || transverse is null || longitudinal is null || divergence is null)
         {
@@ -528,7 +539,7 @@ public static class ModelValidator
             errors.Add(new EinzelError
             {
                 Code = ErrorCodes.ValueOutOfBounds,
-                Path = "/source/cloud/divergence",
+                Path = $"{path}/divergence",
                 Constraint = "divergence is the half-angle of the cone the beam fills, so it "
                     + "must be under 90 degrees",
                 Observed = new ObservedValue(divergence.Value * 180.0 / Math.PI, "deg"),
@@ -538,12 +549,12 @@ public static class ModelValidator
             return null;
         }
 
-        foreach (var (value, path) in new[]
+        foreach (var (value, where) in new[]
         {
-            (temperature.Value, "/source/cloud/temperature"),
-            (transverse.Value, "/source/cloud/transverseSpread"),
-            (longitudinal.Value, "/source/cloud/longitudinalSpread"),
-            (divergence.Value, "/source/cloud/divergence"),
+            (temperature.Value, $"{path}/temperature"),
+            (transverse.Value, $"{path}/transverseSpread"),
+            (longitudinal.Value, $"{path}/longitudinalSpread"),
+            (divergence.Value, $"{path}/divergence"),
         })
         {
             if (value < 0.0)
@@ -551,7 +562,7 @@ public static class ModelValidator
                 errors.Add(new EinzelError
                 {
                     Code = ErrorCodes.ValueOutOfBounds,
-                    Path = path,
+                    Path = where,
                     Constraint = "a spread cannot be negative",
                     Observed = new ObservedValue(value, "SI"),
                     Suggestion = "omit it for zero",
@@ -566,7 +577,7 @@ public static class ModelValidator
             errors.Add(new EinzelError
             {
                 Code = ErrorCodes.ValueOutOfBounds,
-                Path = "/source/cloud/population",
+                Path = $"{path}/population",
                 Constraint = "a packet holds at least one ion",
                 Observed = new ObservedValue(declared, "1"),
                 Suggestion = "omit it to model the ions you launch as the ions that are there, or set 1 to "

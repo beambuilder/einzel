@@ -18,6 +18,7 @@ states the intent and these pages state the reality; both are noted.
 | [Living specification](../SPEC.md) | Every r06 requirement with its status and evidence, what changed and why, and what to do next |
 | [Architecture](architecture.md) | Assemblies, layering, the four invariants, and why each exists |
 | [Model format](model-format.md) | Schema 0.9 in full: parameters, expressions, fields, electrodes (rectangle, disc, polygon, edge profile), source clouds, drives, sequences |
+| [Ion lists](ion-lists.md) | The `.ions.json` document: explicit rows with per-ion species, position, direction, energy, birth time or RF phase and tag; the `cloud` set that draws what `run` draws; the expanded `.ions.csv` that reproduces a list to the bit |
 | [Device templates](device-templates.md) | Writing a new device as data, and the nineteen shipped templates, each with what solving it bought |
 | [Numerics](numerics.md) | Integrator, field solver, interpolation, and the accuracy budget |
 | [Sweeps and optimisation](optimisation.md) | Tolerance studies, sensitivity fields, Nelder-Mead and CMA-ES |
