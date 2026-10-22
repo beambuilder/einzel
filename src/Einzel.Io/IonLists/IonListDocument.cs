@@ -81,6 +81,10 @@ public sealed record IonRowDocument
 }
 
 /// <summary>A set of ions a generator draws, as an ion list declares it.</summary>
+/// <remarks>
+/// Either a <see cref="Cloud"/>, or attributes that are constants and generators; an omitted
+/// attribute takes the model's value, as in a row.
+/// </remarks>
 public sealed record IonSetDocument
 {
     /// <summary>
@@ -91,6 +95,33 @@ public sealed record IonSetDocument
 
     /// <summary>How many ions; for a cloud set, in place of <c>cloud.ions</c>.</summary>
     public int? N { get; init; }
+
+    /// <summary>The seed of the set's one stream; required when an attribute draws at random.</summary>
+    public int? Seed { get; init; }
+
+    /// <summary>Mass-to-charge ratio.</summary>
+    public ScalarDraw? MassToCharge { get; init; }
+
+    /// <summary>Charge number, a constant.</summary>
+    public int? ChargeNumber { get; init; }
+
+    /// <summary>Kinetic energy; not together with <see cref="AccelerationPotential"/>.</summary>
+    public ScalarDraw? KineticEnergy { get; init; }
+
+    /// <summary>Acceleration potential.</summary>
+    public ScalarDraw? AccelerationPotential { get; init; }
+
+    /// <summary>Birth time; not together with <see cref="RfPhase"/>.</summary>
+    public ScalarDraw? BirthTime { get; init; }
+
+    /// <summary>Birth time in cycles of the model's one drive; no unit.</summary>
+    public ScalarDraw? RfPhase { get; init; }
+
+    /// <summary>Starting position.</summary>
+    public PositionDraw? Position { get; init; }
+
+    /// <summary>Direction of travel.</summary>
+    public DirectionDraw? Direction { get; init; }
 
     /// <summary>
     /// The first row's id; the rest follow by one. Defaults to one more than the largest

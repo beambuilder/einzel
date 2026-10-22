@@ -205,6 +205,7 @@ why resolving powers here have carried the caveat "energy aberration only".
 | `transverseSpread` | Gaussian width across the direction of travel. Costs transmission |
 | `longitudinalSpread` | Gaussian width along it. Costs arrival time directly — two ions a millimetre apart are a millimetre of flight path apart |
 | `energyFractionSpread` | Gaussian width of the acceleration energy. Supply ripple, not temperature |
+| `divergence` | Half-angle of the cone the beam fills, an angle with a unit (`{ "value": 2, "unit": "deg" }`), under 90°. Directions are uniform in solid angle inside it and the speed is unchanged. What an aperture leaves behind |
 
 Every spread defaults to zero, so a model that says nothing about a cloud launches
 exactly what it launched before. That is not only backward compatibility: a spread
@@ -220,11 +221,14 @@ The default is the conservative reading — the ions simulated are the ions
 present — so a dense packet is never silently treated as sparse. Set
 `"population": 1` when sampling an intrinsic source property one ion at a time.
 
-**There is no angular-divergence setting, on purpose.** A thermal cloud already
-has one — an ion with sideways thermal velocity is an ion launched at an angle —
-and offering both would let a document say two things about the same physics and
-be believed twice. Energy spread *is* separate, because supply ripple varies the
-energy without varying the direction, which a temperature cannot express.
+**A temperature and a `divergence` say different things, and both may be
+declared.** A thermal cloud has an angular spread of its own, but it moves speed
+and direction together in a fixed ratio; `divergence` tilts the directed velocity
+without changing its length, as an aperture selects directions and takes nothing
+out of the beam energy. The cone is hard-edged and uniform in solid angle, not
+Gaussian, because an aperture truncates. `energyFractionSpread` is the converse:
+it varies the energy without varying the direction. (This page used to say there
+was no divergence setting; the setting exists and is drawn in `src/Einzel.Transport/IonCloud.cs`.)
 
 **A packet may start at rest.** `accelerationPotential` of zero used to be a
 validation error - "or the ion never moves" - which is true of a beam and false of

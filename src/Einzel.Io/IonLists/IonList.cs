@@ -195,7 +195,7 @@ public static class IonList
     /// <summary>The model and its resolved parameters, which every row reads its defaults from.</summary>
     internal sealed record Context(CompiledModel Model, IReadOnlyDictionary<string, Quantity> Parameters);
 
-    private static IonRow Row(IonRowDocument row, string path, Context context)
+    internal static IonRow Row(IonRowDocument row, string path, Context context)
     {
         var model = context.Model;
         var id = row.Id ?? throw Refuse(ErrorCodes.SchemaInvalid, path + "/id", "every row has an id");
@@ -314,9 +314,15 @@ public static class IonList
     private static IEnumerable<IonRow> Set(
         IonSetDocument set, string path, long next, Context context, List<long> seeds)
     {
-        var cloud = set.Cloud ?? throw Refuse(ErrorCodes.SchemaInvalid, path,
-            "a set declares what draws it; this build has 'cloud'");
+        if (set.Cloud is not { } cloud)
+        {
+            return GeneratedSet.Expand(set, path, next, context, seeds);
+        }
 
+        Require(
+            set is { Seed: null, MassToCharge: null, ChargeNumber: null, KineticEnergy: null, AccelerationPotential: null,
+                BirthTime: null, RfPhase: null, Position: null, Direction: null },
+            ErrorCodes.SchemaInvalid, path + "/cloud", "a cloud set takes only n, firstId and tag beside its cloud");
         Require(set.N is null || cloud.Ions == 1, ErrorCodes.SchemaInvalid, path + "/n",
             "state the count once: 'n' or 'cloud.ions'");
         Require(set.N is null or > 0, ErrorCodes.ValueOutOfBounds, path + "/n", "a set draws at least one ion");
