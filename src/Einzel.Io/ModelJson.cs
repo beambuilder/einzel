@@ -111,7 +111,7 @@ public static class ModelJson
     /// Converts a System.Text.Json path such as <c>$.source.position</c> into the
     /// JSON Pointer form AGT-3 uses.
     /// </summary>
-    private static string PointerFrom(string? jsonPath)
+    internal static string PointerFrom(string? jsonPath)
     {
         if (string.IsNullOrEmpty(jsonPath) || jsonPath == "$")
         {
