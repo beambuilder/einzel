@@ -98,7 +98,8 @@ public sealed class IonListFlightTests(ITestOutputHelper output) : IDisposable
 
     /// <summary>The field, settings, detector and gas a flight of this model uses, as a cloud's are built.</summary>
     private static IReadOnlyList<IonFlight> Fly(
-        CompiledModel model, IReadOnlyList<IonRow> rows, int parallelism, bool ladder = false, Einzel.Fields.Solved.ISolveStore? store = null)
+        CompiledModel model, IReadOnlyList<IonRow> rows, int parallelism, bool ladder = false, Einzel.Fields.Solved.ISolveStore? store = null,
+        IReadOnlyList<int>? indices = null)
     {
         var (field, _) = FieldAssembly.BuildReported(model, store);
         var (point, normal) = (model.DetectorPoint, model.DetectorNormal);
@@ -109,7 +110,7 @@ public sealed class IonListFlightTests(ITestOutputHelper output) : IDisposable
             MaximumFlightTime = model.MaximumFlightTimeSi,
         };
 
-        return IonListFlight.Fly(rows, field, settings, detector, Gas(model), model.Gas.Seed, parallelism, ladder);
+        return IonListFlight.Fly(rows, field, settings, detector, Gas(model), model.Gas.Seed, parallelism, ladder, indices: indices);
     }
 
     private static BackgroundGas Gas(CompiledModel model) => model.SourceDirectory is { } directory
@@ -417,6 +418,40 @@ public sealed class IonListFlightTests(ITestOutputHelper output) : IDisposable
         Assert.NotEqual(Bits(flights[5].Result!.FinalState.Position.X), Bits(alone.FinalState.Position.X));
 
         output.WriteLine($"40 rows equal the run's 40 ions, {cloud.Collisions} collisions");
+    }
+
+    /// <summary>
+    /// Rows flown as part of a longer list, as an override group's are, draw the collisions
+    /// they draw in the whole list when given their indices in it, and come back in their own
+    /// order. Without the indices the same rows draw other streams.
+    /// </summary>
+    [Fact]
+    public void RowsGivenTheirIndicesInTheListFlyAsTheyDoInIt()
+    {
+        var model = Compile(WithGas(Quad));
+        var rows = Rows(QuadList, model).Take(48).ToList();
+        var whole = Fly(model, rows, parallelism: 4);
+
+        int[] picked = [.. Enumerable.Range(0, rows.Count).Where(k => k % 3 == 1)];
+        var unplaced = Fly(model, [.. picked.Select(k => rows[k])], parallelism: 4);
+        var part = Fly(model, [.. picked.Select(k => rows[k])], parallelism: 4, indices: picked);
+
+        // On one thread too, where the rows fly in a plain loop.
+        foreach (var flown in new[] { part, Fly(model, [.. picked.Select(k => rows[k])], parallelism: 1, indices: picked) })
+        {
+            for (var j = 0; j < picked.Length; j++)
+            {
+                Assert.Equal(rows[picked[j]].Id, flown[j].Row.Id);
+                Same(whole[picked[j]].Result!, flown[j].Result!, $"row {picked[j]}");
+                Assert.Equal(whole[picked[j]].Collisions, flown[j].Collisions);
+            }
+        }
+
+        Assert.True(whole.Sum(f => f.Collisions) > 0, "no collisions, so the seed went untested");
+        Assert.Contains(Enumerable.Range(0, picked.Length), j => unplaced[j].Collisions != part[j].Collisions
+            || Bits(unplaced[j].Result!.FinalState.Position.X) != Bits(part[j].Result!.FinalState.Position.X));
+
+        Assert.Throws<ArgumentException>(() => Fly(model, rows, parallelism: 1, indices: picked));
     }
 
     /// <summary>
