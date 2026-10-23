@@ -145,6 +145,17 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **An ion-list row or set can name model parameters to fly with, and rows group
+  by them.** `overrides` maps a free model parameter to a quantity in its
+  dimension, on a row or as a constant on a set; it is checked against the model
+  as a sweep checks a scanned parameter (unknown, derived, dimension, bounds,
+  expression), and a row's own expressions see its overrides. A key written
+  twice is refused too; before PR #13 the later one was kept. Rows group by the bits of their
+  SI values in order of first appearance, and the expanded `.ions.csv` carries
+  them as `p:<name>` columns; a list without overrides expands and writes the
+  same rows and bytes as before (the eight golden `ion-sets` CSVs unchanged).
+  [Ion lists](ion-lists.md#parameter-overrides). PR #13.
+
 - **`einzel fly` flies an ion list through a model, one row per ion, and the
   expanded rows reproduce it.** `fly <model> --ions <list>` validates the model as
   `run` does, refuses space charge, diffusion, a sequence with a diffusive phase

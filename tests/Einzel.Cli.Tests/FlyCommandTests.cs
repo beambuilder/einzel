@@ -522,6 +522,30 @@ public sealed class FlyCommandTests(ITestOutputHelper output) : IDisposable
     }
 
     /// <summary>
+    /// Until each override group flies through its own field, a list with overrides is refused
+    /// at the first set's overrides rather than flown through the model as written, and
+    /// nothing is written.
+    /// </summary>
+    [Fact]
+    public void AListWithOverridesIsRefusedUntilGroupsFly()
+    {
+        var model = Write("models/quad.json", IonListFlightTests.Quad.Replace(
+            "\"name\": \"quad\",", "\"name\": \"quad\", \"parameters\": { \"V\": { \"value\": 100, \"unit\": \"V\" } },",
+            StringComparison.Ordinal));
+        var list = Write("ions/over.ions.json", """
+            { "schemaVersion": "0.1", "ions": [ { "id": 1, "overrides": { "V": { "value": 120, "unit": "V" } } }, { "id": 2 } ] }
+            """);
+
+        var (exit, stdout, stderr) = Run("fly", model, "--ions", list, "--project", _root, "--json");
+
+        Assert.True(exit == 1, stdout + stderr);
+        var error = JsonNode.Parse(stdout)!["errors"]![0]!;
+        Assert.Equal("/ions/0/overrides", (string)error["path"]!);
+        Assert.Contains("not flown yet", (string)error["constraint"]!, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(_root, "results")));
+    }
+
+    /// <summary>
     /// A row that throws is a defect in the platform, not an outcome: an ion launched on the
     /// axis of a quadro-logarithmic field, where its potential has no value, ends the flight
     /// with exit 6, the exception's type and its stack, and nothing written.

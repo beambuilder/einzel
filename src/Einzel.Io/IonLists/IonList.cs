@@ -19,6 +19,65 @@ public sealed record IonListExpansion(IReadOnlyList<IonRow>? Rows, IReadOnlyList
 
     /// <summary>The document's <c>maxParallelism</c>; null when it gave none.</summary>
     public int? MaxParallelism { get; init; }
+
+    /// <summary>
+    /// The distinct parameter overrides, in the order their first row appears; empty when no
+    /// row overrides anything. A row without overrides is the empty set, a group of its own.
+    /// </summary>
+    public IReadOnlyList<IonOverrideSet> OverrideSets { get; init; } = [];
+
+    /// <summary>Each row's index into <see cref="OverrideSets"/>; empty when that is.</summary>
+    public IReadOnlyList<int> RowGroups { get; init; } = [];
+
+    /// <summary>
+    /// The rows whose birth time an <c>rfPhase</c> gave, explicit or generated, by index in
+    /// ascending order; empty for a CSV, which states every birth time.
+    /// </summary>
+    /// <remarks>A phase is turned into a time with the model's drive frequency as written.</remarks>
+    public IReadOnlyList<int> RfPhaseRows { get; init; } = [];
+}
+
+/// <summary>One distinct set of parameter overrides of an ion list.</summary>
+/// <param name="Values">Each overridden parameter's value in SI, by name, in ordinal name order.</param>
+/// <param name="Written">The values as the list wrote them; null for a CSV, which states SI.</param>
+/// <param name="DeclaredAt">Where the set was first declared, for an error about the set as a whole.</param>
+/// <remarks>
+/// Two sets are the same when they name the same parameters with the same bits: <c>1 kV</c>
+/// and <c>1000 V</c> are one set, and a field is compiled once for both.
+/// </remarks>
+public sealed record IonOverrideSet(
+    IReadOnlyDictionary<string, double> Values, IReadOnlyDictionary<string, QuantityValue>? Written, string DeclaredAt)
+{
+    /// <summary>The set's identity: sorted names and the bits of their SI values.</summary>
+    internal string Key => string.Join(';', Values.Select(p => $"{p.Key}={BitConverter.DoubleToInt64Bits(p.Value):X16}"));
+
+    /// <summary>Groups rows by their overrides, in the order each set first appears.</summary>
+    /// <param name="perRow">Each row's overrides.</param>
+    /// <returns>The distinct sets and each row's index into them; both empty when nothing is overridden.</returns>
+    internal static (IReadOnlyList<IonOverrideSet> Sets, IReadOnlyList<int> Groups) Group(IReadOnlyList<IonOverrideSet> perRow)
+    {
+        if (perRow.All(set => set.Values.Count == 0))
+        {
+            return ([], []);
+        }
+
+        var index = new Dictionary<string, int>(StringComparer.Ordinal);
+        var sets = new List<IonOverrideSet>();
+        var groups = new int[perRow.Count];
+
+        for (var k = 0; k < perRow.Count; k++)
+        {
+            if (!index.TryGetValue(perRow[k].Key, out var group))
+            {
+                index[perRow[k].Key] = group = sets.Count;
+                sets.Add(perRow[k]);
+            }
+
+            groups[k] = group;
+        }
+
+        return (sets, groups);
+    }
 }
 
 /// <summary>Reads ion lists and expands them into <see cref="IonRow"/>s against a model.</summary>
@@ -32,6 +91,10 @@ public static class IonList
     /// <summary>The ion-list schema version this build reads and writes.</summary>
     public const string SchemaVersion = "0.1";
 
+    // A model's options, refusing a key written twice: an override stated twice would
+    // otherwise keep the last value without a word.
+    private static readonly JsonSerializerOptions Options = new(ModelJson.Options) { AllowDuplicateProperties = false };
+
     /// <summary>Parses an ion-list document, refusing unknown keys.</summary>
     /// <param name="json">The document text.</param>
     /// <returns>The document.</returns>
@@ -40,18 +103,23 @@ public static class IonList
     {
         try
         {
-            return JsonSerializer.Deserialize<IonListDocument>(json, ModelJson.Options)
+            return JsonSerializer.Deserialize<IonListDocument>(json, Options)
                 ?? throw Refuse(ErrorCodes.SchemaInvalid, "/", "an ion list must be a JSON object");
         }
         catch (JsonException failure)
         {
+            // The serializer's own words for a repeated key name a .NET type; the list's are these.
+            var twice = failure.Message.StartsWith("Duplicate property", StringComparison.Ordinal);
+
             throw new EinzelException(new EinzelError
             {
                 Code = ErrorCodes.SchemaInvalid,
                 Path = ModelJson.PointerFrom(failure.Path),
-                Constraint = failure.Message,
-                Suggestion = "docs/ion-lists.md lists every key; an unknown one is refused rather "
-                    + "than ignored, as in a model",
+                Constraint = twice ? "a key written twice" : failure.Message,
+                Suggestion = twice
+                    ? "write each key once; an ion list refuses a repeated key rather than keep one of its values"
+                    : "docs/ion-lists.md lists every key; an unknown one is refused rather "
+                        + "than ignored, as in a model",
             }, failure);
         }
     }
@@ -86,6 +154,19 @@ public static class IonList
                 if (Late(read.Rows![k].BirthTimeSeconds, model, $"/{k}/birth_time_s") is { } late)
                 {
                     errors.Add(late);
+                }
+            }
+
+            foreach (var (set, name, value) in read.OverrideSets.SelectMany(set => set.Values.Select(p => (set, p.Key, p.Value))))
+            {
+                try
+                {
+                    var pointer = $"{set.DeclaredAt}/p:{name}";
+                    Bounded(value, Parameter(name, pointer, model), pointer);
+                }
+                catch (EinzelException failure)
+                {
+                    errors.Add(failure.Error);
                 }
             }
 
@@ -147,19 +228,33 @@ public static class IonList
 
         var context = new Context(model, model.Parameters.Values());
         var rows = new List<IonRow>();
+        var overrides = new List<IonOverrideSet>();
+        var phased = new List<int>();
         var ids = new HashSet<int>();
         var seeds = new List<long>();
         long next = 1;
 
         // One error per row or set, and every row and set is tried, so one pass lists them all.
-        void Each(string path, string idKey, Func<IEnumerable<IonRow>> produce)
+        // A row or set reads its own expressions with its overrides layered on the model's values.
+        void Each(
+            string path, string idKey, IReadOnlyDictionary<string, QuantityValue>? declared, bool byPhase,
+            Func<Context, IEnumerable<IonRow>> produce)
         {
             try
             {
-                foreach (var row in produce())
+                var set = Overrides(declared, path, model);
+
+                foreach (var row in produce(Layered(context, set)))
                 {
                     Require(ids.Add(row.Id), ErrorCodes.SchemaInvalid, path + idKey, $"id {row.Id} is used twice");
+
+                    if (byPhase)
+                    {
+                        phased.Add(rows.Count);
+                    }
+
                     rows.Add(row);
+                    overrides.Add(set);
                     next = Math.Max(next, (long)row.Id + 1);
                 }
             }
@@ -176,20 +271,120 @@ public static class IonList
         for (var k = 0; k < rowCount; k++)
         {
             var path = $"/ions/{k}";
-            Each(path, "/id", () => [Row(ions[k] ?? throw Refuse(ErrorCodes.SchemaInvalid, path, "a row is an object"), path, context)]);
+            Each(path, "/id", ions[k]?.Overrides, ions[k]?.RfPhase is not null,
+                local => [Row(ions[k] ?? throw Refuse(ErrorCodes.SchemaInvalid, path, "a row is an object"), path, local)]);
         }
 
         for (var s = 0; s < setCount; s++)
         {
             var path = $"/ionSets/{s}";
-            Each(path, "/firstId", () => Set(sets[s] ?? throw Refuse(ErrorCodes.SchemaInvalid, path, "a set is an object"), path, next, context, seeds));
+            Each(path, "/firstId", sets[s]?.Overrides, sets[s]?.RfPhase is not null,
+                local => Set(sets[s] ?? throw Refuse(ErrorCodes.SchemaInvalid, path, "a set is an object"), path, next, local, seeds));
         }
+
+        var (overrideSets, groups) = IonOverrideSet.Group(overrides);
 
         return new IonListExpansion(errors.Count > 0 ? null : rows, errors)
         {
             Seeds = seeds,
             MaxParallelism = document.MaxParallelism,
+            OverrideSets = overrideSets,
+            RowGroups = groups,
+            RfPhaseRows = phased,
         };
+    }
+
+    /// <summary>
+    /// The parameters a row or set with overrides evaluates its expressions with: the model's
+    /// surface resolved again with the overrides layered on, derived parameters and all, as
+    /// the model is compiled for the row's field. Defaults still come from the model as written.
+    /// </summary>
+    private static Context Layered(Context context, IonOverrideSet set)
+    {
+        if (set.Values.Count == 0)
+        {
+            return context;
+        }
+
+        var model = context.Model;
+        var errors = new List<EinzelError>();
+        var surface = ParameterSurface.Resolve(
+            model.Source.Parameters,
+            set.Values.ToDictionary(
+                pair => pair.Key,
+                pair => Quantity.Si(pair.Value, model.Parameters.Parameters[pair.Key].Value.Dimension),
+                StringComparer.Ordinal),
+            errors);
+
+        if (surface is null)
+        {
+            var error = errors[0];
+            throw new EinzelException(error with
+            {
+                Path = set.DeclaredAt,
+                Constraint = $"with these overrides the model is refused at {error.Path}: {error.Constraint}",
+            });
+        }
+
+        return context with { Parameters = surface.Values() };
+    }
+
+    /// <summary>
+    /// Checks a row's or a set's overrides against the model's parameters, as a sweep checks
+    /// the parameter it scans: each names a free parameter, in its dimension, within its bounds.
+    /// </summary>
+    private static IonOverrideSet Overrides(
+        IReadOnlyDictionary<string, QuantityValue>? declared, string path, CompiledModel model)
+    {
+        var at = path + "/overrides";
+        var values = new SortedDictionary<string, double>(StringComparer.Ordinal);
+
+        foreach (var (name, value) in declared ?? new Dictionary<string, QuantityValue>())
+        {
+            var pointer = $"{at}/{name}";
+            var parameter = Parameter(name, pointer, model);
+
+            // The model's own expressions follow an override; one that was itself an expression
+            // would be a second parameter surface beside the model's.
+            Require(value is { Expression: null }, ErrorCodes.SchemaInvalid, pointer,
+                "an override is a value with its unit, not an expression");
+
+            // + 0.0 turns -0 into 0: the two are one value, and one group compiles one field.
+            values[name] = Bounded(value!.ToQuantity(pointer, parameter.Value.Dimension).SiValue, parameter, pointer) + 0.0;
+        }
+
+        return new IonOverrideSet(
+            values,
+            declared is null ? null : new SortedDictionary<string, QuantityValue>(declared.ToDictionary(), StringComparer.Ordinal),
+            at);
+    }
+
+    /// <summary>The free parameter an override names, or the refusal: unknown, or derived.</summary>
+    private static ResolvedParameter Parameter(string name, string pointer, CompiledModel model)
+    {
+        var surface = model.Parameters;
+
+        Require(surface.Parameters.ContainsKey(name), ErrorCodes.SchemaInvalid, pointer,
+            $"'{name}' is not a parameter of this model; "
+            + (surface.FreeParameters.Count == 0
+                ? "it declares none"
+                : $"its free parameters are {string.Join(", ", surface.FreeParameters.Select(p => p.Name))}"));
+
+        var parameter = surface.Parameters[name];
+
+        Require(!parameter.IsDerived, ErrorCodes.SchemaInvalid, pointer,
+            $"'{name}' is derived from other parameters; override what it is derived from");
+
+        return parameter;
+    }
+
+    /// <summary>An override's SI value, refused outside the parameter's declared bounds.</summary>
+    private static double Bounded(double si, ResolvedParameter parameter, string pointer)
+    {
+        Require(parameter.IsWithinBounds(Quantity.Si(si, parameter.Value.Dimension)), ErrorCodes.ValueOutOfBounds, pointer,
+            $"the value lies outside the declared bounds of '{parameter.Name}'");
+
+        return si;
     }
 
     /// <summary>The model and its resolved parameters, which every row reads its defaults from.</summary>
@@ -322,7 +517,7 @@ public static class IonList
         Require(
             set is { Seed: null, MassToCharge: null, ChargeNumber: null, KineticEnergy: null, AccelerationPotential: null,
                 BirthTime: null, RfPhase: null, Position: null, Direction: null },
-            ErrorCodes.SchemaInvalid, path + "/cloud", "a cloud set takes only n, firstId and tag beside its cloud");
+            ErrorCodes.SchemaInvalid, path + "/cloud", "a cloud set takes only n, firstId, tag and overrides beside its cloud");
         Require(set.N is null || cloud.Ions == 1, ErrorCodes.SchemaInvalid, path + "/n",
             "state the count once: 'n' or 'cloud.ions'");
         Require(set.N is null or > 0, ErrorCodes.ValueOutOfBounds, path + "/n", "a set draws at least one ion");

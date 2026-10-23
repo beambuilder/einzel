@@ -200,6 +200,26 @@ public static class FlyCommand
             return (null, validation with { Valid = false, Errors = expansion.Errors }, ions);
         }
 
+        // Until each group flies through its own field, a list with overrides would fly every
+        // row through the model as written; it is refused rather than flown with the wrong field.
+        if (expansion.OverrideSets.Count > 0)
+        {
+            return (null, validation with
+            {
+                Valid = false,
+                Errors =
+                [
+                    new EinzelError
+                    {
+                        Code = ErrorCodes.SchemaInvalid,
+                        Path = expansion.OverrideSets[0].DeclaredAt,
+                        Constraint = "parameter overrides are not flown yet (PR #14)",
+                        Suggestion = "fly one model file per operating point",
+                    },
+                ],
+            }, ions);
+        }
+
         var rows = expansion.Rows!;
         var gas = GasFlowImport.Resolve(model.Gas, directory);
         var parallelism = expansion.MaxParallelism ?? Environment.ProcessorCount;
