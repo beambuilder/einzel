@@ -495,8 +495,12 @@ public static class IonList
     }
 
     /// <summary>Every distinct drive frequency the model's elements declare, in hertz.</summary>
-    internal static IReadOnlyList<double> Frequencies(CompiledModel model)
+    /// <param name="model">The model.</param>
+    /// <returns>The frequencies, in the order the elements and their phases declare them.</returns>
+    public static IReadOnlyList<double> Frequencies(CompiledModel model)
     {
+        ArgumentNullException.ThrowIfNull(model);
+
         static IEnumerable<double> Of(CompiledField field) =>
             (field.Kind == CompiledFieldKind.IdealQuadrupoleRf ? [field.DriveFrequencySi] : Array.Empty<double>())
                 .Concat(field.Solve?.Drives.Select(d => d.FrequencyHz) ?? [])

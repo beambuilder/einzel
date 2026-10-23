@@ -147,6 +147,17 @@ public sealed record RunManifest
     /// </remarks>
     public int? MaxParallelism { get; init; }
 
+    /// <summary>
+    /// For an ion-list flight whose rows override model parameters: one entry per group of
+    /// rows with the same overrides, in the order the groups were flown. Absent elsewhere.
+    /// </summary>
+    /// <remarks>
+    /// Each group was flown through the model compiled with its overrides, so its channel
+    /// hashes are what its field was built from; <see cref="Solves"/> and
+    /// <see cref="FieldCache"/> are then the union over the groups, each channel once.
+    /// </remarks>
+    public IReadOnlyList<OverrideGroup>? OverrideGroups { get; init; }
+
     /// <summary>Extension identities and versions. Empty when none were used (GRD-6).</summary>
     public IReadOnlyList<string> Extensions { get; init; } = [];
 

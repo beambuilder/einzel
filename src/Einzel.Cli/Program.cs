@@ -2501,6 +2501,15 @@ public static class Program
             Console.Out.WriteLine(string.Create(
                 invariant,
                 $"  seeds [{string.Join(", ", fly.Manifest.Seeds)}]; field: {fly.CachedChannels} of {fly.Channels} channel(s) in the cache"));
+
+            // The cold cost before it is paid: a group whose channels are not cached solves them.
+            foreach (var group in fly.Manifest.OverrideGroups ?? [])
+            {
+                Console.Out.WriteLine(string.Create(
+                    invariant,
+                    $"  group {group.Index} ({group.Describe()}): {group.Rows} ion(s), {group.CachedChannels} of {group.ChannelHashes.Count} channel(s) in the cache"));
+            }
+
             return (int)ExitCode.Success;
         }
 

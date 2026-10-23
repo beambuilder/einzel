@@ -145,6 +145,23 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **`einzel fly` flies each set of parameter overrides through its own field,
+  and one list replaces a process per scan point.** Rows group by their
+  overrides; each group's model is compiled with them and refused if it differs
+  from the model as written in anything but its fields, or if it changes a drive
+  frequency under a row born by `rfPhase`; groups fly in order, each
+  field built through the cache behind an in-process memo (each channel read or
+  solved once per flight), the rows of a group at once by their index in the
+  whole list, so seeds and places do not depend on grouping. The manifest records
+  every group (`overrideGroups`), rows their `group`, the CSVs `p:` columns, and a
+  dry run lists each group's cached channels. Measured warm on the 0.2 mm pixel-rod
+  quadrupole with a parameterised corpus model: the 06b tune line, 1488 rows
+  in 31 groups, in 11.5 s against 34.4 s for 31 processes; the 06c
+  q line, 4848 rows in 101 groups, in 23.9 s against 112.9 s; 6336 of
+  6336 rows bitwise equal to the per-point flights. A list without overrides
+  writes the same bytes as before. SPEC Amendment 61;
+  [the CLI](cli.md#flying-an-ion-list), [Ion lists](ion-lists.md#parameter-overrides). PR #14.
+
 - **An ion-list row or set can name model parameters to fly with, and rows group
   by them.** `overrides` maps a free model parameter to a quantity in its
   dimension, on a row or as a constant on a set; it is checked against the model

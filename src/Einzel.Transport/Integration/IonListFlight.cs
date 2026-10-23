@@ -75,9 +75,16 @@ public static class IonListFlight
     /// not change the arithmetic; with the ladder the path is a fourth flight at rung 0, as a
     /// single-ion run draws its own.
     /// </param>
+    /// <param name="indices">
+    /// Each row's index in the whole list when these rows are part of it, as when the rows of
+    /// one override group fly through that group's field; null when the rows are the list. Row
+    /// k then draws its collisions from <c>gasSeed + indices[k]</c>, so a row's flight does not
+    /// depend on which group it was flown with.
+    /// </param>
     /// <returns>The flights, index for index with <paramref name="rows"/>.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxParallelism"/> is below one.</exception>
+    /// <exception cref="ArgumentException"><paramref name="indices"/> does not have one entry per row.</exception>
     public static IReadOnlyList<IonFlight> Fly(
         IReadOnlyList<IonRow> rows,
         IElectrostaticField field,
@@ -87,7 +94,8 @@ public static class IonListFlight
         int gasSeed,
         int maxParallelism,
         bool ladder = false,
-        Func<TrajectoryRecorder>? record = null)
+        Func<TrajectoryRecorder>? record = null,
+        IReadOnlyList<int>? indices = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(field);
@@ -95,6 +103,11 @@ public static class IonListFlight
         ArgumentNullException.ThrowIfNull(detector);
         ArgumentNullException.ThrowIfNull(gas);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxParallelism, 1);
+
+        if (indices is not null && indices.Count != rows.Count)
+        {
+            throw new ArgumentException("one index per row", nameof(indices));
+        }
 
         var flights = new IonFlight[rows.Count];
 
@@ -104,7 +117,7 @@ public static class IonListFlight
         {
             for (var index = 0; index < rows.Count; index++)
             {
-                flights[index] = FlyOne(rows[index], index, field, settings, detector, gas, gasSeed, ladder, record);
+                flights[index] = FlyOne(rows[index], indices?[index] ?? index, field, settings, detector, gas, gasSeed, ladder, record);
             }
 
             return flights;
@@ -114,7 +127,7 @@ public static class IonListFlight
             0,
             rows.Count,
             new ParallelOptions { MaxDegreeOfParallelism = maxParallelism },
-            index => flights[index] = FlyOne(rows[index], index, field, settings, detector, gas, gasSeed, ladder, record));
+            index => flights[index] = FlyOne(rows[index], indices?[index] ?? index, field, settings, detector, gas, gasSeed, ladder, record));
 
         return flights;
     }
