@@ -78,6 +78,16 @@ public sealed record IonRowDocument
 
     /// <summary>A free label carried to the results. No comma, quote or line break.</summary>
     public string? Tag { get; init; }
+
+    /// <summary>
+    /// Values for the model's free parameters that this row is flown with, by name: the
+    /// fields are compiled again with them, everything else stays the model's.
+    /// </summary>
+    /// <remarks>
+    /// A quantity in the parameter's own dimension, never an expression. Rows with equal
+    /// overrides fly through one field.
+    /// </remarks>
+    public IReadOnlyDictionary<string, QuantityValue>? Overrides { get; init; }
 }
 
 /// <summary>A set of ions a generator draws, as an ion list declares it.</summary>
@@ -131,4 +141,7 @@ public sealed record IonSetDocument
 
     /// <summary>A label given to every row of the set.</summary>
     public string? Tag { get; init; }
+
+    /// <summary>Parameter overrides every row of the set is flown with; a constant, never drawn.</summary>
+    public IReadOnlyDictionary<string, QuantityValue>? Overrides { get; init; }
 }

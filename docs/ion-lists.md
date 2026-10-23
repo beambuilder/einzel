@@ -44,6 +44,7 @@ the expanded row type is `IonRow` in `src/Einzel.Transport/IonRow.cs`.
 A list declares at least one row or one set. **An unknown key is refused** with
 its JSON pointer, as in a model: a misspelled attribute silently dropped would
 launch the model's default ion and read as though it launched another.
+A key written twice is refused too; before PR #13 the later one was kept.
 
 ## A row
 
@@ -59,6 +60,7 @@ launch the model's default ion and read as though it launched another.
 | `birthTime` | time, e.g. `us` | 0 | Not negative, and at most 1000 of the model's `maximumFlightTime`. SIMION's `tob` |
 | `rfPhase` | cycles | none | `birthTime = rfPhase / f`. Only for a model with exactly one declared drive frequency; not together with `birthTime` |
 | `tag` | text | empty | Carried to the results. One CSV field: no comma, double quote or line break |
+| `overrides` | per parameter | none | Values for the model's free parameters this row is flown with; see [Parameter overrides](#parameter-overrides) |
 
 Quantities are written as in a model, `{ "value": …, "unit": "…" }`, and may be
 an `expression` over the model's parameters; units are required and checked
@@ -100,6 +102,91 @@ The model supplies every default, so it must have one ion and one launch:
 
 Both are refused at `/`, for a `.csv` as for a JSON list.
 
+## Parameter overrides
+
+A row or a set may fly through the model with some of its parameters set to
+other values:
+
+```json
+{ "id": 7, "rfPhase": 0.25, "overrides": { "U": { "value": 20.79, "unit": "V" } } }
+```
+
+`overrides` maps the name of a **free model parameter** to a quantity in that
+parameter's dimension. The model is compiled again with those values, exactly as
+a sweep compiles it: every expression over the parameter follows, derived
+parameters included, and the declared bounds still hold. This is the model
+format's own rule for changing an operating point ([a phase sets parameters, not
+electrode settings](model-format.md#a-phase-sets-parameters-not-electrode-settings)),
+so a model whose electrode potentials and drive amplitudes are expressions over
+named parameters can be flown at many operating points from one list:
+
+```json
+"parameters": {
+  "axis": { "value": -8, "unit": "V" },
+  "U": { "value": 22.41050655, "unit": "V" },
+  "V": { "value": 137.6526976, "unit": "V" }
+},
+…
+{ "name": "rodZp", …, "potential": { "expression": "axis + U", "unit": "V" },
+  "driveAmplitude": { "expression": "V", "unit": "V" }, "drivePhase": { "value": 0.75, "unit": "1" } }
+```
+
+**What may be overridden.** A free parameter (`value`, not `expression`) the
+model declares. Refused, each at `/ions/<k>/overrides/<name>` or
+`/ionSets/<s>/overrides/<name>`: a name the model does not declare, a derived
+parameter (override what it is derived from), a unit of another dimension, a
+value outside the parameter's `minimum`/`maximum`, an `expression` (an override
+is a number), a missing unit, and a name written twice in one object (which a
+model's own parser would let the later one win; the ion list refuses a key
+written twice anywhere). A value that makes a derived parameter leave its bounds
+is refused at the row's or set's `overrides`. A set's `overrides` is one constant for every row of
+the set, generated or `cloud`; it draws nothing, so a set's rows are the same
+with and without it.
+
+**What an override is for.** The fields. An override that would change the ion,
+the source, the detector, the integration settings, the flight-time limit or the
+gas is refused when the list is flown: a row's defaults (`massToCharge`,
+`position`, the energy) are resolved against the model as written, and an
+override that moved them would leave the row and its field disagreeing. State
+those on the row instead. A row's or set's own expressions (an attribute written
+as `{ "expression": "Ek", "unit": "eV" }`) are evaluated with its overrides
+layered on the model's parameters, as its field is: a row that overrides `Ek`
+and states its energy as `Ek` launches at the overridden value.
+
+Until `fly` flies the groups (PR #14), it refuses a list with overrides at the
+first row's or set's `overrides`, rather than fly every row through the model as
+written.
+
+**Groups.** Rows are grouped by their overrides: same parameter names and the same
+bits of their SI values (`1 V`, `1.0 V` and `1000 mV` are one group; key order
+inside the object does not matter; `-0` and `0` are one value). Groups are
+numbered in the order their first row appears, and the rows without overrides
+are a group of their own. Rows keep their place in the list; the group is a
+property of the row. Values that are equal only after unit conversion can differ
+in the last bit (a value in `kV` and the same value in `mV` are each rounded
+once to SI) and then fly as two groups, each correct, the second at the cost of
+another field; write one unit throughout a list to share the field.
+
+**What a group costs.** Each group is one compiled model and one field, built
+through the [field cache](cli.md#a-second-run-of-the-same-geometry-loads-its-field), so what it costs is what the
+override changes in the solved channels:
+
+| Override changes | Cost per new value |
+| --- | --- |
+| a drive amplitude (`V` on an RF pair) | none: the same channels, other weights; a cache load |
+| a phase common to every tap of a drive (`drivePhase` over a parameter) | none for a single-phase structure such as a quadrupole; two new quadrature channels for a multi-phase sinusoid (a travelling wave) |
+| the DC pattern (`U` on a quadrupole, any non-uniform DC change) | one solve of the new DC channel, then cached |
+| any potential of a static, undriven model (a lens) | one solve, since a static model is one channel at its absolute potentials |
+
+**An RF phase that is not a birth time.** `rfPhase` moves the ion's birth, so
+the ion sees the drive *and* any `sequence` timeline from that instant. A
+phase on the drive alone is written as `drivePhase` over a parameter and
+overridden per row (`"drivePhase": { "expression": "phi", "unit": "1" }` on
+every tap, `"overrides": { "phi": … }`). For a single-phase drive this is a
+weight change, solve-free. On the corpus quadrupole a common shift of 1/16
+written either way gives the same outcome for 144 of 144 ions; the two are not
+bit-equal (different arithmetic), and they differ only where a sequence runs.
+
 ## The `cloud` set
 
 ```json
@@ -118,6 +205,7 @@ this on every shipped example with a cloud.
 | `n` | The ion count, in place of `cloud.ions`; state one or the other (`cloud.ions` of 1 is its default and counts as unstated). Raising it keeps the earlier ions unchanged (the draw is prefix-stable) |
 | `firstId` | The first row's id; the rest follow by one |
 | `tag` | Given to every row of the set |
+| `overrides` | [Parameter overrides](#parameter-overrides) for every row of the set |
 
 ## Generated sets
 
@@ -247,6 +335,14 @@ reads its defaults from it.
 | `VALUE_OUT_OF_BOUNDS` | `/ionSets/0/position` | a generated value the row refuses (a non-positive mass, a negative or late birth, a position that overflows), at the set's attribute |
 | `SCHEMA_INVALID` | `/ionSets/0/seed` | a set that draws at random without a seed; two forms in one attribute; a generator where it does not belong |
 | `VALUE_OUT_OF_BOUNDS` | `/ionSets/0/birthTime/gaussian/sigma` | negative `sigma`, `max` below `min`, `radius` not positive, `halfAngle` outside (0°, 90°], `n` below 1 |
+| `SCHEMA_INVALID` | `/ions/0/overrides/U` | not a parameter of the model; a derived one; an `expression`; the key written twice |
+| `SCHEMA_INVALID` | `/ions/0/id` | any key written twice: "a key written twice" |
+| `UNITS_INCOMPATIBLE` | `/ions/0/overrides/U` | a unit of another dimension than the parameter's |
+| `UNITS_REQUIRED` | `/ions/0/overrides/U` | an override without its unit |
+| `VALUE_OUT_OF_BOUNDS` | `/ionSets/0/overrides/U` | outside the parameter's declared bounds |
+| `VALUE_OUT_OF_BOUNDS` | `/ions/0/overrides` | "with these overrides the model is refused at /parameters/W": a derived parameter leaves its bounds |
+| `SCHEMA_INVALID` | `/ions/0/overrides` | (fly) "parameter overrides are not flown yet (PR #14)": any list with overrides, until PR #14 |
+| `SCHEMA_INVALID` | `/3/p:X` | a `.csv` column naming no free parameter, at the first row of its group |
 
 ## The expanded `.ions.csv`
 
@@ -262,7 +358,18 @@ id,tag,mass_kg,charge_C,x_m,y_m,z_m,vx_m_per_s,vy_m_per_s,vz_m_per_s,birth_time_
 
 Numbers use round-trip (`R`) formatting and the invariant culture, lines end in
 `\n`, so reading the file back gives the same rows to the bit; a test holds
-that. A `.csv` is also accepted wherever an ion list is (explicit rows only),
+that. A list with overrides adds one column per overridden parameter after the
+eleven, `p:<name>` in ordinal name order, holding the SI value (volts for a
+potential, cycles for a phase) or nothing where the row does not override it:
+
+```
+id,tag,mass_kg,charge_C,x_m,y_m,z_m,vx_m_per_s,vy_m_per_s,vz_m_per_s,birth_time_s,p:U,p:V
+1,k0v0,1.6605390689199998E-25,1.602176634E-19,0,2E-05,2E-05,1964.5389486782906,0,0,0,20.793253499922816,
+```
+
+Read back, the rows group as they did. A list without overrides writes exactly
+the eleven columns, as before overrides existed, and a file with the eleven is
+read as a list without overrides. A `.csv` is also accepted wherever an ion list is (explicit rows only),
 and its errors are addressed as `/<row>/<column>`, rows counted from 0 after the
 header. A CSV row states its mass, charge, launch and birth time in full and
 defaults nothing from the model, but the model is checked as for a JSON list: a
@@ -385,6 +492,8 @@ build. "Later" marks what later milestones add.
 | Lua loops and tables | a program builds the list | explicit `ions` | parity through rows; no Lua |
 | `.ion` | explicit list | `ions`, or a `.ions.csv` | parity in content; importer project side |
 | clock-seeded random | not reproducible | `seed`, and the expanded `.ions.csv` | beyond |
-| `fast_adjust` per ion | per-ion voltages | none; one model per operating point | gap; later (A.5) |
+| `fast_adjust` per ion | per-ion voltages | `overrides` of model parameters on a row or set | parity; a DC change costs one cached solve per distinct pattern where SIMION recombines unit solutions for free |
+| `init_p_values` per ion | per-ion static instance voltages | `overrides`, as above | parity; on a static model every distinct voltage set is one solve |
+| `adjustable` + `phase_angle_deg` | a global phase | `drivePhase` over a parameter, overridden per row | parity; solve-free for a single-phase drive |
 | grouped flight, repulsion | common time step | none for a list | gap; later (B2.4/B2.5) |
 | `terminate` record | splat per ion | a `fly` row: id, tag, outcome, surface, final position, time since birth, steps | parity |
