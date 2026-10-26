@@ -165,21 +165,7 @@ public static class ToleranceStudy
         // Splitting the two costs nothing, because the draw is arithmetic and the
         // evaluation is a field and its flights. The perturbations are identical to what the
         // sequential version produced, draw for draw.
-        var random = new Random(seed);
-
-        var perturbations = new Dictionary<string, Quantity>[draws];
-
-        for (var d = 0; d < draws; d++)
-        {
-            var overrides = new Dictionary<string, Quantity>(StringComparer.Ordinal);
-
-            foreach (var channel in channels)
-            {
-                overrides[channel.Parameter] = channel.Draw(surface[channel.Parameter], random);
-            }
-
-            perturbations[d] = overrides;
-        }
+        var perturbations = Draws(channels, surface, draws, seed);
 
         var parallelism = new ParallelOptions
         {
@@ -203,6 +189,42 @@ public static class ToleranceStudy
             : [];
 
         return new ToleranceStudyResult(rows, sensitivity, Distribution(rows, draws, figureDimension), nominal);
+    }
+
+    /// <summary>
+    /// The draws a seeded sweep makes, in the order it makes them, before any is evaluated:
+    /// what <see cref="Run"/> evaluates, for a caller that needs to know the points first.
+    /// </summary>
+    /// <param name="channels">The channels, bound to <paramref name="surface"/>.</param>
+    /// <param name="surface">The nominal model's parameters, each channel's draw centred on its value.</param>
+    /// <param name="draws">How many draws.</param>
+    /// <param name="seed">The sweep's seed.</param>
+    /// <returns>One override set per draw, each channel's parameter drawn in channel order.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The draw count is negative.</exception>
+    public static Dictionary<string, Quantity>[] Draws(
+        IReadOnlyList<PerturbationChannel> channels, ParameterSurface surface, int draws, int seed)
+    {
+        ArgumentNullException.ThrowIfNull(channels);
+        ArgumentNullException.ThrowIfNull(surface);
+        ArgumentOutOfRangeException.ThrowIfNegative(draws);
+
+        var random = new Random(seed);
+        var perturbations = new Dictionary<string, Quantity>[draws];
+
+        for (var d = 0; d < draws; d++)
+        {
+            var overrides = new Dictionary<string, Quantity>(StringComparer.Ordinal);
+
+            foreach (var channel in channels)
+            {
+                overrides[channel.Parameter] = channel.Draw(surface[channel.Parameter], random);
+            }
+
+            perturbations[d] = overrides;
+        }
+
+        return perturbations;
     }
 
     private static List<ChannelSensitivity> Attribute(

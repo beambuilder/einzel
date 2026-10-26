@@ -1290,7 +1290,8 @@ public static class EstimateCommand
 
         return held + string.Create(
             Inv,
-            $": {solved} channel solve(s) at {perChannel:F2} s each and {loaded} load(s) from the cache, {seconds:F2} s for the study's fields.");
+            $": {solved} channel solve(s) at {perChannel:F2} s each and {loaded} load(s) from the cache, {seconds:F2} s for the study's fields.")
+            + (survey.BasisNote is { } note ? $" Under the field basis the {note}." : string.Empty);
     }
 
     /// <summary>How many evaluations a study's declared driver will make.</summary>

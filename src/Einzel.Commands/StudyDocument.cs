@@ -153,6 +153,27 @@ public sealed record StudyDocument
     /// </remarks>
     public MemoryDocument? MemoryBudget { get; init; }
 
+    /// <summary>
+    /// How the study's solved fields are decomposed: <c>patterns</c>, the default, as a run
+    /// decomposes them; or <c>varyingElectrodes</c>, where each group of electrodes the study's
+    /// own points move is a DC channel of its own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// By default every DC potential feeds one constant supply, so a point that moves a DC
+    /// electrode of a driven model, or any potential of a static one, is a new pattern and a
+    /// solve. Under <c>varyingElectrodes</c> those points re-weight channels solved once: a DC
+    /// scan of the 0.2 mm quadrupole solves four channels in all where it solved one per point.
+    /// </para>
+    /// <para>
+    /// The fields are the direct ones to the solver's convergence, not to the bit, so a result
+    /// under the basis is not byte-identical to one under the patterns; the manifest records the
+    /// plan. Each channel is one more interpolation per field evaluation for the points that use
+    /// it.
+    /// </para>
+    /// </remarks>
+    public string FieldBasis { get; init; } = "patterns";
+
     /// <summary>Optimisation: convergence tolerance on the parameters, as a fraction of the box.</summary>
     public double ParameterTolerance { get; init; } = 1e-4;
 
@@ -494,6 +515,29 @@ public static class StudyBinding
                 Path = "/sense",
                 Constraint = $"'{study.Sense}' is not a direction",
                 Suggestion = "'minimise' or 'maximise', or omit it and the figure of merit decides",
+            }),
+        };
+    }
+
+    /// <summary>Checks the study's field basis.</summary>
+    /// <param name="study">The study.</param>
+    /// <returns>Whether the study asks for a basis other than the default patterns.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="study"/> is null.</exception>
+    /// <exception cref="EinzelException">The basis is neither <c>patterns</c> nor <c>varyingElectrodes</c>.</exception>
+    public static bool FieldBasis(StudyDocument study)
+    {
+        ArgumentNullException.ThrowIfNull(study);
+
+        return study.FieldBasis switch
+        {
+            "patterns" => false,
+            StudyFieldBasis.VaryingElectrodes => true,
+            _ => throw new EinzelException(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = "/fieldBasis",
+                Constraint = $"{(study.FieldBasis is null ? "null" : $"'{study.FieldBasis}'")} is not a field basis",
+                Suggestion = "one of: patterns, varyingElectrodes",
             }),
         };
     }

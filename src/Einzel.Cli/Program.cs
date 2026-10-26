@@ -467,7 +467,8 @@ public static class Program
             CultureInfo.InvariantCulture,
             $"  field: {survey.CachedChannels} of {survey.Channels} channel(s) in the cache at the nominal model and the study's ends; "
             + $"{points}; {survey.SolvingEvaluations} of {survey.Evaluations} evaluation(s) solve; "
-            + $"peak {EstimateCommand.MemorySize(survey.PeakMiB)} at up to {survey.MaxParallelism} at once"));
+            + $"peak {EstimateCommand.MemorySize(survey.PeakMiB)} at up to {survey.MaxParallelism} at once"
+            + $"{(survey.BasisNote is { } note ? "; " + note : string.Empty)}"));
     }
 
     /// <summary>The first line of a failure, for a table cell.</summary>
