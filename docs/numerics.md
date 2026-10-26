@@ -128,9 +128,15 @@ property, not the stencil, is what makes a full basis campaign tractable.
 
 **Basis superposition** matches a direct solve to 1.4e-11 V on a 4800 V scale.
 Solving once per electrode at unit potential turns voltage optimisation from a
-solve-per-iteration problem into arithmetic, which every sweep and optimiser
-depends on. It breaks the moment geometry changes, which is why tolerance work
-needs sensitivity fields rather than more superposition.
+solve-per-iteration problem into arithmetic. It breaks the moment geometry
+changes, which is why tolerance work needs sensitivity fields rather than more
+superposition. On real meshes with cut cells it holds to the solver's
+convergence rather than to round-off: on the 0.2 mm quadrupole a DC set summed
+from group channels differs from its direct solve by at most 3.9 uV of 1500 V
+(2.6e-9) and the RF channel by 7.0 uV (5.1e-8), on the two-dimensional lens by
+0.37 uV (1.4e-9). A `FieldBasisPlan` builds fields that way when a caller asks
+(`docs/library.md`); the default decomposition does not, so `run` keeps its
+bits.
 
 ## Cut cells
 

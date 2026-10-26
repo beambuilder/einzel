@@ -939,7 +939,7 @@ public static class GeometryBuilder
     /// <param name="solve">The compiled solve.</param>
     /// <returns>
     /// One list per basis channel, in the order <see cref="SolveChannels"/> and
-    /// <see cref="Build"/> solve them; each the <see cref="ChannelSolve.Holding"/> that solve
+    /// <see cref="Build(CompiledSolvedField, ISolveStore)"/> solve them; each the <see cref="ChannelSolve.Holding"/> that solve
     /// will report.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
@@ -948,11 +948,30 @@ public static class GeometryBuilder
     /// <see cref="Patterns"/> and the same <see cref="Held"/> the mask is built with, so the key
     /// of a channel and the solve it names cannot describe two different problems.
     /// </remarks>
-    public static IReadOnlyList<IReadOnlyList<double>> Holdings(CompiledSolvedField solve)
+    public static IReadOnlyList<IReadOnlyList<double>> Holdings(CompiledSolvedField solve) =>
+        Holdings(solve, null);
+
+    /// <summary>What each declared electrode holds in each channel under DC groups, worked out without solving.</summary>
+    /// <param name="solve">The compiled solve.</param>
+    /// <param name="directGroups">The element's DC groups (<see cref="FieldBasisPlan"/>), or null for none.</param>
+    /// <returns>One list per basis channel, in the order the build solves them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
+    /// <exception cref="ArgumentException">A group names an electrode the element does not declare.</exception>
+    public static IReadOnlyList<IReadOnlyList<double>> Holdings(
+        CompiledSolvedField solve, IReadOnlyList<IReadOnlyList<string>>? directGroups)
     {
         ArgumentNullException.ThrowIfNull(solve);
+        FieldBasisPlan.CheckNames(directGroups, [.. solve.Electrodes.Select(e => e.Name)]);
 
-        return [.. Patterns(solve).Select(potentialOf => HoldingOf(solve, potentialOf))];
+        if (directGroups is not null && solve.Stages.Count == 0 && solve.Drives.Count == 0)
+        {
+            // A plan that leaves no channel is the one static channel, as the build has it.
+            return StaticPlan(solve, directGroups) is { Count: > 0 } plan
+                ? [.. plan.Select(channel => HoldingOf(solve, channel.PotentialOf))]
+                : [HoldingOf(solve, null)];
+        }
+
+        return [.. Patterns(solve, solve.Stages.Count == 0 ? directGroups : null).Select(potentialOf => HoldingOf(solve, potentialOf))];
     }
 
     private static IReadOnlyList<double> HoldingOf(
@@ -1036,7 +1055,7 @@ public static class GeometryBuilder
     /// <returns>The node and channel counts and the bytes.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
     /// <remarks>
-    /// The channels come from the same decomposition <see cref="Build"/> makes, so the count
+    /// The channels come from the same decomposition <see cref="Build(CompiledSolvedField, ISolveStore)"/> makes, so the count
     /// this uses and the solves that run cannot disagree. A plane build solves them one at a
     /// time and keeps each potential, and no channel's mask outlives its solve.
     /// </remarks>
@@ -1060,21 +1079,60 @@ public static class GeometryBuilder
     /// </para>
     /// <para>
     /// <b>A static geometry's entry is null, meaning every electrode as declared</b> - the mask
-    /// <see cref="Build"/> makes, electrode by electrode. It used to be a dictionary keyed by
+    /// <see cref="Build(CompiledSolvedField, ISolveStore)"/> makes, electrode by electrode. It used to be a dictionary keyed by
     /// name, and that was wrong twice. Read from each electrode's scalar it zeroed every edge
     /// profile, whose volts are in its profile, so <c>einzel solve</c> solved the planar
     /// mirror pair with no boards. And a name defaulted to <c>electrode</c> and need not have
     /// been unique, so two unnamed plates at +100 V and -100 V both solved at -100.
     /// </para>
     /// </remarks>
-    private static List<Func<CompiledElectrode, double>?> Patterns(CompiledSolvedField solve)
+    private static List<Func<CompiledElectrode, double>?> Patterns(
+        CompiledSolvedField solve, IReadOnlyList<IReadOnlyList<string>>? directGroups = null)
     {
         if (solve.Drives.Count == 0 && solve.Stages.Count == 0)
         {
             return [null];
         }
 
-        return [.. Groups(solve).Select(group => (Func<CompiledElectrode, double>?)Weighted(group.Pattern))];
+        return [.. Groups(solve, directGroups).Select(group => (Func<CompiledElectrode, double>?)Weighted(group.Pattern))];
+    }
+
+    /// <summary>
+    /// A static element's channels under DC groups, each with its weight: the electrodes in no
+    /// group at their potentials (weight one, left out when they all hold nothing), then each
+    /// group at one volt (weighted by its potential).
+    /// </summary>
+    /// <remarks>
+    /// A group is a unit channel only while its electrodes hold one potential; one whose
+    /// electrodes differ, or an edge profile, whose volts are in its profile, stays with the
+    /// fixed channel. The field is then still the declared one.
+    /// </remarks>
+    private static List<(Func<CompiledElectrode, double> PotentialOf, double Weight)> StaticPlan(
+        CompiledSolvedField solve, IReadOnlyList<IReadOnlyList<string>> directGroups)
+    {
+        var units = directGroups
+            .Select(names => solve.Electrodes
+                .Where(e => names.Contains(e.Name, StringComparer.Ordinal) && e.Shape != ElectrodeShape.EdgeProfile)
+                .ToList())
+            .Where(members => members.Count > 0 && members.All(e => e.Potential == members[0].Potential))
+            .ToList();
+        var grouped = units.SelectMany(members => members.Select(e => e.Name)).ToHashSet(StringComparer.Ordinal);
+
+        Func<CompiledElectrode, double> fixedOf = e => grouped.Contains(e.Name) ? 0.0 : Held(e, null);
+        var channels = new List<(Func<CompiledElectrode, double>, double)>();
+
+        if (solve.Electrodes.Any(e => fixedOf(e) != 0.0))
+        {
+            channels.Add((fixedOf, 1.0));
+        }
+
+        foreach (var members in units)
+        {
+            var names = members.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
+            channels.Add((e => names.Contains(e.Name) ? 1.0 : 0.0, members[0].Potential));
+        }
+
+        return channels;
     }
 
     /// <summary>The basis channels of a driven or sequenced geometry, in the order they are solved.</summary>
@@ -1085,7 +1143,7 @@ public static class GeometryBuilder
     /// trap that fills and then extracts usually shares most of its patterns between the
     /// two, and paying for them twice would be paying for the sequencer rather than for the
     /// physics. Decomposing the states <em>together</em> is the one thing that must not
-    /// happen - see <see cref="DriveChannels.DecomposeStates"/>.
+    /// happen - see <see cref="DriveChannels.DecomposeStates(IReadOnlyList{IReadOnlyList{Excitation}}, IReadOnlyList{bool})"/>.
     /// </para>
     /// <para>
     /// A sinusoid resolves every phase into two fixed quadrature components, so a structure
@@ -1099,11 +1157,12 @@ public static class GeometryBuilder
     /// key names are the channels a run solves, in the same order.
     /// </para>
     /// </remarks>
-    private static List<DriveChannel> Groups(CompiledSolvedField solve)
+    private static List<DriveChannel> Groups(
+        CompiledSolvedField solve, IReadOnlyList<IReadOnlyList<string>>? directGroups = null)
     {
         var (_, _, quadrature) = Clocks(solve.Drives);
 
-        return DriveChannels.DecomposeStates(States(StageStates(solve)), quadrature);
+        return DriveChannels.DecomposeStates(States(StageStates(solve)), quadrature, FieldBasisPlan.Map(directGroups));
     }
 
     /// <summary>Builds, solves, and wraps a declared geometry as a field.</summary>
@@ -1112,13 +1171,37 @@ public static class GeometryBuilder
     /// <returns>The field, and how the solve went.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
     public static (IElectrostaticField Field, SolveReport Report) Build(
-        CompiledSolvedField solve, ISolveStore? store = null)
+        CompiledSolvedField solve, ISolveStore? store = null) =>
+        Build(solve, store, null);
+
+    /// <summary>Builds a declared geometry as a field, with its DC split by groups.</summary>
+    /// <param name="solve">The declared geometry.</param>
+    /// <param name="store">Where to load each channel from or keep it, or null to solve them all.</param>
+    /// <param name="directGroups">The element's DC groups (<see cref="FieldBasisPlan"/>), or null for the default decomposition.</param>
+    /// <returns>The field, and how the solve went.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="solve"/> is null.</exception>
+    /// <exception cref="ArgumentException">A group names an electrode the element does not declare.</exception>
+    public static (IElectrostaticField Field, SolveReport Report) Build(
+        CompiledSolvedField solve, ISolveStore? store, IReadOnlyList<IReadOnlyList<string>>? directGroups)
     {
         ArgumentNullException.ThrowIfNull(solve);
+        FieldBasisPlan.CheckNames(directGroups, [.. solve.Electrodes.Select(e => e.Name)]);
 
-        if (solve.Drives.Count > 0 || solve.Stages.Count > 0)
+        if (solve.Stages.Count > 0)
         {
-            return BuildDriven(solve, store);
+            // A sequence keeps the default decomposition: its stages are weighed against the
+            // channels pattern by pattern, and a plan is about one operating point's DC.
+            return BuildDriven(solve, store, null);
+        }
+
+        if (solve.Drives.Count > 0)
+        {
+            return BuildDriven(solve, store, directGroups);
+        }
+
+        if (directGroups is not null && StaticPlan(solve, directGroups) is { Count: > 0 } plan)
+        {
+            return BuildWeighted(solve, store, plan);
         }
 
         // The static solve is the one channel holding every electrode as declared.
@@ -1172,7 +1255,7 @@ public static class GeometryBuilder
     /// </para>
     /// </remarks>
     private static (IElectrostaticField Field, SolveReport Report) BuildDriven(
-        CompiledSolvedField solve, ISolveStore? store)
+        CompiledSolvedField solve, ISolveStore? store, IReadOnlyList<IReadOnlyList<string>>? directGroups)
     {
         var grid = BuildGrid(solve);
         var keyed = Keyed(solve, store);
@@ -1180,7 +1263,7 @@ public static class GeometryBuilder
 
         // The same channels, in the same order, that the solve key and einzel solve name.
         // Why stages are decomposed one at a time and sinusoids by quadrature: see Groups.
-        var groups = Groups(solve);
+        var groups = Groups(solve, directGroups);
 
         var channels = new List<IElectrostaticField>(groups.Count);
         var direct = new List<double>(groups.Count);
@@ -1202,23 +1285,7 @@ public static class GeometryBuilder
 
             meshWarnings ??= warnings;
 
-            IElectrostaticField basis = new SolvedField2D(
-                potential,
-                new BicubicInterpolant(potential),
-                boundaryIsDiscontinuous: solve.BoundaryIsDiscontinuous,
-                conductors: solve.Electrodes);
-
-            if (solve.Symmetry == SolveSymmetry.Cylindrical)
-            {
-                basis = new AxisymmetricField(basis);
-            }
-
-            if (solve.ReflectAboutX is { } plane)
-            {
-                basis = new SuperposedField([basis, new ReflectedField(basis, plane)]);
-            }
-
-            channels.Add(basis);
+            channels.Add(Basis(solve, potential));
             direct.Add(group.Direct);
             harmonics.Add(group.Harmonics);
 
@@ -1300,6 +1367,63 @@ public static class GeometryBuilder
             anyRamp ? stageEndDirect : null, anyRamp ? stageEndHarmonics : null);
 
         return (sequenced, worst);
+    }
+
+    /// <summary>One solved channel as a field, wrapped as the element's symmetry and reflection ask.</summary>
+    private static IElectrostaticField Basis(CompiledSolvedField solve, ScalarField2D potential)
+    {
+        IElectrostaticField basis = new SolvedField2D(
+            potential,
+            new BicubicInterpolant(potential),
+            boundaryIsDiscontinuous: solve.BoundaryIsDiscontinuous,
+            conductors: solve.Electrodes);
+
+        if (solve.Symmetry == SolveSymmetry.Cylindrical)
+        {
+            basis = new AxisymmetricField(basis);
+        }
+
+        if (solve.ReflectAboutX is { } plane)
+        {
+            basis = new SuperposedField([basis, new ReflectedField(basis, plane)]);
+        }
+
+        return basis;
+    }
+
+    /// <summary>
+    /// Builds a static geometry under DC groups: one solve per channel of <see cref="StaticPlan"/>,
+    /// summed with fixed weights into a field as time-free as the one channel it replaces.
+    /// </summary>
+    private static (IElectrostaticField Field, SolveReport Report) BuildWeighted(
+        CompiledSolvedField solve, ISolveStore? store, List<(Func<CompiledElectrode, double> PotentialOf, double Weight)> plan)
+    {
+        var grid = BuildGrid(solve);
+        var keyed = Keyed(solve, store);
+        var channels = new List<IElectrostaticField>(plan.Count);
+        SolveReport worst = new(true, 0, 0.0, 0.0, 0.0);
+        IReadOnlyList<Core.Results.ValidityWarning>? meshWarnings = null;
+
+        for (var index = 0; index < plan.Count; index++)
+        {
+            var (potential, report, _, _, warnings) =
+                SolvePattern(solve, grid, plan[index].PotentialOf, askMesh: index == 0, keyed);
+
+            meshWarnings ??= warnings;
+            channels.Add(Basis(solve, potential));
+
+            if (report.Cycles > worst.Cycles)
+            {
+                worst = report;
+            }
+        }
+
+        worst = worst with
+        {
+            Warnings = meshWarnings ?? SharedFaceNodes.Warnings(NodesOnSharedFaces(solve, grid)),
+        };
+
+        return (new WeightedSolvedField(channels, [.. plan.Select(channel => channel.Weight)]), worst);
     }
 
     /// <summary>

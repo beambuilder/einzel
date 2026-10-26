@@ -218,14 +218,27 @@ public static class FieldAssembly
     /// <remarks>
     /// Throws on a solve that missed its tolerance, rather than handing back a field
     /// that is indistinguishable from a converged one. Callers that produce a
-    /// reportable result should use <see cref="BuildReported"/> instead and carry the
+    /// reportable result should use <see cref="BuildReported(CompiledModel, Solved.ISolveStore)"/> instead and carry the
     /// warning onto the number, which is what GRD-2 asks for; there is nowhere to
     /// attach a taint on a bare field, so the only honest alternatives here are to
     /// throw or to hide it.
     /// </remarks>
-    public static IElectrostaticField Build(CompiledModel model, Solved.ISolveStore? store = null)
+    public static IElectrostaticField Build(CompiledModel model, Solved.ISolveStore? store = null) =>
+        Build(model, store, null);
+
+    /// <summary>Builds the field described by a compiled model, its DC split as a plan says.</summary>
+    /// <param name="model">The validated model.</param>
+    /// <param name="store">Where each solved channel is loaded from or kept, or null to solve every one.</param>
+    /// <param name="plan">Which electrodes get DC channels of their own, or null for the default decomposition.</param>
+    /// <returns>The assembled field.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
+    /// <exception cref="Core.Errors.EinzelException">A solved element did not converge.</exception>
+    /// <exception cref="ArgumentException">
+    /// The plan names an element the model does not solve, or an electrode an element does not declare.
+    /// </exception>
+    public static IElectrostaticField Build(CompiledModel model, Solved.ISolveStore? store, Solved.FieldBasisPlan? plan)
     {
-        var (field, warnings) = BuildReported(model, store);
+        var (field, warnings) = BuildReported(model, store, plan);
 
         // Narrowed from "any warning at all" to "any warning saying the field is WRONG",
         // and the distinction is about WHO KNOWS THE THING, not about how bad it is.
@@ -276,9 +289,27 @@ public static class FieldAssembly
     /// revision because the report saying so was discarded at this seam.
     /// </remarks>
     public static (IElectrostaticField Field, IReadOnlyList<Core.Results.ValidityWarning> Warnings)
-        BuildReported(CompiledModel model, Solved.ISolveStore? store = null)
+        BuildReported(CompiledModel model, Solved.ISolveStore? store = null) =>
+        BuildReported(model, store, null);
+
+    /// <summary>Builds the field and the warnings its solves earned, its DC split as a plan says.</summary>
+    /// <param name="model">The validated model.</param>
+    /// <param name="store">Where each solved channel is loaded from or kept, or null to solve every one.</param>
+    /// <param name="plan">
+    /// Which electrodes of each solved element get DC channels of their own
+    /// (<see cref="Solved.FieldBasisPlan"/>), or null for the default decomposition. Analytic
+    /// elements and elements the plan does not name are built as they always are.
+    /// </param>
+    /// <returns>The assembled field, and any non-suppressible warnings.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// The plan names an element the model does not solve, or an electrode an element does not declare.
+    /// </exception>
+    public static (IElectrostaticField Field, IReadOnlyList<Core.Results.ValidityWarning> Warnings)
+        BuildReported(CompiledModel model, Solved.ISolveStore? store, Solved.FieldBasisPlan? plan)
     {
         ArgumentNullException.ThrowIfNull(model);
+        plan?.CheckElements(model);
 
         var elements = new List<IElectrostaticField>(model.Fields.Count);
         var warnings = new List<Core.Results.ValidityWarning>();
@@ -332,7 +363,7 @@ public static class FieldAssembly
                 {
                     var geometry = Solved.Geometry3D.Of(element.Solve3D!);
 
-                    var (built, report3d) = Solved.GeometryBuilder3D.BuildField(geometry, store);
+                    var (built, report3d) = Solved.GeometryBuilder3D.BuildField(geometry, store, plan?.GroupsOf(index));
                     elements.Add(built);
                     Note(warnings, report3d, index, "solved3d");
                     break;
@@ -342,7 +373,7 @@ public static class FieldAssembly
                 {
                     // The solve happens here, once per build. Nothing about what
                     // the electrodes add up to is known at this level.
-                    var (plane, report2d) = Solved.GeometryBuilder.Build(element.Solve!, store);
+                    var (plane, report2d) = Solved.GeometryBuilder.Build(element.Solve!, store, plan?.GroupsOf(index));
 
                     // A tilted extrusion axis is applied here rather than baked into the
                     // geometry, because a rotation of a solved field is exact while a

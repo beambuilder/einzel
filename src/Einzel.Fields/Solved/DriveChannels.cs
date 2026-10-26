@@ -112,7 +112,34 @@ public static class DriveChannels
     /// <returns>The channels, each with a pattern and a weight.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="excitations"/> is null.</exception>
     public static List<DriveChannel> Decompose(
-        IReadOnlyList<Excitation> excitations, IReadOnlyList<bool> quadrature)
+        IReadOnlyList<Excitation> excitations, IReadOnlyList<bool> quadrature) =>
+        Decompose(excitations, quadrature, null);
+
+    /// <summary>
+    /// Groups excitations into channels, with the DC of the named electrodes split off the one
+    /// constant supply into a supply per group.
+    /// </summary>
+    /// <param name="excitations">What each electrode holds, in declaration order.</param>
+    /// <param name="quadrature">Per drive, whether it is a sinusoid.</param>
+    /// <param name="directGroups">
+    /// Electrode name to DC group, or null for none: every electrode's DC then feeds the one
+    /// constant supply, as it always has. An electrode in group <c>g</c> feeds a supply of its
+    /// own group instead, so its DC is a channel whose pattern holds the group alone, at one
+    /// volt when the group's electrodes hold equal potentials, and whose weight is that
+    /// potential. Electrodes in no group keep the constant supply between them.
+    /// </param>
+    /// <returns>The channels, each with a pattern and a weight.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="excitations"/> is null.</exception>
+    /// <remarks>
+    /// What a study's field basis is made of: a group whose potential changes from one point to
+    /// the next keeps its pattern and changes only its weight, so the points share their
+    /// solves. Exact like everything else here: a group's pattern is the same at two points
+    /// exactly when its electrodes' potentials are in the same ratio there.
+    /// </remarks>
+    public static List<DriveChannel> Decompose(
+        IReadOnlyList<Excitation> excitations,
+        IReadOnlyList<bool> quadrature,
+        IReadOnlyDictionary<string, int>? directGroups)
     {
         ArgumentNullException.ThrowIfNull(excitations);
         ArgumentNullException.ThrowIfNull(quadrature);
@@ -140,15 +167,15 @@ public static class DriveChannels
 
         var supplies = new List<Supply>();
 
-        Supply Reach(double direct, int drive, double amplitude, double phase)
+        Supply Reach(double direct, int drive, double amplitude, double phase, int group = -1)
         {
             var existing = supplies.FirstOrDefault(t =>
                 t.Direct == direct && t.Drive == drive
-                && t.Amplitude == amplitude && t.Phase == phase);
+                && t.Amplitude == amplitude && t.Phase == phase && t.Group == group);
 
             if (existing is null)
             {
-                existing = new Supply([], direct, drive, amplitude, phase);
+                existing = new Supply([], direct, drive, amplitude, phase, group);
                 supplies.Add(existing);
             }
 
@@ -170,7 +197,8 @@ public static class DriveChannels
             // Drive -1 marks it: no clock, so no phase to distinguish it by.
             if (excitation.Direct != 0.0)
             {
-                Feed(Reach(1.0, -1, 0.0, 0.0), excitation.Name, excitation.Direct);
+                var group = directGroups is not null && directGroups.TryGetValue(excitation.Name, out var g) ? g : -1;
+                Feed(Reach(1.0, -1, 0.0, 0.0, group), excitation.Name, excitation.Direct);
             }
 
             foreach (var tap in excitation.Taps)
@@ -289,7 +317,22 @@ public static class DriveChannels
     /// </para>
     /// </remarks>
     public static List<DriveChannel> DecomposeStates(
-        IReadOnlyList<IReadOnlyList<Excitation>> states, IReadOnlyList<bool> quadrature)
+        IReadOnlyList<IReadOnlyList<Excitation>> states, IReadOnlyList<bool> quadrature) =>
+        DecomposeStates(states, quadrature, null);
+
+    /// <summary>
+    /// The channels a whole sequence needs, with the DC of the named electrodes in a supply per
+    /// group.
+    /// </summary>
+    /// <param name="states">What each electrode holds, one list per stage state.</param>
+    /// <param name="quadrature">Per drive, whether it is a sinusoid.</param>
+    /// <param name="directGroups">Electrode name to DC group, or null for none.</param>
+    /// <returns>The distinct channels, in the order the states first reach them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="states"/> is null.</exception>
+    public static List<DriveChannel> DecomposeStates(
+        IReadOnlyList<IReadOnlyList<Excitation>> states,
+        IReadOnlyList<bool> quadrature,
+        IReadOnlyDictionary<string, int>? directGroups)
     {
         ArgumentNullException.ThrowIfNull(states);
 
@@ -297,7 +340,7 @@ public static class DriveChannels
 
         foreach (var state in states)
         {
-            foreach (var group in Decompose(state, quadrature))
+            foreach (var group in Decompose(state, quadrature, directGroups))
             {
                 if (!channels.Any(existing => SamePattern(existing.Pattern, group.Pattern)))
                 {
@@ -370,7 +413,8 @@ public static class DriveChannels
         double Direct,
         int Drive,
         double Amplitude,
-        double Phase);
+        double Phase,
+        int Group);
 
     /// <summary>
     /// Scales a supply's potentials so the leading non-zero one is exactly one, and

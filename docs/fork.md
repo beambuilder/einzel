@@ -145,6 +145,19 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **The field builders can give chosen electrodes DC channels of their own.**
+  `FieldAssembly.BuildReported(model, store, plan)` and `SolveHash.Of(model,
+  plan)` take a `FieldBasisPlan`: per solved element, groups of electrodes whose
+  DC leaves the one constant supply and becomes a unit channel weighted by the
+  group's potential, the rest kept in one fixed channel. Two models that differ
+  only in a group's potential then share every key. A static element under a
+  plan is a `WeightedSolvedField`, time-free as the single channel it replaces;
+  a driven one a `DrivenSolvedField` with one more channel per group. On the
+  plates and a small volume the planned field equals the direct one to 1e-6 V;
+  without a plan every key and every bit is as before; a plan whose groups
+  overlap, or that names an electrode the element does not declare, is refused.
+  SPEC Amendment 63; [the library](library.md#a-drive-per-ion). PR #16.
+
 - **A study's points share the nominal channels in memory, and its manifest says
   what it solved and loaded.** Each study builds its fields through one bounded
   in-process memo over the field cache (the first evaluation's channels pinned,
