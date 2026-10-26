@@ -511,7 +511,7 @@ flew 48 ion(s): 48 StruckElectrode
 | `--json` | Print the result document; the bytes are the stored `.fly.json`'s |
 | `--project <dir>` | Project root; otherwise inferred from the model |
 | `--no-cache` | Solve the field rather than load or keep it |
-| `--dry-run` | Validate and expand, print the row count, the seeds and how many of the field's channels the cache holds, write nothing |
+| `--dry-run` | Validate and expand, print the row count, the seeds and how many of the field's channels the cache holds (for a list with overrides, per group as well), write nothing |
 | `--ladder` | Three tolerances per row, the finest reported with its residual. Three flights per row |
 | `--vtu` | Every row's sampled path, one polyline per ion, written to `.einzel/`. With `--ladder` the paths are a fourth flight per row at the model tolerance, the ladder's first rung |
 
@@ -529,6 +529,50 @@ row born more than 1000 maximum flight times late is refused at its `birthTime` 
 resolved no better than one unit in the last place of its birth time. A CSV states
 the mass, charge and launch of every ion and nothing in it is defaulted, but it is
 checked against the model as a JSON list is.
+
+**Rows that override parameters fly in groups.** A row or set may carry
+[`overrides`](ion-lists.md#parameter-overrides), values for the model's free
+parameters. `fly` groups the rows by them (same names, same bits) and, before any
+field is built, compiles the model once per group with the group's values, as a
+sweep does (`ModelValidator.Validate` with overrides), and refuses the group when
+the compiled model is refused or differs from the model as written in anything
+but its fields: the ion, the source, the detector, the integration settings, the
+maximum flight time or the gas ("an override may change only the fields", at the
+group's `overrides`, exit 1). A row's defaults and its `rfPhase` are resolved
+against the model as written, and an override that moved them would leave the row
+and its field disagreeing. A drive frequency is a field, but `rfPhase` is turned
+into a birth time with the frequency as written, so a group that changes a drive
+frequency and holds a row born by `rfPhase` is refused at its `overrides` ("an
+override that changes the drive frequency moves what rfPhase means", exit 1);
+state `birthTime` on those rows. Then the groups fly one after another, in the order
+their first row appears: each builds its field through the cache, behind an
+in-process memo that keeps every channel loaded or solved so far, so a channel
+two groups share is read from disk (or solved) once; and its rows fly at once,
+each written back at its index in the list and drawing its collisions from the
+gas seed plus that index, so a row's flight does not depend on which rows share
+its group. A list without overrides is one group, the model itself, as before.
+
+```
+einzel fly models/quad_param.json --ions ions/tune_line.ions.json --dry-run
+would fly 1488 ion(s) from ions/tune_line.ions.json through models/quad_param.json on up to 20 thread(s)
+  seeds []; field: 32 of 32 channel(s) in the cache
+  group 0 (U = 20.793253499922816 V): 48 ion(s), 2 of 2 channel(s) in the cache
+  ...
+```
+
+What a group costs is what its overrides change in the solved channels: a drive
+amplitude, or a phase common to every tap of a single-phase drive, is the same
+channels with other weights; a new DC pattern is one solve; any change to a static
+(undriven) model is a solve, since a static field is one channel at its absolute
+potentials. A dry run shows how many of each group's channels are cached before
+any is solved, which is the cold cost: about 30 s and 2.9 GB per new DC pattern of
+the 0.2 mm quadrupole. The memo holds every channel until the flight ends, 68 MB
+per channel of that quadrupole (64 DC patterns and one RF channel are about
+4.4 GB). In a gas, each group's regime is measured on the model's own ion through
+that group's field, beside the half-space depth check of that group's model, and a
+warning the groups share is reported once. When one warning code carries different
+messages in different groups, each message names its group: `group 2 (f = 0.05
+MHz): about 1.59 collisions happen per drive cycle, ...`.
 
 **Regime.** In a gas, `fly` measures the regime numbers as `run` does, for the model's
 own ion over one flight at the model tolerance, and carries the same `regime.*`
@@ -549,7 +593,13 @@ and in `inputHashes` the ion list's bytes keyed by its project-relative path, so
 `verify` reports a fly whose list was edited since. `seeds` are the list's set seeds
 in document order, then the gas seed when the model has a gas (a CSV list has no set
 seeds). `maxParallelism` is recorded as what it is, a cost: rows are written by
-index and are the same at any setting.
+index and are the same at any setting. For a list with overrides, `overrideGroups`
+lists each group in flight order: its index, its overrides (the value and unit as
+written, absent for a CSV list, and the SI value the model was compiled with), its
+row count, the channel hashes its field was built from, how many channels it read
+from the cache, solved, or took from an earlier group (`loaded`, `solved`,
+`reused`; a dry run gives `cachedChannels` instead) and its field-ready seconds;
+`solves` and `fieldCache` are then the union over the groups, each channel once.
 
 **The result** (`<model>.<list>.fly.json`) carries the manifest, `launched`, counts
 per outcome and per struck surface, `integratorFailures`, the field-ready and fly
@@ -557,9 +607,14 @@ seconds, the warnings of the field, the model and the regime, and one row per io
 in list order: `id`, `tag`, `outcome`, `surface`, the final position in mm, the
 flight time in µs **from the ion's birth**, `timeHalfWidthUs` with `--ladder`,
 accepted and rejected steps, `collisions`, the largest relative energy drift and
-the codes of its own warnings. `timeUs` is the flight time in seconds times 10^6, as
+the codes of its own warnings, and with overrides its `group`. `timeUs` is the flight time in seconds times 10^6, as
 a cloud's events in a `run` result give it; a single-ion `run` converts through the
-unit system and can differ from it in the last place. `report` names it as an
+unit system and can differ from it in the last place. With overrides the result
+also carries `groups`, the number of groups; its field-ready and fly seconds are
+summed over them; `.fly.csv` adds `group` and one `p:<name>` column per overridden
+parameter in SI after its own columns, and `.fly.ions.csv` its `p:` columns, so
+flying it again flies the same groups. A list without overrides writes none of
+these, byte for byte the files of before. `report` names it as an
 answer stored and not drawn, as it does a study's.
 
 **One stem per model and list name.** The files are named

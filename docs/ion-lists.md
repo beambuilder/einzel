@@ -153,9 +153,12 @@ as `{ "expression": "Ek", "unit": "eV" }`) are evaluated with its overrides
 layered on the model's parameters, as its field is: a row that overrides `Ek`
 and states its energy as `Ek` launches at the overridden value.
 
-Until `fly` flies the groups (PR #14), it refuses a list with overrides at the
-first row's or set's `overrides`, rather than fly every row through the model as
-written.
+**`rfPhase` under another drive frequency is refused.** `rfPhase` is turned into
+a birth time with the model's drive frequency as written. A group whose overrides
+change a drive frequency and that holds a row born by `rfPhase` (explicit or
+generated) is refused at the group's `overrides` when the list is flown: an
+override that changes the drive frequency moves what `rfPhase` means. State
+`birthTime` on these rows; a row with `birthTime` flies under any frequency.
 
 **Groups.** Rows are grouped by their overrides: same parameter names and the same
 bits of their SI values (`1 V`, `1.0 V` and `1000 mV` are one group; key order
@@ -341,7 +344,9 @@ reads its defaults from it.
 | `UNITS_REQUIRED` | `/ions/0/overrides/U` | an override without its unit |
 | `VALUE_OUT_OF_BOUNDS` | `/ionSets/0/overrides/U` | outside the parameter's declared bounds |
 | `VALUE_OUT_OF_BOUNDS` | `/ions/0/overrides` | "with these overrides the model is refused at /parameters/W": a derived parameter leaves its bounds |
-| `SCHEMA_INVALID` | `/ions/0/overrides` | (fly) "parameter overrides are not flown yet (PR #14)": any list with overrides, until PR #14 |
+| `VALUE_OUT_OF_BOUNDS`, `SCHEMA_INVALID`, … | `/ions/0/overrides` | (fly) "with these overrides the model is refused at <pointer>": the model compiled with the group's values is refused, by its validator or by what `fly` refuses (a source cloud, space charge, …) |
+| `SCHEMA_INVALID` | `/ions/0/overrides` | (fly) "an override may change only the fields": the group's model changes the ion, source, detector, integration settings, flight-time limit or gas |
+| `SCHEMA_INVALID` | `/ions/0/overrides` | (fly) "an override that changes the drive frequency moves what rfPhase means": a group with a row born by `rfPhase` overrides a drive frequency |
 | `SCHEMA_INVALID` | `/3/p:X` | a `.csv` column naming no free parameter, at the first row of its group |
 
 ## The expanded `.ions.csv`
@@ -406,6 +411,13 @@ the cloud of a `run`:
 - **Seeds.** Row k's collisions are drawn from the gas seed plus k, its index
   in the list, not its id: row k of a `cloud` set is ion k of the cloud `run`
   flies, collisions included, and appending rows leaves the earlier ones alone.
+- **Override groups.** Rows with [parameter overrides](#parameter-overrides)
+  fly group by group, each group through the field of the model compiled with
+  its values (`fly` builds them one after another through the cache, each
+  channel read or solved once per flight). A group's rows are flown with their
+  indices in the whole list, so their collision seeds and their places in the
+  result are the ones they have without grouping, and an override equal to the
+  model's own value flies the row the list without it flies, to the bit.
 - **A row that throws** does not stop the others: the core carries the exception
   as that row's failure and flies the rest. The integrator itself throws nothing
   in flight, so a thrown row is a defect, and the caller rethrows the first one
@@ -447,7 +459,7 @@ writes:
 | `results/quad.corpus48.fly.manifest.json` | the run manifest: model hash, the list's hash in `inputHashes`, the seeds (none here: nothing is drawn), `maxParallelism` |
 | `results/quad.corpus48.fly.json` | per ion: id, tag, outcome, surface, final position in mm, flight time in µs since birth, steps, rejected steps, collisions, energy drift, warnings; counts per outcome and surface; timings |
 | `results/quad.corpus48.fly.csv` | the same rows as `id,tag,outcome,surface,x_mm,y_mm,z_mm,time_us,steps,rejected,collisions,warnings` |
-| `results/quad.corpus48.fly.ions.csv` | the expanded rows; `fly --ions` on it flies the same ions again |
+| `results/quad.corpus48.fly.ions.csv` | the expanded rows; `fly --ions` on it flies the same ions again (with overrides, in the same groups: the `p:` columns) |
 | `.einzel/quad.corpus48.fly.trajectories.vtu` | with `--vtu`: every ion's path as one polyline, `id` and `outcome` as cell data, `time_us` as point data; large and regenerable, so beside the cache as `run`'s trajectory is |
 
 The files are named by the model and the list (`a.ions.json` and `a.csv` share a
