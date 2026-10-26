@@ -74,6 +74,13 @@ public sealed record SweepOutcome
 
     /// <summary>Files written, relative to the project root.</summary>
     public required IReadOnlyList<string> Artifacts { get; init; }
+
+    /// <summary>
+    /// What the study's fields will cost: the channels at the nominal model and the study's
+    /// extreme points, how many the cache holds, and the predicted peak. Set by a dry run and
+    /// absent from a result, whose manifest records what was actually solved and loaded.
+    /// </summary>
+    public StudyFieldSurvey? Field { get; init; }
 }
 
 /// <summary>One point of a scan, as it is reported.</summary>
@@ -138,6 +145,13 @@ public sealed record ScanOutcome
 
     /// <summary>Files written, relative to the project root.</summary>
     public required IReadOnlyList<string> Artifacts { get; init; }
+
+    /// <summary>
+    /// What the study's fields will cost: the channels at the nominal model and the study's
+    /// extreme points, how many the cache holds, and the predicted peak. Set by a dry run and
+    /// absent from a result, whose manifest records what was actually solved and loaded.
+    /// </summary>
+    public StudyFieldSurvey? Field { get; init; }
 }
 
 /// <summary>Where a scan's figure changes fastest, on the grid it was computed on.</summary>
@@ -226,6 +240,13 @@ public sealed record BoundaryOutcome
 
     /// <summary>Files written, relative to the project root.</summary>
     public required IReadOnlyList<string> Artifacts { get; init; }
+
+    /// <summary>
+    /// What the study's fields will cost: the channels at the nominal model and the study's
+    /// extreme points, how many the cache holds, and the predicted peak. Set by a dry run and
+    /// absent from a result, whose manifest records what was actually solved and loaded.
+    /// </summary>
+    public StudyFieldSurvey? Field { get; init; }
 }
 
 /// <summary>What an optimisation found.</summary>
@@ -276,6 +297,13 @@ public sealed record OptimiseOutcome
 
     /// <summary>Files written, relative to the project root.</summary>
     public required IReadOnlyList<string> Artifacts { get; init; }
+
+    /// <summary>
+    /// What the study's fields will cost: the channels at the nominal model and the study's
+    /// extreme points, how many the cache holds, and the predicted peak. Set by a dry run and
+    /// absent from a result, whose manifest records what was actually solved and loaded.
+    /// </summary>
+    public StudyFieldSurvey? Field { get; init; }
 }
 
 /// <summary>
@@ -322,7 +350,7 @@ public static class StudyCommand
         double energySpread,
         int ions,
         WarningLedger ledger,
-        ISolveStore? store,
+        StudyFieldRun fields,
         out ExtensionObjective.Provenance? provenance)
     {
         // THE SINK IS PER EVALUATION, NOT PER STUDY. Baking `ledger.Add` into one
@@ -332,8 +360,9 @@ public static class StudyCommand
         // evaluation's warning because another had just earned the same code.
         //
         // Rebuilding the evaluator per evaluation costs a name lookup and a delegate,
-        // which is nothing against the solve every evaluation does anyway.
+        // which is nothing against the field build and the flights every evaluation makes.
         Func<EvaluationWarnings, Func<CompiledModel, double?>> build;
+        var store = fields.Store;
 
         if (!ExtensionObjective.Names(name))
         {
@@ -356,10 +385,12 @@ public static class StudyCommand
 
         // One evaluation is one draw however many warnings it emitted, and the
         // count is closed even when the evaluation throws - a study that dies
-        // half way still has to say what it saw on the way.
+        // half way still has to say what it saw on the way. The first evaluation's
+        // channels are pinned in the study's memo however it ended.
         return model =>
         {
             var evaluation = ledger.BeginEvaluation();
+            fields.Record(model);
 
             try
             {
@@ -368,6 +399,7 @@ public static class StudyCommand
             finally
             {
                 evaluation.Close();
+                fields.Evaluated();
             }
         };
     }
@@ -392,8 +424,13 @@ public static class StudyCommand
         long seed,
         ExtensionObjective.Provenance? extension,
         DateTimeOffset timestampUtc,
-        IReadOnlyDictionary<string, string> inputHashes)
+        IReadOnlyDictionary<string, string> inputHashes,
+        StudyFieldRun fields,
+        IReadOnlyList<double[]>? points,
+        int maxParallelism)
     {
+        var (solves, uses) = fields.Union(points);
+
         var manifest = new RunManifest
         {
             ModelHash = ContentHash.OfText(modelText),
@@ -410,6 +447,14 @@ public static class StudyCommand
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
             TransportMode = transportMode,
             ComputePath = EngineBuild.ComputePath,
+
+            // Every key an evaluation built its field from and what became of each channel in
+            // the cache, in point order; how many evaluations could run at once; and the
+            // seconds spent loading and solving channels.
+            Solves = solves,
+            FieldCache = uses,
+            MaxParallelism = maxParallelism,
+            FieldSeconds = fields.Memo.FieldSeconds,
             Seeds = [seed],
             Extensions = extension is null ? [] : [extension.Identity],
             Interpreter = extension?.Interpreter,
@@ -483,6 +528,9 @@ public static class StudyCommand
             });
         }
 
+        // A budget in a unit that is not memory is refused here, before anything is solved.
+        _ = StudyBinding.MemoryBudget(study);
+
         // Relative to the study, not to the working directory: a study travels
         // with the project and should mean the same thing from anywhere in it.
         var modelPath = Path.GetFullPath(
@@ -496,15 +544,25 @@ public static class StudyCommand
     /// <param name="project">Where artifacts belong.</param>
     /// <param name="dryRun">Report what would be done and compute nothing (CLI-4).</param>
     /// <param name="store">
-    /// Where each evaluation loads its solved field channels from and keeps them, or null to
-    /// solve every one. A study that varies no geometric parameter solves once and loads after.
+    /// Where the study's memo loads solved channels from and keeps them, or null to solve every
+    /// one. A study whose points keep the nominal model's channels solves them once, if at all,
+    /// and every point shares them in memory.
+    /// </param>
+    /// <param name="announce">Where the study's diagnostics go: its memory warning and its field line.</param>
+    /// <param name="availableMemoryBytes">
+    /// What the process may use, for the memory warning; this machine's when omitted.
     /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="studyPath"/> is null or blank.</exception>
     /// <exception cref="EinzelException">The study or the model does not validate.</exception>
     public static SweepOutcome Sweep(
-        string studyPath, ProjectLayout project, bool dryRun = false, ISolveStore? store = null)
+        string studyPath,
+        ProjectLayout project,
+        bool dryRun = false,
+        ISolveStore? store = null,
+        Action<string>? announce = null,
+        long? availableMemoryBytes = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -513,6 +571,7 @@ public static class StudyCommand
         var channels = StudyBinding.Channels(study);
         var modelText = File.ReadAllText(modelPath);
         var document = ModelJson.Parse(modelText);
+        var survey = Survey(study, document, modelPath, project, store, announce, availableMemoryBytes);
 
         if (dryRun)
         {
@@ -526,14 +585,16 @@ public static class StudyCommand
                 Draws = study.Draws,
                 Sensitivity = [],
                 Artifacts = [],
+                Field = survey,
             };
         }
 
         var inputHashes = RunInputs.Capture(document, modelPath, project.Root, absolute);
         var ledger = new WarningLedger();
 
+        var fields = new StudyFieldRun(store, study, channels.Select(channel => channel.Parameter));
         var evaluate = Evaluate(
-            figure.Name, project, study.EnergySpread, study.Ions, ledger, store, out var extension);
+            figure.Name, project, study.EnergySpread, study.Ions, ledger, fields, out var extension);
 
         var result = ToleranceStudy.Run(
             document,
@@ -545,6 +606,23 @@ public static class StudyCommand
             figure.Dimension,
             Path.GetDirectoryName(modelPath),
             study.MaxParallelism);
+
+        announce?.Invoke(fields.Line());
+
+        // The sweep's own order of points: its draws, then each channel's two extremes.
+        var nominal = fields.Nominal;
+        var surface = ModelValidator.Validate(document, null, Path.GetDirectoryName(modelPath)).Model?.Parameters;
+        List<double[]> points = [.. result.Draws.Select(draw => fields.Values(nominal, draw.Parameters))];
+
+        if (study.OneAtATime && surface is not null && nominal.Length > 0)
+        {
+            foreach (var channel in channels.Where(channel => surface.Parameters.ContainsKey(channel.Parameter)))
+            {
+                var (low, high) = channel.Extremes(surface[channel.Parameter]);
+                points.Add(fields.Values(nominal, new Dictionary<string, Core.Units.Quantity> { [channel.Parameter] = low }));
+                points.Add(fields.Values(nominal, new Dictionary<string, Core.Units.Quantity> { [channel.Parameter] = high }));
+            }
+        }
 
         // One conversion from SI into the figure's unit, applied to everything the
         // sweep reports, so nothing leaves here as a bare number under a label it
@@ -577,7 +655,8 @@ public static class StudyCommand
                     project, absolute, "sweep", modelPath, modelText,
                     document.SchemaVersion,
                     document.Transport?.Mode ?? "trajectory", study.Seed, extension,
-                    DateTimeOffset.UtcNow, inputHashes),
+                    DateTimeOffset.UtcNow, inputHashes,
+                    fields, points, Math.Max(1, study.MaxParallelism ?? Environment.ProcessorCount)),
             ],
         };
     }
@@ -587,8 +666,13 @@ public static class StudyCommand
     /// <param name="project">Where artifacts belong.</param>
     /// <param name="dryRun">Report what would be done and compute nothing (CLI-4).</param>
     /// <param name="store">
-    /// Where each evaluation loads its solved field channels from and keeps them, or null to
-    /// solve every one. A study that varies no geometric parameter solves once and loads after.
+    /// Where the study's memo loads solved channels from and keeps them, or null to solve every
+    /// one. A study whose points keep the nominal model's channels solves them once, if at all,
+    /// and every point shares them in memory.
+    /// </param>
+    /// <param name="announce">Where the study's diagnostics go: its memory warning and its field line.</param>
+    /// <param name="availableMemoryBytes">
+    /// What the process may use, for the memory warning; this machine's when omitted.
     /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
@@ -601,7 +685,12 @@ public static class StudyCommand
     /// file beside the model, and a form an agent can author.
     /// </remarks>
     public static ScanOutcome Scan(
-        string studyPath, ProjectLayout project, bool dryRun = false, ISolveStore? store = null)
+        string studyPath,
+        ProjectLayout project,
+        bool dryRun = false,
+        ISolveStore? store = null,
+        Action<string>? announce = null,
+        long? availableMemoryBytes = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -610,6 +699,7 @@ public static class StudyCommand
         var axis = StudyBinding.Axis(study);
         var modelText = File.ReadAllText(modelPath);
         var document = ModelJson.Parse(modelText);
+        var survey = Survey(study, document, modelPath, project, store, announce, availableMemoryBytes);
 
         var unit = study.Scan!.Unit!;
         var spacing = axis.Spacing.ToString().ToLowerInvariant();
@@ -627,18 +717,22 @@ public static class StudyCommand
                 Succeeded = 0,
                 Points = [],
                 Artifacts = [],
+                Field = survey,
             };
         }
 
         var inputHashes = RunInputs.Capture(document, modelPath, project.Root, absolute);
         var ledger = new WarningLedger();
 
+        var fields = new StudyFieldRun(store, study, [axis.Parameter]);
         var evaluate = Evaluate(
-            figure.Name, project, study.EnergySpread, study.Ions, ledger, store, out var extension);
+            figure.Name, project, study.EnergySpread, study.Ions, ledger, fields, out var extension);
 
         var result = ParameterScan.Run(
             document, axis, evaluate, Path.GetDirectoryName(modelPath),
             study.MaxParallelism);
+
+        announce?.Invoke(fields.Line());
 
         // One conversion out of SI for the figure and one for the scan variable, so
         // nothing leaves here as a bare number under a label it does not match.
@@ -683,7 +777,9 @@ public static class StudyCommand
                     project, absolute, "scan", modelPath, modelText,
                     document.SchemaVersion,
                     document.Transport?.Mode ?? "trajectory", study.Seed, extension,
-                    DateTimeOffset.UtcNow, inputHashes),
+                    DateTimeOffset.UtcNow, inputHashes,
+                    fields, [.. Enumerable.Range(0, axis.Points).Select(index => new[] { axis.At(index).SiValue })],
+                    Math.Max(1, study.MaxParallelism ?? Environment.ProcessorCount)),
             ],
         };
     }
@@ -693,8 +789,13 @@ public static class StudyCommand
     /// <param name="project">Where artifacts belong.</param>
     /// <param name="dryRun">Report what would be done and compute nothing (CLI-4).</param>
     /// <param name="store">
-    /// Where each evaluation loads its solved field channels from and keeps them, or null to
-    /// solve every one. A study that varies no geometric parameter solves once and loads after.
+    /// Where the study's memo loads solved channels from and keeps them, or null to solve every
+    /// one. A study whose points keep the nominal model's channels solves them once, if at all,
+    /// and every point shares them in memory.
+    /// </param>
+    /// <param name="announce">Where the study's diagnostics go: its memory warning and its field line.</param>
+    /// <param name="availableMemoryBytes">
+    /// What the process may use, for the memory warning; this machine's when omitted.
     /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
@@ -707,7 +808,12 @@ public static class StudyCommand
     /// five hundred and one.
     /// </remarks>
     public static BoundaryOutcome Boundary(
-        string studyPath, ProjectLayout project, bool dryRun = false, ISolveStore? store = null)
+        string studyPath,
+        ProjectLayout project,
+        bool dryRun = false,
+        ISolveStore? store = null,
+        Action<string>? announce = null,
+        long? availableMemoryBytes = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -716,6 +822,7 @@ public static class StudyCommand
         var (axis, threshold, sense, resolution, budget) = StudyBinding.Boundary(study);
         var modelText = File.ReadAllText(modelPath);
         var document = ModelJson.Parse(modelText);
+        var survey = Survey(study, document, modelPath, project, store, announce, availableMemoryBytes);
 
         var unit = study.Boundary!.Unit!;
         var inside = sense.ToString().ToLowerInvariant();
@@ -735,14 +842,16 @@ public static class StudyCommand
                 ResolvedFraction = double.NaN,
                 Converged = false,
                 Artifacts = [],
+                Field = survey,
             };
         }
 
         var inputHashes = RunInputs.Capture(document, modelPath, project.Root, absolute);
         var ledger = new WarningLedger();
 
+        var fields = new StudyFieldRun(store, study, [axis.Parameter]);
         var evaluate = Evaluate(
-            figure.Name, project, study.EnergySpread, study.Ions, ledger, store, out var extension);
+            figure.Name, project, study.EnergySpread, study.Ions, ledger, fields, out var extension);
 
         var result = BoundarySearch.Run(
             document,
@@ -753,6 +862,8 @@ public static class StudyCommand
             resolution,
             budget,
             Path.GetDirectoryName(modelPath));
+
+        announce?.Invoke(fields.Line());
 
         var outcome = new BoundaryOutcome
         {
@@ -782,7 +893,8 @@ public static class StudyCommand
                     project, absolute, "boundary", modelPath, modelText,
                     document.SchemaVersion,
                     document.Transport?.Mode ?? "trajectory", study.Seed, extension,
-                    DateTimeOffset.UtcNow, inputHashes),
+                    DateTimeOffset.UtcNow, inputHashes,
+                    fields, null, 1),
             ],
         };
     }
@@ -792,15 +904,25 @@ public static class StudyCommand
     /// <param name="project">Where artifacts belong.</param>
     /// <param name="dryRun">Report what would be done and compute nothing (CLI-4).</param>
     /// <param name="store">
-    /// Where each evaluation loads its solved field channels from and keeps them, or null to
-    /// solve every one. A study that varies no geometric parameter solves once and loads after.
+    /// Where the study's memo loads solved channels from and keeps them, or null to solve every
+    /// one. A study whose points keep the nominal model's channels solves them once, if at all,
+    /// and every point shares them in memory.
+    /// </param>
+    /// <param name="announce">Where the study's diagnostics go: its memory warning and its field line.</param>
+    /// <param name="availableMemoryBytes">
+    /// What the process may use, for the memory warning; this machine's when omitted.
     /// </param>
     /// <returns>The outcome.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="studyPath"/> is null or blank.</exception>
     /// <exception cref="EinzelException">The study or the model does not validate.</exception>
     public static OptimiseOutcome Optimise(
-        string studyPath, ProjectLayout project, bool dryRun = false, ISolveStore? store = null)
+        string studyPath,
+        ProjectLayout project,
+        bool dryRun = false,
+        ISolveStore? store = null,
+        Action<string>? announce = null,
+        long? availableMemoryBytes = null)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -811,6 +933,7 @@ public static class StudyCommand
         var sense = StudyBinding.Sense(study, figure);
         var modelText = File.ReadAllText(modelPath);
         var document = ModelJson.Parse(modelText);
+        var survey = Survey(study, document, modelPath, project, store, announce, availableMemoryBytes);
 
         if (dryRun)
         {
@@ -828,16 +951,19 @@ public static class StudyCommand
                 Converged = false,
                 History = [],
                 Artifacts = [],
+                Field = survey,
             };
         }
 
         var inputHashes = RunInputs.Capture(document, modelPath, project.Root, absolute);
         var ledger = new WarningLedger();
 
+        var fields = new StudyFieldRun(store, study, variables.Select(variable => variable.Parameter));
+
         var result = Optimiser.Run(
             document,
             variables,
-            Evaluate(figure.Name, project, study.EnergySpread, study.Ions, ledger, store, out var extension),
+            Evaluate(figure.Name, project, study.EnergySpread, study.Ions, ledger, fields, out var extension),
             sense,
             algorithm,
             new OptimisationSettings
@@ -849,6 +975,8 @@ public static class StudyCommand
                 Seed = study.Seed,
             },
             Path.GetDirectoryName(modelPath));
+
+        announce?.Invoke(fields.Line());
 
         var best = new Dictionary<string, MeasuredJson>(StringComparer.Ordinal);
 
@@ -886,9 +1014,53 @@ public static class StudyCommand
                     project, absolute, "optimise", modelPath, modelText,
                     document.SchemaVersion,
                     document.Transport?.Mode ?? "trajectory", study.Seed, extension,
-                    DateTimeOffset.UtcNow, inputHashes),
+                    DateTimeOffset.UtcNow, inputHashes,
+                    fields, null, 1),
             ],
         };
+    }
+
+    /// <summary>
+    /// Surveys a study's fields before it starts, and warns when its predicted peak will not
+    /// fit in what this process may use.
+    /// </summary>
+    /// <remarks>
+    /// Null when the survey cannot be made - a model that does not compile, a study the driver
+    /// will refuse - so that the driver, not the survey, reports what is wrong with it.
+    /// </remarks>
+    private static StudyFieldSurvey? Survey(
+        StudyDocument study,
+        ModelDocument document,
+        string modelPath,
+        ProjectLayout project,
+        ISolveStore? store,
+        Action<string>? announce,
+        long? availableMemoryBytes)
+    {
+        StudyFieldSurvey? survey;
+
+        try
+        {
+            survey = StudyFields.Survey(
+                study, document, Path.GetDirectoryName(modelPath), store is FieldCache ? project : null);
+        }
+        catch (EinzelException)
+        {
+            return null;
+        }
+
+        var available = availableMemoryBytes ?? GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+
+        if (survey is not null && available > 0 && survey.PeakMiB * 1024.0 * 1024.0 > available)
+        {
+            announce?.Invoke(
+                "  warning: " + EstimateCommand.CapacityNote(survey.PeakMiB, available, "this study's")
+                + (survey.PointChannels > 0 && survey.MaxParallelism > 1
+                    ? " Its points solve channels of their own, so a lower maxParallelism lowers it."
+                    : string.Empty));
+        }
+
+        return survey;
     }
 
     /// <summary>An empty envelope, for a dry run that computed nothing.</summary>

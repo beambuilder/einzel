@@ -123,7 +123,9 @@ public sealed class StudyWarningTests : IDisposable
         // difference between a corner of the tolerance box and a study to discard.
         Assert.Contains("evaluations)", missed.GetProperty("message").GetString()!, StringComparison.Ordinal);
 
-        Assert.Equal(string.Empty, stderr);
+        // On stderr the study's one field line, as a run prints its own, and no warning: under
+        // --json the warnings are in the document.
+        Assert.StartsWith("  field: ", Assert.Single(stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries)).TrimEnd('\r'), StringComparison.Ordinal);
     }
 
     [Fact]

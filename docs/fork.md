@@ -145,6 +145,24 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A study's points share the nominal channels in memory, and its manifest says
+  what it solved and loaded.** Each study builds its fields through one bounded
+  in-process memo over the field cache (the first evaluation's channels pinned,
+  the rest within four times their size or the study's `memoryBudget`), and
+  `transmission` and `confined` build one field per evaluation rather than one
+  per ensemble member. Study manifests record `solves`, `fieldCache`,
+  `maxParallelism` and `fieldSeconds` in point order; a study prints one field
+  line on stderr; `--dry-run` lists the channels at the nominal model and the
+  study's ends and how many are cached; a study whose predicted peak will not fit
+  says so before it starts. `estimate` charges a solve only where a point adds a
+  channel, counts the nominal evaluation and the cache, and states a peak that
+  multiplies by the evaluations solving at once. Measured on the 0.2 mm
+  quadrupole: an 11-point amplitude scan warm in 7.9 s against 39.7 s, peak
+  working set 323 MB against 1,030 MB (5.0 s and 323 MB at two at once, against
+  24.3 s and 2.8 GB); cold in 73.3 s against 97.7 s; `estimate` 77 s cold and 7 s
+  warm against 73.3 s and 7.9 s measured. Study results are byte-identical to
+  before on eight studies. SPEC Amendment 62; [the CLI](cli.md#studies). PR #15.
+
 - **`einzel fly` flies each set of parameter overrides through its own field,
   and one list replaces a process per scan point.** Rows group by their
   overrides; each group's model is compiled with them and refused if it differs

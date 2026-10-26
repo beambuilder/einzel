@@ -191,7 +191,8 @@ public static class Program
         var studyPath = Path.GetFullPath(options.Positional[0]);
         var root = options.Value("project") ?? InferProjectRoot(studyPath);
         var project = new ProjectLayout(root);
-        var outcome = StudyCommand.Sweep(studyPath, project, options.Has("dry-run"), CacheFor(project, options));
+        var outcome = StudyCommand.Sweep(
+            studyPath, project, options.Has("dry-run"), CacheFor(project, options), Console.Error.WriteLine);
 
         if (options.Has("json"))
         {
@@ -205,6 +206,7 @@ public static class Program
             Console.Out.WriteLine(string.Create(
                 invariant,
                 $"would sweep {outcome.Draws} draws of {outcome.FigureOfMerit.Name} over {outcome.ModelPath}"));
+            WriteFieldPlan(outcome.Field);
 
             return (int)ExitCode.Success;
         }
@@ -282,7 +284,8 @@ public static class Program
         var studyPath = Path.GetFullPath(options.Positional[0]);
         var root = options.Value("project") ?? InferProjectRoot(studyPath);
         var project = new ProjectLayout(root);
-        var outcome = StudyCommand.Scan(studyPath, project, options.Has("dry-run"), CacheFor(project, options));
+        var outcome = StudyCommand.Scan(
+            studyPath, project, options.Has("dry-run"), CacheFor(project, options), Console.Error.WriteLine);
 
         if (options.Has("json"))
         {
@@ -297,6 +300,7 @@ public static class Program
                 invariant,
                 $"would scan {outcome.Parameter} over {outcome.FigureOfMerit.Name} in "
                 + $"{outcome.ModelPath}"));
+            WriteFieldPlan(outcome.Field);
 
             return (int)ExitCode.Success;
         }
@@ -371,7 +375,8 @@ public static class Program
         var studyPath = Path.GetFullPath(options.Positional[0]);
         var root = options.Value("project") ?? InferProjectRoot(studyPath);
         var project = new ProjectLayout(root);
-        var outcome = StudyCommand.Boundary(studyPath, project, options.Has("dry-run"), CacheFor(project, options));
+        var outcome = StudyCommand.Boundary(
+            studyPath, project, options.Has("dry-run"), CacheFor(project, options), Console.Error.WriteLine);
 
         if (options.Has("json"))
         {
@@ -386,6 +391,7 @@ public static class Program
                 invariant,
                 $"would bisect for {outcome.Parameter} where {outcome.FigureOfMerit.Name} crosses "
                 + $"{outcome.Threshold:G6} in {outcome.ModelPath}"));
+            WriteFieldPlan(outcome.Field);
 
             return (int)ExitCode.Success;
         }
@@ -438,6 +444,32 @@ public static class Program
         return outcome.Converged ? (int)ExitCode.Success : (int)ExitCode.ConvergenceFailure;
     }
 
+    /// <summary>What a study's dry run says about its fields, as <c>fly --dry-run</c> does.</summary>
+    /// <remarks>
+    /// The cold cost before it is paid: which channels the nominal model and the study's ends
+    /// need, how many of them the cache holds, and whether the points solve channels of their
+    /// own or only re-weight the nominal ones.
+    /// </remarks>
+    private static void WriteFieldPlan(StudyFieldSurvey? survey)
+    {
+        if (survey is null)
+        {
+            return;
+        }
+
+        var points = survey.PointChannels == 0
+            ? "the points re-weight the nominal channels"
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"each point adds up to {survey.PointChannels} channel(s) of its own");
+
+        Console.Out.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"  field: {survey.CachedChannels} of {survey.Channels} channel(s) in the cache at the nominal model and the study's ends; "
+            + $"{points}; {survey.SolvingEvaluations} of {survey.Evaluations} evaluation(s) solve; "
+            + $"peak {EstimateCommand.MemorySize(survey.PeakMiB)} at up to {survey.MaxParallelism} at once"));
+    }
+
     /// <summary>The first line of a failure, for a table cell.</summary>
     private static string Short(string? failure)
     {
@@ -463,7 +495,8 @@ public static class Program
         var studyPath = Path.GetFullPath(options.Positional[0]);
         var root = options.Value("project") ?? InferProjectRoot(studyPath);
         var project = new ProjectLayout(root);
-        var outcome = StudyCommand.Optimise(studyPath, project, options.Has("dry-run"), CacheFor(project, options));
+        var outcome = StudyCommand.Optimise(
+            studyPath, project, options.Has("dry-run"), CacheFor(project, options), Console.Error.WriteLine);
 
         if (options.Has("json"))
         {
@@ -477,6 +510,7 @@ public static class Program
             Console.Out.WriteLine(
                 $"would {outcome.Sense.ToLowerInvariant()} {outcome.FigureOfMerit.Name} "
                 + $"by {outcome.Algorithm} over {outcome.ModelPath}");
+            WriteFieldPlan(outcome.Field);
 
             return (int)ExitCode.Success;
         }
@@ -846,7 +880,7 @@ public static class Program
         if (options.Positional.Count == 0)
         {
             Console.Error.WriteLine(
-                "usage: einzel estimate <model.json|study.json> [--threshold <seconds>] [--json]");
+                "usage: einzel estimate <model.json|study.json> [--threshold <seconds>] [--project <dir>] [--json]");
             return (int)ExitCode.ValidationFailure;
         }
 
@@ -881,8 +915,12 @@ public static class Program
         // because the file already says which it is and a flag would let the two
         // disagree - the cost of getting that wrong is a plan short by a factor of
         // the evaluation count.
+        // A study is costed against the project's field cache: a channel it holds is loaded,
+        // not solved.
         var outcome = IsStudy(path)
-            ? EstimateCommand.ForStudy(path, calibrate, threshold)
+            ? EstimateCommand.ForStudy(
+                path, calibrate, threshold,
+                new ProjectLayout(options.Value("project") ?? InferProjectRoot(Path.GetFullPath(path))))
             : EstimateCommand.Execute(path, calibrate, threshold);
 
         if (options.Has("json"))
@@ -912,7 +950,14 @@ public static class Program
 
             Console.Out.WriteLine(string.Create(
                 invariant,
-                $"per eval      {study.SecondsPerEvaluation:F2} s  (one solve, {study.Members} {flown})"));
+                $"per eval      {study.SecondsPerEvaluation:F2} s  ({study.Members} {flown}, besides the field)"));
+
+            // The field by channel rather than by evaluation: a point that keeps the nominal
+            // channels shares them and solves nothing.
+            Console.Out.WriteLine(string.Create(
+                invariant,
+                $"field         {study.FieldSeconds:F2} s  ({study.SolvedChannels} channel solve(s), {study.LoadedChannels} load(s); "
+                + $"{study.SolvingEvaluations} of {study.Evaluations} evaluations solve, up to {study.MaxParallelism} at once)"));
 
             var bound = study.EvaluationsAreACeiling ? " at most" : string.Empty;
 

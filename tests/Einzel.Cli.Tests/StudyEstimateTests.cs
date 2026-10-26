@@ -113,12 +113,13 @@ public sealed class StudyEstimateTests(ITestOutputHelper output) : IDisposable
                 $"{points,3} points  {costed.Seconds,8:F2} s  =  {study.Evaluations} x "
                 + $"{study.SecondsPerEvaluation:F4} s");
 
-            Assert.Equal(points, study.Evaluations);
+            // The points and the nominal evaluation every scan makes before them.
+            Assert.Equal(points + 1, study.Evaluations);
             Assert.Equal("scan", study.Kind);
 
-            // Exact to rounding: the total is the count times the unit cost, and is not
-            // arrived at any other way.
-            Assert.Equal(study.Evaluations * study.SecondsPerEvaluation, costed.Seconds, 9);
+            // Exact to rounding: the total is the count times the unit cost plus what the
+            // study's channels cost, and is not arrived at any other way.
+            Assert.Equal((study.Evaluations * study.SecondsPerEvaluation) + study.FieldSeconds, costed.Seconds, 9);
         }
     }
 
@@ -151,31 +152,36 @@ public sealed class StudyEstimateTests(ITestOutputHelper output) : IDisposable
         var members = study.Members;
         var flight = costed.TrajectorySeconds;
 
+        // A separation scan moves the geometry, so every evaluation solves its own field: the
+        // field term is a solve per evaluation, and one evaluation is that and its flights.
+        Assert.Equal(study.Evaluations, study.SolvingEvaluations);
+        var perEvaluation = study.SecondsPerEvaluation + (study.FieldSeconds / study.Evaluations);
+
         // What one whole run of the model costs, out of this same estimate: the evaluation
         // less the extra members' flights.
-        var single = study.SecondsPerEvaluation - ((members - 1) * flight);
+        var single = perEvaluation - ((members - 1) * flight);
 
         var naive = members * single;
 
         output.WriteLine($"members            {members,8}");
         output.WriteLine($"one flight         {flight * 1000,8:F1} ms");
         output.WriteLine($"one whole run      {single * 1000,8:F1} ms");
-        output.WriteLine($"per evaluation     {study.SecondsPerEvaluation * 1000,8:F1} ms");
+        output.WriteLine($"per evaluation     {perEvaluation * 1000,8:F1} ms");
         output.WriteLine($"naive, x members   {naive * 1000,8:F1} ms");
 
         Assert.True(members > 1, "the study declares nine ions, so there is a distinction to make");
 
         Assert.True(
-            study.SecondsPerEvaluation < naive,
-            $"one evaluation was costed at {study.SecondsPerEvaluation:F3} s against "
+            perEvaluation < naive,
+            $"one evaluation was costed at {perEvaluation:F3} s against "
             + $"{naive:F3} s for {members} whole model runs. A figure of merit solves the "
             + "field once and flies every member through it, so only the flight term is "
             + "multiplied");
 
         // And the flights are counted, not dropped: an evaluation costs at least all of them.
         Assert.True(
-            study.SecondsPerEvaluation >= members * flight,
-            $"an evaluation was costed at {study.SecondsPerEvaluation:F3} s, which is less "
+            perEvaluation >= members * flight,
+            $"an evaluation was costed at {perEvaluation:F3} s, which is less "
             + $"than the {members} flights of {flight:F4} s it must contain");
     }
 

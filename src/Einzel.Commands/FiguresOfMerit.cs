@@ -1981,15 +1981,20 @@ public static class FiguresOfMerit
         var arrived = 0;
         var members = Distinct(model, spread, ions, report);
 
+        // ONE FIELD FOR THE WHOLE ENSEMBLE, as the energy scan has it: an energy offset changes
+        // how fast an ion is launched and nothing about the field. Built once per member, the
+        // same cached channels were read again for every ion - 83 per cent of a warm 21-ion
+        // evaluation of the 0.2 mm quadrupole. A field is never written after it is built, so
+        // every member flies through the same bits it flew through before.
+        var (_, species, field, settings, detector, collisions) = Setup(model, store, report: report);
+
         for (var k = 0; k < members; k++)
         {
             var fraction = members == 1 ? 0.0 : (2.0 * k / (members - 1.0)) - 1.0;
 
-            var (launch, species, field, settings, detector, collisions) =
-                Setup(model, store, spread * fraction, report);
-
             var result = TrajectoryIntegrator.Integrate(
-                launch, species, field, settings, detector, collisions: collisions?.Invoke());
+                LaunchAt(model, spread * fraction), species, field, settings, detector,
+                collisions: collisions?.Invoke());
 
             if (result.Outcome == TrajectoryOutcome.StopConditionMet)
             {
@@ -2105,15 +2110,16 @@ public static class FiguresOfMerit
         var held = 0;
         var members = Distinct(model, spread, ions, report);
 
+        // One field for every member, as in Counted.
+        var (_, species, field, settings, detector, collisions) = Setup(model, store, report: report);
+
         for (var k = 0; k < members; k++)
         {
             var fraction = members == 1 ? 0.0 : (2.0 * k / (members - 1.0)) - 1.0;
 
-            var (launch, species, field, settings, detector, collisions) =
-                Setup(model, store, spread * fraction, report);
-
             var result = TrajectoryIntegrator.Integrate(
-                launch, species, field, settings, detector, collisions: collisions?.Invoke());
+                LaunchAt(model, spread * fraction), species, field, settings, detector,
+                collisions: collisions?.Invoke());
 
             if (result.Outcome == TrajectoryOutcome.MaximumFlightTimeReached
                 && result.StruckSurface is null)

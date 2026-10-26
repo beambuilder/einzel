@@ -187,7 +187,11 @@ The field cache is the largest thing in it: `.einzel/cache/solver-<version>-<com
 holds each solved basis channel under its channel hash, so the next run of the
 same geometry loads it instead of solving. The engine asks for it through
 `ISolveStore`, an interface in `Einzel.Fields`; `Einzel.Project` implements it on
-disk; the commands hand it down. The solvers never see a path.
+disk; the commands hand it down. The solvers never see a path. In front of it a
+command that builds many fields - a study, an ion list with overrides - puts a
+`SolveMemo`, which keeps the channels it has loaded or solved in memory so that
+fields with the same channels share their arrays; a study bounds it (the first
+evaluation's channels pinned, the rest least recently used first).
 
 Nothing touches version control. A plain folder is the default and fully
 supported; `--vcs git` writes an ignore file and changes no behaviour anywhere
