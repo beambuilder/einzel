@@ -100,8 +100,8 @@ public sealed record RunManifest
     /// <summary>
     /// What each solved field element was solved from: its geometry hash and one hash per
     /// basis channel. Empty when no element is solved. Absent on manifests written before
-    /// it was recorded, and on study manifests, whose geometry can change from one
-    /// evaluation to the next.
+    /// it was recorded. A study records the union over its evaluations, each key once, in the
+    /// order of the points that first needed it.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -122,7 +122,8 @@ public sealed record RunManifest
     /// <summary>
     /// What became of each solved channel in the field cache: loaded, stored, replaced, or not
     /// writable, with the SHA-256 of the potential the run used. Absent when the run did not
-    /// use the cache (<c>--no-cache</c>, a study, a manifest written before the cache existed).
+    /// use the cache (<c>--no-cache</c>, a manifest written before the cache existed). A study
+    /// and an ion list with overrides record each channel once, at its first use.
     /// </summary>
     /// <remarks>
     /// The payload hash is what lets <c>einzel verify</c> notice that the cache now holds a
@@ -140,12 +141,26 @@ public sealed record RunManifest
     /// <summary>Random seeds. Empty for a deterministic single-ion run.</summary>
     public IReadOnlyList<long> Seeds { get; init; } = [];
 
-    /// <summary>How many ions could fly at once, for an ion-list flight; absent elsewhere.</summary>
+    /// <summary>
+    /// How many ions could fly at once, for an ion-list flight, or how many evaluations could
+    /// run at once, for a study; absent elsewhere.
+    /// </summary>
     /// <remarks>
-    /// A cost and not an input: rows are flown and written by index, so the result is the
-    /// same at any setting. Recorded because it explains the wall time beside it.
+    /// A cost and not an input: rows and points are computed and written by index, so the
+    /// result is the same at any setting. Recorded because it explains the wall time and the
+    /// memory beside it.
     /// </remarks>
     public int? MaxParallelism { get; init; }
+
+    /// <summary>
+    /// For a study: the seconds its evaluations spent getting solved channels, loading them
+    /// from the field cache and solving them; absent elsewhere.
+    /// </summary>
+    /// <remarks>
+    /// A channel shared in memory between evaluations costs nothing, so this is what the study
+    /// paid for its fields, not what each evaluation would have paid alone.
+    /// </remarks>
+    public double? FieldSeconds { get; init; }
 
     /// <summary>
     /// For an ion-list flight whose rows override model parameters: one entry per group of

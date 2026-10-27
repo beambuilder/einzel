@@ -61,6 +61,7 @@ public static class CatalogCommand
                 ["figureOfMerit"] = [.. FiguresOfMerit.All.Select(f => f.Name)],
                 ["algorithm"] = ["nelderMead", "cmaEs"],
                 ["sense"] = ["minimise", "maximise"],
+                ["MemoryDocument.unit"] = [.. StudyBinding.MemoryUnits],
             });
 
     /// <summary>Lists the device templates.</summary>

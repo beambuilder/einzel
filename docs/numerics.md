@@ -751,7 +751,10 @@ negatives of one another, share a basis.
 A quadrupole's two pairs are exact negatives, so **four rods reduce to one basis
 solve**. The channel's weight swings 500 V to 0 to -500 V across a cycle and the
 field is that weight times one solved basis. A q scan, or a mass scan, re-solves
-nothing whatever.
+nothing: the amplitude and the mass are weights and an ion, and the channels
+come from the field cache, or from memory within one study. A DC scan of a
+driven model is different: every DC electrode feeds the one constant supply, so
+a new DC level is a new pattern and one solve (see `docs/cli.md`, "Studies").
 
 The grouping is exact rather than approximate: two electrodes share a channel when
 their DC and RF parts are equal or both exactly negated, at the same phase - which

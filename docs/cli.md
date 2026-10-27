@@ -89,7 +89,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel new <model.json> --from-template <name>` | Start from a shipped device |
 | `einzel new <model.json> --from-example <name>` | Start from a reference model, **and get its test** |
 | `einzel validate <model.json>` | Units, bounds, dimensions, regime validity. Instant |
-| `einzel estimate <model.json\|study.json>` | What a run or a whole study will cost, before starting it (GRD-8) |
+| `einzel estimate <model.json\|study.json>` | What a run or a whole study will cost, before starting it (GRD-8). A study's field cost counts what the project's field cache holds (`--project`) |
 | `einzel solve <model.json>` | Solve the fields only, and report how they went |
 | `einzel run <model.json>` | Run; writes a manifest and a result. Reports the ensemble too when the model declares a source cloud, and says where it has got to every 30 s (`--progress`). Loads solved channels from `.einzel/cache` and keeps the ones it solves (`--no-cache` to solve everything) |
 | `einzel fly <model.json> --ions <list>` | Fly an [ion list](ion-lists.md) through the model, one trajectory per row, rows at once on up to `maxParallelism` threads; writes a manifest, a per-ion result and CSV, and the expanded rows. `--ladder` runs the tolerance ladder per row, `--vtu` writes every path to `.einzel/` |
@@ -123,7 +123,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `--no-scale` | `render still` only: leave out the ruler, which is drawn by default in the corner the instrument covers least (and left out anyway when the picture is too small to hold it) |
 | `--progress <seconds>` | `run` and both render verbs: how often to say where the transport has got to, on stderr. Thirty seconds by default, `0` for silence |
 | `--no-cache` | `run`, `fly`, `test` and the four studies: neither load solved channels from `.einzel/cache` nor keep them; a run's manifest then records no `fieldCache`. `solve`: do not keep what it solves |
-| `--project <dir>` | Project root; otherwise inferred by walking up from the model |
+| `--project <dir>` | Project root; otherwise inferred by walking up from the model or study. `estimate` on a study reads that project's field cache to tell a solve from a load |
 
 Not yet built: `self-update`, which needs `Einzel.Update`. Of the render verbs
 `section` and `animation` exist; `still` is a raster projection, nothing here
@@ -693,13 +693,56 @@ resolving power is better larger, and making the author restate that is an
 invitation to state it wrongly.
 
 **Every evaluation goes through the field cache** (see "A second run of the same
-geometry loads its field"), as does every expectation `einzel test` checks. A study
-whose parameters move no electrode - a supply, an energy, a cloud - solves its field
-once and loads it at every later point, and a second study of the same model loads it
-throughout. One that moves an electrode keeps one entry per geometry it visited, eight
-bytes a node for each channel of each, which is the cost to watch on a large mesh;
-`einzel cache status` says how much is there. A study's manifest does not list the
-cache's use, since its geometry can change from one evaluation to the next.
+geometry loads its field"), as does every expectation `einzel test` checks, and through
+one in-memory store per study in front of it. Every driver makes its first evaluation
+alone - the nominal model for a scan or a sweep, the starting point for an optimisation,
+the first bracket end for a boundary search - so the channels it solves or loads are there
+for every point after it.
+What a point then costs depends on whether its channels are the nominal model's:
+
+| a point that changes | its channels | what it costs |
+| --- | --- | --- |
+| a drive amplitude, a frequency, a phase of a single-phase sinusoid or of a rectangular drive, an ion, an energy, a cloud | the nominal model's, re-weighted | nothing for its field: it shares the nominal arrays in memory |
+| a DC level of a driven model, any potential of a static model | the drive channels, and a DC pattern of its own | one solve of the new pattern; the drive channels are shared |
+| a geometry, an edge profile | its own | a solve of every channel |
+
+On the 0.2 mm quadrupole (8.54 M nodes) an 11-point amplitude scan with a 21-ion
+`transmission` figure took 97.7 s cold and 39.7 s warm before the store, most of the warm
+time re-reading the same two channels for every ion; it takes 73.3 s cold and 7.9 s warm,
+323 MB at its peak where it was 1,030 MB, and 5.0 s at two evaluations at once (24.3 s and
+2.8 GB before). A DC scan of the same model still solves its DC pattern at every new value
+(about 30 s and 2.9 GB each). A second study of the same model loads what the first stored.
+
+**The store is bounded.** It pins the first evaluation's channels and keeps others, least
+recently used first, within four times the nominal channels' size; `memoryBudget` in the
+study (`{ "value": 2, "unit": "GiB" }`; `B`, `kB`, `MB`, `GB`, `KiB`, `MiB`, `GiB`) sets
+another bound, never below the nominal channels. A channel let go is loaded or solved again
+when a later point needs it. The bound changes what a study holds and never what it
+computes: a field reads the same bits from memory, from the cache or from its own solve.
+
+**What a study says, and what it records.** One line on stderr, as `run` prints its own:
+
+```
+  field: 0 channel(s) solved, 2 loaded from the cache, 22 reused in memory, over 12 evaluation(s); 0.1 s getting them
+```
+
+The manifest records `solves` (every solve key an evaluation built from, each once),
+`fieldCache` (what became of each channel in the cache, at its first use), `maxParallelism`
+and `fieldSeconds` (the seconds spent loading and solving channels). Both lists are in the
+order of the study's points - the nominal first, then the points, then a sweep's attribution
+extremes - whatever order evaluations run at once finished in. `--dry-run` adds a `field`
+block, and a line, with the channels the nominal model and the study's ends need, how many
+the cache holds, how many evaluations will solve and the predicted peak:
+
+```
+  field: 2 of 2 channel(s) in the cache at the nominal model and the study's ends; the points re-weight the nominal channels; 0 of 12 evaluation(s) solve; peak 130.3 MiB at up to 1 at once
+```
+
+A study whose predicted peak is more than the process may use says so on stderr before it
+starts (`warning: Memory: this study's peak is ...`); see `estimate` for how the peak is
+counted. One that moves an electrode keeps one cache entry per pattern it visited, eight
+bytes a node for each, which is the cost to watch on a large mesh; `einzel cache status`
+says how much is there.
 
 ### Figures of merit
 
@@ -1195,6 +1238,8 @@ would be refused. They pass the whole list now, and the CLI prints one line per 
 | `.einzel/<name>.density.vti` | The density on the tracked grid, with the run's caveats and their severities in a comment block. Written for a diffusive run, and for a **sequenced** run whose last phase was diffusive - a sequence ending as trajectories has no density, which is a different fact from an empty one, so none is written |
 | `results/<name>.arrivals.csv` | The arrival profile, where enough arrived to be one. See the note on `sequence.nothing-eluted` below |
 | `results/<model>.<list>.fly.manifest.json` | `fly`: the run manifest, with the ion list in `inputHashes`, the seeds and `maxParallelism` |
+| `results/<study>.<kind>.json` | A study's result (`kind` is `scan`, `sweep`, `boundary` or `optimise`); `--json` prints the same bytes |
+| `results/<study>.<kind>.manifest.json` | A study's manifest: the model and study hashes, the seed, the union of `solves` and `fieldCache` over its evaluations in point order, `maxParallelism` and `fieldSeconds` |
 | `results/<model>.<list>.fly.json` | `fly`: the per-ion result; `--json` prints the same bytes |
 | `results/<model>.<list>.fly.csv` | `fly`: one line per ion, `id,tag,outcome,surface,x_mm,y_mm,z_mm,time_us,steps,rejected,collisions,warnings` (warning codes joined by `;`), numbers in round-trip (`R`) format |
 | `results/<model>.<list>.fly.ions.csv` | `fly`: the expanded rows in SI; `fly --ions` on this file flies the same ions again |
@@ -1328,24 +1373,48 @@ einzel estimate studies/separation-scan.json
 ```
 
 A study is detected rather than declared by a flag: a study names the model it studies
-and a model names no model, which is exact and needs no schema version.
+and a model names no model, which is exact and needs no schema version. A study is costed
+against the project's field cache (`--project`, or the project the study is in): a channel
+the cache holds is loaded, not solved.
 
 ```
-field 0  Solved2D       513x33           0.25 s      2.5 MiB
-per eval      0.75 s  (one solve, 9 trajectories)
-scan          31 evaluations
-total         23.15 s, peak 2.5 MiB
+field 0  Solved3D       513x129x129     67.67 s      1.3 GiB
+per eval      0.54 s  (21 trajectories, besides the field)
+field         0.15 s  (0 channel solve(s), 2 load(s); 0 of 12 evaluations solve, up to 1 at once)
+scan          12 evaluations
+total         7 s, peak 130.3 MiB
 ```
+
+That is the 0.2 mm quadrupole's amplitude scan with its two channels in the cache: the
+model would solve in 68 s, and the study loads instead.
 
 **The multiplier costs nothing.** Every driver states its own extent — a scan its points,
 a sweep its draws, an optimiser and a bisection their evaluation ceilings — so this is
 arithmetic over numbers already in the file. A ceiling is reported *as* a ceiling, because
 a scan computes every point it declares while a search stops when it converges.
 
-**The two terms scale differently.** An evaluation solves the field once and flies every
-ensemble member through it, so a study costs `evaluations x (solve + members x flight)`.
-Multiplying the model's own total by the evaluation count charges a whole solve per
-member — 4.8x over on the shipped mirror pair at nine members.
+**The terms scale differently.** An evaluation flies every ensemble member through one
+field, and a study's evaluations share their channels in memory, so a study costs
+`evaluations x (compile + members x flight)` plus its channels: one solve for each channel
+the nominal model needs and the cache does not hold, and for each point that adds channels
+(a geometry, a DC level of a driven model) one solve per channel it adds, or one load where
+the cache holds the study's ends. Which kind a study is, is read at the nominal model and
+the study's extreme points: their channel keys come out of the compiled model without a
+solve. The nominal evaluation every scan and sweep makes is counted, so `estimate --json`
+reports one more `evaluations` than the scan has points, and its `memoryMiB` is the study's
+peak below rather than one evaluation's. Charging a solve per
+evaluation, as this did before, overstated weight-only studies of the 0.2 mm quadrupole 4
+to 12 times cold and 10 to 17 times warm; on the amplitude scan above it is now 77 s
+against 73.3 s measured cold and 7 s against 7.9 s warm. Multiplying the model's own total
+by the evaluation count charges a whole solve per member — 4.8x over on the shipped mirror
+pair at nine members.
+
+**The peak is the study's.** Evaluations that solve at once each hold one solve's peak, so a
+study whose points solve peaks at `min(maxParallelism, evaluations) x` the model's peak,
+plus what the in-memory store keeps (its budget); a study whose points re-weight the nominal
+channels holds those channels once, with one solve's peak on top while the nominal model
+solves cold. Above half of what the process may use the basis says so, as it does for a
+model, and a study whose peak exceeds it warns before it starts.
 
 ### How many flights a figure of merit actually costs
 

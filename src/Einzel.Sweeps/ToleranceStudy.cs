@@ -105,9 +105,11 @@ public static class ToleranceStudy
     /// <param name="maxParallelism">
     /// How many draws may be evaluated at once, or null for one per processor.
     /// <para>
-    /// Lower it when a single solve is large: each draw in flight holds its own solved
-    /// field, so peak memory is this times one solve. The draws themselves are always
-    /// made in seed order, so this changes what the study costs and never what it says.
+    /// Lower it when a single solve is large and the draws solve: each draw in flight that
+    /// solves holds the solver's working set, so peak memory is this times one solve. A draw
+    /// that only re-weights fields another evaluation solved holds nothing of its own when
+    /// the evaluator shares them. The draws themselves are always made in seed order, so this
+    /// changes what the study costs and never what it says.
     /// </para>
     /// </param>
     /// <returns>The draws, the attribution, and the distribution.</returns>
@@ -161,7 +163,7 @@ public static class ToleranceStudy
         // make the same seed give a different study on every run.
         //
         // Splitting the two costs nothing, because the draw is arithmetic and the
-        // evaluation is a solve and a flight. The perturbations are identical to what the
+        // evaluation is a field and its flights. The perturbations are identical to what the
         // sequential version produced, draw for draw.
         var random = new Random(seed);
 
@@ -181,8 +183,8 @@ public static class ToleranceStudy
 
         var parallelism = new ParallelOptions
         {
-            // Memory is the constraint, not cores: every draw in flight holds its own
-            // solved field. See ParameterScan.Run for the arithmetic.
+            // Memory is the constraint, not cores, when the draws solve: every draw in flight
+            // that solves holds the solver's working set. See ParameterScan.Run.
             MaxDegreeOfParallelism = Math.Max(1, maxParallelism ?? Environment.ProcessorCount),
         };
 
@@ -213,8 +215,8 @@ public static class ToleranceStudy
         ParallelOptions parallelism)
     {
         // Two evaluations per channel, all independent, and each as expensive as a draw -
-        // so attribution over a dozen channels is two dozen solves and runs at once like
-        // the draws do. Written by index so the pre-sort order does not depend on which
+        // so attribution over a dozen channels is two dozen evaluations, two dozen solves
+        // when the channels move the geometry, and runs at once like the draws do. Written by index so the pre-sort order does not depend on which
         // channel finished first; the sort below is by swing and would hide a reordering
         // rather than surface it.
         var measured = new (double? Low, double? High)[channels.Count];

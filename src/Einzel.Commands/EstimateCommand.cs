@@ -84,8 +84,28 @@ public sealed record StudyEstimate
     /// <summary>How many trajectories one evaluation flies.</summary>
     public required int Members { get; init; }
 
-    /// <summary>What one evaluation costs, in seconds.</summary>
+    /// <summary>What one evaluation costs besides its field, in seconds: the compile and the flights.</summary>
     public required double SecondsPerEvaluation { get; init; }
+
+    /// <summary>How many evaluations solve a channel; the nominal counts when it does.</summary>
+    public int SolvingEvaluations { get; init; }
+
+    /// <summary>How many channels the study solves, over all its evaluations.</summary>
+    public int SolvedChannels { get; init; }
+
+    /// <summary>How many channels it loads from the field cache, over all its evaluations.</summary>
+    public int LoadedChannels { get; init; }
+
+    /// <summary>What getting those channels costs, solves and loads, in seconds.</summary>
+    /// <remarks>
+    /// <b>Not per evaluation.</b> A point that keeps the nominal model's channels shares them in
+    /// memory and pays nothing for its field, so the total is
+    /// <c>evaluations x SecondsPerEvaluation + FieldSeconds</c>.
+    /// </remarks>
+    public double FieldSeconds { get; init; }
+
+    /// <summary>How many evaluations may run at once: one for a boundary search or an optimisation.</summary>
+    public int MaxParallelism { get; init; } = 1;
 
     /// <summary>How the evaluation count was arrived at.</summary>
     public required string Basis { get; init; }
@@ -207,6 +227,14 @@ public static class EstimateCommand
     /// an estimate.
     /// </remarks>
     private const double VolumeSecondsPerMegaNode = 65.0;
+
+    /// <summary>Seconds per million nodes to load one channel from the field cache.</summary>
+    /// <remarks>
+    /// Measured on the 0.2 mm quadrupole: 30 ms to read a channel of 8.54 M nodes and 43 ms
+    /// to check its SHA-256, so about 8.6 ms per million nodes. A study pays it once per
+    /// channel it holds in memory, not once per evaluation.
+    /// </remarks>
+    private const double LoadSecondsPerMegaNode = 0.0086;
 
     /// <summary>How much coarser the calibration pilot is than the solve it stands for.</summary>
     /// <remarks>
@@ -901,7 +929,7 @@ public static class EstimateCommand
     /// study. Capped for the same reason.
     /// </para>
     /// </remarks>
-    private static List<IReadOnlyDictionary<string, Core.Units.Quantity>> Extremes(
+    internal static List<IReadOnlyDictionary<string, Core.Units.Quantity>> Extremes(
         StudyDocument study)
     {
         static IReadOnlyDictionary<string, Core.Units.Quantity> At(
@@ -1028,6 +1056,14 @@ public static class EstimateCommand
     /// <param name="threshold">
     /// Seconds above which the estimate says the study should be confirmed.
     /// </param>
+    /// <param name="project">
+    /// The project whose field cache the study will load from, or null to cost every channel as
+    /// solved.
+    /// </param>
+    /// <param name="availableMemoryBytes">
+    /// What the process may use, for the comparison with the study's peak; this machine's when
+    /// omitted.
+    /// </param>
     /// <returns>The estimate, carrying the model's own breakdown and the study multiplier.</returns>
     /// <exception cref="ArgumentException"><paramref name="studyPath"/> is null or blank.</exception>
     /// <exception cref="Core.Errors.EinzelException">The study or its model is invalid.</exception>
@@ -1039,15 +1075,23 @@ public static class EstimateCommand
     /// what makes it free where the per-evaluation cost is measured.
     /// </para>
     /// <para>
-    /// <b>One solve, many trajectories.</b> An evaluation solves the field once and flies
-    /// every ensemble member through it, so the two terms are multiplied separately: a
-    /// study is <c>evaluations x (solve + members x flight)</c>, not <c>evaluations x</c>
-    /// the model's total. Costing it the second way overstates a nine-member figure by
-    /// most of eight solves per evaluation.
+    /// <b>Solves by channel key, flights by evaluation.</b> An evaluation flies every ensemble
+    /// member through one field, and a study's evaluations share their channels in memory:
+    /// a point whose channels are the nominal model's (an amplitude, a frequency, an ion)
+    /// solves nothing, and one that adds a channel (a geometry, a DC level of a driven model)
+    /// solves that channel. So a study is <c>evaluations x (compile + members x flight)</c>
+    /// plus the channels it solves or loads, classified at its nominal and extreme points
+    /// (<see cref="StudyFields.Survey"/>). Charging a solve per evaluation overstated
+    /// weight-only studies of the 0.2 mm quadrupole 4 to 12 times cold and 10 to 17 times
+    /// warm.
     /// </para>
     /// </remarks>
     public static EstimateOutcome ForStudy(
-        string studyPath, bool calibrate = true, double threshold = ThresholdSeconds)
+        string studyPath,
+        bool calibrate = true,
+        double threshold = ThresholdSeconds,
+        Project.ProjectLayout? project = null,
+        long? availableMemoryBytes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(studyPath);
 
@@ -1132,23 +1176,48 @@ public static class EstimateCommand
                 model.TrajectorySeconds,
                 evaluations >= ExtremeSamplingThreshold ? Extremes(study) : []);
 
-        var perEvaluation = wholeRun
-            ? compile + model.Seconds
-            : compile + (model.Seconds - model.TrajectorySeconds) + (members * flight);
+        // THE FIELD IS COSTED BY CHANNEL, NOT BY EVALUATION. The nominal model's channels are
+        // solved once (or loaded, when the cache holds them), and every point that keeps them
+        // shares them in memory; a point that adds channels pays for those alone. The model's
+        // own solve is the whole of its channels, so one channel is its share of that.
+        var survey = StudyFields.Survey(study, document, directory, project);
+        var solve = model.Elements.Sum(element => element.Seconds);
+        var nominalChannels = Math.Max(1, survey?.NominalChannels ?? 1);
+        var perChannel = solve / nominalChannels;
+        var perLoad = survey is null ? 0.0
+            : LoadSecondsPerMegaNode * survey.ChannelMiB * Mebibyte / sizeof(double) / 1e6 / nominalChannels;
 
-        var seconds = evaluations * perEvaluation;
+        var points = survey is { PointChannels: > 0 } ? (evaluations - 1) * survey.PointChannels : 0;
+        var pointsLoad = survey?.PointsCached == true;
+        var solved = (survey is null ? 0 : survey.NominalChannels - survey.NominalCached) + (pointsLoad ? 0 : points);
+        var loaded = (survey?.NominalCached ?? 0) + (pointsLoad ? points : 0);
+        var fieldSeconds = survey is null ? solve : (solved * perChannel) + (loaded * perLoad);
+
+        var perEvaluation = wholeRun
+            ? compile + (model.Seconds - solve)
+            : compile + (members * flight);
+
+        var seconds = (evaluations * perEvaluation) + fieldSeconds;
 
         var each = wholeRun
             ? "is one whole run of the model - a density stepped, or a packet advanced in "
             + "lockstep - so its flights are already inside the figure above and are not "
             + "counted again"
-            : $"solves once and flies {members} "
-            + $"trajector{(members == 1 ? "y" : "ies")} through that one field";
+            : $"flies {members} trajector{(members == 1 ? "y" : "ies")} through its field";
+
+        // What one evaluation holds besides its field - a density, a packet - is held by every
+        // evaluation running at once.
+        var extra = survey is null ? 0.0 : Math.Max(0.0, model.MemoryMiB - survey.SolvePeakMiB);
+        var peak = survey is null
+            ? model.MemoryMiB
+            : survey.PeakMiB + (extra * Math.Min(survey.MaxParallelism, evaluations));
 
         var basis = model.Basis
             + $" This is a study: {how} Each evaluation re-compiles the document "
             + $"({compile * 1000.0:F0} ms, measured) and {each}, so it costs "
-            + $"{perEvaluation:F2} s, and {evaluations} of them cost {Duration(seconds)}."
+            + $"{perEvaluation:F2} s besides its field, and {evaluations} of them cost "
+            + $"{Duration(evaluations * perEvaluation)}."
+            + FieldNote(survey, evaluations, perChannel, solved, loaded, fieldSeconds)
             + spread
             + (ceiling
                 ? " That count is a ceiling the search may stop short of."
@@ -1157,11 +1226,19 @@ public static class EstimateCommand
             + " Process start and just-in-time compilation are not included - a fixed cost, "
             + "which is negligible for a long study and is not for a short one.";
 
+        var fits = CapacityNote(peak, availableMemoryBytes ?? GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, "the study's");
+
+        if (fits.Length > 0)
+        {
+            basis = basis + " " + fits;
+        }
+
         return model with
         {
             Seconds = seconds,
             AboveThreshold = seconds > threshold,
             Basis = basis,
+            MemoryMiB = peak,
 
             // The flight the arithmetic above actually used, not the nominal pilot it
             // started from. Leaving the nominal here made the record contradict itself:
@@ -1177,9 +1254,43 @@ public static class EstimateCommand
                 EvaluationsAreACeiling = ceiling,
                 Members = members,
                 SecondsPerEvaluation = perEvaluation,
+                SolvingEvaluations = survey?.SolvingEvaluations ?? evaluations,
+                SolvedChannels = solved,
+                LoadedChannels = loaded,
+                FieldSeconds = fieldSeconds,
+                MaxParallelism = survey?.MaxParallelism ?? 1,
                 Basis = how,
             },
         };
+    }
+
+    /// <summary>What a study's fields cost, in a sentence for the basis.</summary>
+    /// <remarks>
+    /// The two cases a study falls into, said as what they are: points that re-weight the
+    /// nominal channels and solve nothing, and points that add channels of their own.
+    /// </remarks>
+    private static string FieldNote(
+        StudyFieldSurvey? survey, int evaluations, double perChannel, int solved, int loaded, double seconds)
+    {
+        if (survey is null || survey.NominalChannels == 0)
+        {
+            return " No field element is solved, so no evaluation solves.";
+        }
+
+        var others = evaluations - 1;
+        var how = survey.PointsCached ? "loads them, since the cache holds the ends'" : "solves them";
+
+        var held = survey.PointChannels == 0
+            ? string.Create(
+                Inv,
+                $" The study's ends hold the nominal model's {survey.NominalChannels} channel(s), so its points re-weight them and share them in memory")
+            : string.Create(
+                Inv,
+                $" The study's ends add up to {survey.PointChannels} channel(s) to the nominal model's {survey.NominalChannels}, so each of the other {others} evaluations {how}");
+
+        return held + string.Create(
+            Inv,
+            $": {solved} channel solve(s) at {perChannel:F2} s each and {loaded} load(s) from the cache, {seconds:F2} s for the study's fields.");
     }
 
     /// <summary>How many evaluations a study's declared driver will make.</summary>
@@ -1193,8 +1304,8 @@ public static class EstimateCommand
     {
         if (study.Scan is { } scan)
         {
-            return ("scan", Math.Max(scan.Points, 1), false,
-                $"a scan of {scan.Points} points over '{scan.Parameter}'.");
+            return ("scan", Math.Max(scan.Points, 1) + 1, false,
+                $"a scan of {scan.Points} points over '{scan.Parameter}', after the nominal evaluation every scan makes.");
         }
 
         if (study.Boundary is { } boundary)
@@ -1220,12 +1331,13 @@ public static class EstimateCommand
         // Attribution is two more evaluations per channel, at that channel's extremes.
         var attribution = study.OneAtATime ? 2 * channels : 0;
 
-        return ("sweep", Math.Max(study.Draws + attribution, 1), false,
+        return ("sweep", Math.Max(study.Draws + attribution, 1) + 1, false,
             $"a tolerance sweep of {study.Draws} draws over {channels} "
             + $"channel{(channels == 1 ? string.Empty : "s")}"
             + (attribution > 0
-                ? $", plus {attribution} more for one-at-a-time attribution."
-                : "."));
+                ? $", plus {attribution} more for one-at-a-time attribution"
+                : string.Empty)
+            + ", after the nominal evaluation every sweep makes.");
     }
 
     /// <summary>Why the study's range was not sampled, when it was not.</summary>
@@ -1463,6 +1575,7 @@ public static class EstimateCommand
     /// <summary>Says whether the model's peak fits what this process may use, when it is close.</summary>
     /// <param name="peakMiB">The model's peak, in mebibytes.</param>
     /// <param name="available">What the process may use, in bytes; nothing is said when unknown.</param>
+    /// <param name="whose">Whose peak the sentence names: the model's, or a study's.</param>
     /// <returns>A sentence for the basis line, or empty when the peak is under half of it.</returns>
     /// <remarks>
     /// <para>
@@ -1477,7 +1590,7 @@ public static class EstimateCommand
     /// a run that would not fit was priced without a word.
     /// </para>
     /// </remarks>
-    private static string CapacityNote(double peakMiB, long available)
+    internal static string CapacityNote(double peakMiB, long available, string whose = "the model's")
     {
         var peak = peakMiB * Mebibyte;
 
@@ -1489,7 +1602,7 @@ public static class EstimateCommand
         var share = peak / available;
 
         return string.Create(
-                Inv, $"Memory: the model's peak is {share:P0} of the {Size(available)} this process may use on this machine")
+                Inv, $"Memory: {whose} peak is {share:P0} of the {Size(available)} this process may use on this machine")
             + (share >= 1.0 ? ", so it will not fit here." : ", which leaves little room.");
     }
 

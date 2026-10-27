@@ -137,7 +137,9 @@ public sealed class StudyEstimateShapeTests(ITestOutputHelper output) : IDisposa
             + $"{study.SecondsPerEvaluation * 1000:F2} ms per evaluation. The reported "
             + "trajectorySeconds is not the flight the per-evaluation figure was built from");
 
-        // And the total is still exactly the count times the unit cost.
+        // And the total is still exactly the count times the unit cost, plus the fields: none
+        // here, since nothing is solved.
+        Assert.Equal(0.0, study.FieldSeconds);
         Assert.Equal(study.Evaluations * study.SecondsPerEvaluation, costed.Seconds, 9);
     }
 

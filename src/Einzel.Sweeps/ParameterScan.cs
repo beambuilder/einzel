@@ -289,9 +289,11 @@ public static class ParameterScan
     /// <param name="maxParallelism">
     /// How many points may be evaluated at once, or null for one per processor.
     /// <para>
-    /// Lower it when a single solve is large: each point in flight holds its own solved
-    /// field, so peak memory is this times one solve. Cores are rarely the binding
-    /// constraint; memory is.
+    /// Lower it when a single solve is large and the points solve: each point in flight that
+    /// solves holds the solver's working set, so peak memory is this times one solve. A point
+    /// that only re-weights fields another point solved holds nothing of its own when the
+    /// evaluator shares them, as the study verbs do. Cores are rarely the binding constraint;
+    /// memory is.
     /// </para>
     /// </param>
     /// <returns>One row per point, and what the scan has to say about its own range.</returns>
@@ -358,9 +360,11 @@ public static class ParameterScan
         }
 
         // THE POINTS ARE INDEPENDENT, SO THEY RUN AT ONCE. Every point compiles its own
-        // model from the same immutable document and solves its own field; nothing is
-        // shared but the evaluator, whose only mutable state is the warning ledger, and
-        // that now scopes per evaluation and merges under a lock.
+        // model from the same immutable document and builds its own field; nothing is
+        // shared but the evaluator, whose mutable state is the warning ledger, scoped per
+        // evaluation and merged under a lock, and whatever store it builds fields through.
+        // The nominal evaluation above runs first and alone, so a point whose channels are
+        // the nominal model's finds them stored rather than solving them again.
         //
         // WRITTEN BY INDEX, NOT APPENDED, so the curve comes back in scan order whatever
         // order the points finish in. CLI-6 asks for deterministic output, and a scan whose
@@ -371,11 +375,13 @@ public static class ParameterScan
         // seed and a collision sampler from the gas seed plus the ion's index, so a point
         // computes the same number wherever it runs.
         //
-        // MEMORY IS THE CONSTRAINT, NOT CORES. Each point in flight holds its own solved
-        // field, so peak memory is the degree of parallelism times one solve - on a
-        // 34 M-node volume geometry that is 1.6 GiB each, and sixteen at once is 26 GiB.
-        // The caller lowers `maxParallelism` when the solve is large; the default is one
-        // per processor, which is right for the plane geometries most studies scan.
+        // MEMORY IS THE CONSTRAINT, NOT CORES, WHEN THE POINTS SOLVE. A point that solves
+        // holds the solver's working set while it does: a DC scan of the 0.2 mm quadrupole
+        // (8.5 M nodes) peaked at 4.5 GB one point at a time and 9.4 GB two at a time. A
+        // point that re-weights the nominal channels holds only its flights when the
+        // evaluator shares those channels. The caller lowers `maxParallelism` when the solve
+        // is large; the default is one per processor, which is right for the plane
+        // geometries most studies scan.
         var rows = new ScanPoint[axis.Points];
 
         var parallelism = Math.Max(1, maxParallelism ?? Environment.ProcessorCount);

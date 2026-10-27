@@ -50,10 +50,11 @@ public static class ModelSchemaWriter
     /// <param name="version">The format version this build writes.</param>
     /// <param name="description">What the document is, when the type's own summary is not enough.</param>
     /// <param name="allowed">
-    /// Permitted values for named properties, by camel-case property name. Some
+    /// Permitted values for named properties, by camel-case property name, or as
+    /// <c>Type.property</c> for a property of a nested document record. Some
     /// fields take a string out of a set the type system does not express - which
-    /// figure of merit, which algorithm - and leaving that to prose is how invalid
-    /// documents get written.
+    /// figure of merit, which algorithm, which unit of memory - and leaving that to
+    /// prose is how invalid documents get written.
     /// </param>
     /// <returns>The schema, as indented JSON text with a trailing newline.</returns>
     public static string Write<T>(
@@ -79,11 +80,13 @@ public static class ModelSchemaWriter
 
         if (allowed is not null)
         {
-            var properties = root["properties"]!.AsObject();
-
             foreach (var (name, values) in allowed)
             {
-                if (properties[name] is JsonObject property)
+                // "Type.property" names a property of a nested record, described once in $defs.
+                var dot = name.IndexOf('.', StringComparison.Ordinal);
+                var owner = dot < 0 ? root : definitions.GetValueOrDefault(name[..dot]);
+
+                if (owner?["properties"]?[name[(dot + 1)..]] is JsonObject property)
                 {
                     property["enum"] = new JsonArray([.. values.Select(v => (JsonNode)v)]);
                 }

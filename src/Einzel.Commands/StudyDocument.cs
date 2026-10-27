@@ -116,13 +116,21 @@ public sealed record StudyDocument
     /// <summary>Optimisation: ceiling on objective evaluations.</summary>
     public int MaximumEvaluations { get; init; } = 200;
 
-    /// <summary>How many evaluations may run at once, or null for one per processor.</summary>
+    /// <summary>
+    /// How many evaluations may run at once, or null for one per processor. Each evaluation
+    /// that solves holds one solve's working set while it does; one that re-weights the
+    /// nominal channels shares them and holds only its flights.
+    /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Memory is the constraint, not cores.</b> Every evaluation in flight holds its own
-    /// solved field, so peak memory is this times one solve: on a 34 M-node volume geometry
-    /// that is 1.6 GiB each, and one per processor on a sixteen-core machine is 26 GiB. The
-    /// plane geometries most studies scan are a few hundred megabytes and need no limit.
+    /// <b>Memory is the constraint, not cores, for a study whose points solve.</b> One
+    /// evaluation that solves holds the solver's working set and its channels: on the 0.2 mm
+    /// quadrupole (8.5 M nodes, two channels) 1.3 GiB live and 4.5 GB of working set, and a
+    /// DC scan of it at two at once peaked at 9.4 GB. A study whose points reuse the nominal
+    /// channels - an amplitude, a frequency, an ion - solves once and shares those channels
+    /// between its evaluations, so its memory does not grow with this. <c>estimate</c> and the
+    /// study itself say what the peak will be, and a study that will not fit says so before it
+    /// starts.
     /// </para>
     /// <para>
     /// It changes what a study <i>costs</i> and never what it <i>says</i>: draws are made in
@@ -132,6 +140,18 @@ public sealed record StudyDocument
     /// </para>
     /// </remarks>
     public int? MaxParallelism { get; init; }
+
+    /// <summary>
+    /// The most memory the study keeps solved channels in between evaluations, as a value and
+    /// a unit (<c>B</c>, <c>kB</c>, <c>MB</c>, <c>GB</c>, <c>KiB</c>, <c>MiB</c>, <c>GiB</c>), or
+    /// null for four times the nominal model's channels.
+    /// </summary>
+    /// <remarks>
+    /// The nominal model's channels are always kept, so a budget below them keeps those alone.
+    /// A channel let go is loaded from the field cache, or solved, again when a later point
+    /// needs it; what the study computes does not depend on this.
+    /// </remarks>
+    public MemoryDocument? MemoryBudget { get; init; }
 
     /// <summary>Optimisation: convergence tolerance on the parameters, as a fraction of the box.</summary>
     public double ParameterTolerance { get; init; } = 1e-4;
@@ -146,6 +166,16 @@ public sealed record StudyDocument
     /// spend its whole budget doing so and then report that it never converged.
     /// </remarks>
     public double ObjectiveTolerance { get; init; } = 1e-8;
+}
+
+/// <summary>An amount of memory, as it appears in a study file.</summary>
+public sealed record MemoryDocument
+{
+    /// <summary>How much.</summary>
+    public required double Value { get; init; }
+
+    /// <summary><c>B</c>, <c>kB</c>, <c>MB</c>, <c>GB</c>, <c>KiB</c>, <c>MiB</c> or <c>GiB</c>.</summary>
+    public required string? Unit { get; init; }
 }
 
 /// <summary>One parameter a scan varies, as it appears in a file.</summary>
@@ -466,6 +496,60 @@ public static class StudyBinding
                 Suggestion = "'minimise' or 'maximise', or omit it and the figure of merit decides",
             }),
         };
+    }
+
+    /// <summary>The units a <c>memoryBudget</c> may be written in, as the schema lists them.</summary>
+    public static IReadOnlyList<string> MemoryUnits { get; } = ["B", "kB", "MB", "GB", "KiB", "MiB", "GiB"];
+
+    /// <summary>The study's memory budget, in bytes, or null when it names none.</summary>
+    /// <param name="study">The study.</param>
+    /// <returns>The budget in bytes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="study"/> is null.</exception>
+    /// <exception cref="EinzelException">The unit is not an amount of memory, or the value is negative.</exception>
+    public static long? MemoryBudget(StudyDocument study)
+    {
+        ArgumentNullException.ThrowIfNull(study);
+
+        if (study.MemoryBudget is not { } budget)
+        {
+            return null;
+        }
+
+        double? scale = budget.Unit switch
+        {
+            "B" => 1.0,
+            "kB" => 1e3,
+            "MB" => 1e6,
+            "GB" => 1e9,
+            "KiB" => 1024.0,
+            "MiB" => 1024.0 * 1024.0,
+            "GiB" => 1024.0 * 1024.0 * 1024.0,
+            _ => null,
+        };
+
+        if (scale is null)
+        {
+            throw new EinzelException(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = "/memoryBudget/unit",
+                Constraint = $"{(budget.Unit is null ? "null" : $"'{budget.Unit}'")} is not an amount of memory",
+                Suggestion = $"one of: {string.Join(", ", MemoryUnits)}",
+            });
+        }
+
+        if (!double.IsFinite(budget.Value) || budget.Value < 0.0)
+        {
+            throw new EinzelException(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = "/memoryBudget/value",
+                Constraint = "a memory budget is a finite amount, zero or more",
+                Suggestion = "for example { \"value\": 2, \"unit\": \"GiB\" }",
+            });
+        }
+
+        return (long)Math.Min(budget.Value * scale.Value, long.MaxValue);
     }
 
     private static PerturbationDistribution Distribution(string declared, int index) => declared switch
