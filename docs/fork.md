@@ -113,21 +113,25 @@ on Windows those ten tests fail until upstream
 the MCP server `src/Einzel.Mcp/bin/Release/net10.0/einzel-mcp(.exe)`.
 
 Fork-only helpers live under `tools/` and are listed in `Einzel.slnx`, so they
-build in CI and any API drift shows up as a build failure. The first is
-`tools/quadbatch`, the in-process batch driver (solve once, fly many ions with
-per-ion RF phase) that the validation project uses. It builds each ion's field
-with the library's own `DrivenSolvedField.Create` rather than a copy of that
-class, and keeps its basis solves in a project's field cache when the job names
-one; [Using Einzel as a library](library.md) shows the same path in one example
-that the test suite runs. It is retired when the library also takes explicit ion
-lists.
+build in CI and any API drift shows up as a build failure. `tools/quadbatch`
+was the in-process batch driver (solve once, fly many ions with per-ion RF
+phase) that the validation project used while a run re-solved its field on
+every invocation (before the field cache, PRs #4–#7) and took no ion list
+(before `einzel fly`, PRs #9–#12). It was retired in PR #19 once the public
+surface did the same: the field cache, `einzel fly` with explicit ion lists and
+per-ion overrides, and the field basis for studies. The in-process path it
+demonstrated is still [Using Einzel as a library](library.md), in one example
+that the test suite runs. No helper lives under `tools/` now.
 
 ## How the validation project uses this repository
 
 The validation project builds a specific `esibd` commit (or a `base/<sha>` tag)
-from a sibling clone, points its scripts at `src/Einzel.Cli/bin/Release/net10.0`
-and `tools/quadbatch/bin/Release/net10.0`, and records the commit hash with
-every result. Nothing from that project is committed here: no SIMION
+from a sibling clone, points its scripts at `src/Einzel.Cli/bin/Release/net10.0`,
+and records the commit hash with every result. Its reference-case corpus (an
+einzel lens, a DC quadrupole, an RF quadrupole under a sinusoid and under a
+50/50 rectangular drive, judged against SIMION and closed forms) runs through
+the CLI alone: `einzel run` for the lens and the DC quadrupole, `einzel fly`
+with one 48-ion list per scan point for the RF cases. Nothing from that project is committed here: no SIMION
 files, no field caches (`.einzel/`), no trajectories, no raw benchmark output,
 no personal paths.
 
@@ -145,6 +149,16 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **The validation corpus passes through the CLI alone, and the batch driver is
+  retired.** At `c43eace` the four reference cases run from the public surface
+  only: `einzel run` for the einzel lens and the DC quadrupole, `einzel fly`
+  with one 48-ion list per scan point for the RF quadrupole under a sinusoid
+  (213 points, 10,224 ions) and under a 50/50 rectangular drive (325 points,
+  15,600 ions). All four pass their evaluators (12/12, 20/20, 7/7, 7/7); with
+  a warm field cache the RF cases take 99.6 s and 172.5 s on 20 threads, and
+  every per-ion transmitted verdict equals the driver's at `098d410` (0 of
+  25,824 differ). `tools/quadbatch` and its solution entry are removed. No
+  product code changes. PR #19.
 - **A DC scan solves each moving electrode group once when the study asks for a
   field basis.** `"fieldBasis": "varyingElectrodes"` groups the electrodes a
   study's own points move (equal potentials at every sampled point) and builds
@@ -317,7 +331,7 @@ the PR number.
   decomposition the solve makes, and a test holds them equal to the keys of
   the channels actually solved. No numbers change. `SPEC.md` `FLD-3` set
   from Met to Partial: the key exists, the cache does not. PR #3.
-- **The task-10 batch driver lives here as `tools/quadbatch`.** Solve once,
+- **The task-10 batch driver lives here as `tools/quadbatch`** (retired in PR #19). Solve once,
   fly many ions with a per-ion RF phase, in process, until the library's
   public surface offers the same; listed in `Einzel.slnx` so CI builds it.
   Input handling hardened on review (gas refusal, warnings in the output,
