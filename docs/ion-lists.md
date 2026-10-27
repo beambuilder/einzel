@@ -470,8 +470,8 @@ model earns as under `run`, and what a row that throws does.
 
 An ion's RF phase in this list is its birth time: the ion born at `rfPhase` k/8 sees
 the drive's argument `f·(t + k/(8f)) + 0.75`, which is the argument
-`f·t + (k/8 − 1/4)` of the harness (`tools/quadbatch`) modulo one cycle. Flown so,
-the 48 ions agree with the harness in outcome and surface, and their final positions differ by less than a nanometre
+`f·t + (k/8 − 1/4)` of the validation project's harness (`tools/quadbatch`, retired in PR #19) modulo one cycle. Flown so,
+the 48 ions agreed with the harness in outcome and surface, and their final positions differed by less than a nanometre
 against both matching harness blocks (the two-channel field against the harness's
 four bases). An ion is transmitted, in the 06c cases' terms, when its final x is
 above 90 mm and its outcome is `StruckElectrode` (on the detector disc) or

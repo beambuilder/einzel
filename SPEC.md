@@ -383,7 +383,7 @@ left for its own decision; the PRJ-3 row says so.
 Measured: the 48-row corpus list through the 0.2 mm pixel-rod quadrupole at mass 100 u, warm
 cache, in 1.1 s wall (field ready 0.34 s, 48 ions flown in 0.40 s on 20 threads), against
 4.4 s for a 48-ion cloud through `run`; outcome and surface agree with the harness
-(`tools/quadbatch`) on 48 of 48 ions and final positions within 1 nm (both matching harness
+(`tools/quadbatch`, retired in PR #19) on 48 of 48 ions and final positions within 1 nm (both matching harness
 blocks). The 480-ion cloud as a list flies in 2.5 s wall (1.8 s flying) on 20 threads and
 15.75 s wall (15.0 s flying) on one, against 31.2 s wall for `run`, and its rows equal `run`'s
 events bit for bit. No `schemaVersion` or `solverBehaviourVersion` bump: no model format and

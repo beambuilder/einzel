@@ -5,8 +5,10 @@ writes a result with its manifest. A program that needs one field for many
 ions, each with its own launch, voltages or RF phase (a stability scan, an
 explicit ion list), can do the same in process: reference the engine
 assemblies, solve once, and fly as many ions as it likes against the field it
-holds. This page is the short version of how. The fork's batch driver,
-`tools/quadbatch`, is a complete program built this way.
+holds. This page is the short version of how. The fork's batch driver
+`tools/quadbatch` was a complete program built this way until `einzel fly`
+([Ion lists](ion-lists.md)) covered its use from the command line and it was
+retired (PR #19).
 
 ## What to reference
 
