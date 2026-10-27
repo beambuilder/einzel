@@ -163,6 +163,12 @@ public sealed record RunManifest
     public double? FieldSeconds { get; init; }
 
     /// <summary>
+    /// For a study built under a field basis other than the default patterns: the plan, its
+    /// channel hashes and the points that fell back to their own patterns; absent elsewhere.
+    /// </summary>
+    public FieldBasisRecord? FieldBasis { get; init; }
+
+    /// <summary>
     /// For an ion-list flight whose rows override model parameters: one entry per group of
     /// rows with the same overrides, in the order the groups were flown. Absent elsewhere.
     /// </summary>

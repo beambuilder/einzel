@@ -31,7 +31,8 @@ internal sealed class StudyFieldRun
     private readonly FieldCache? _cache;
     private readonly StudyDocument _study;
     private readonly string[] _parameters;
-    private readonly ConcurrentQueue<(long Call, double[] At, IReadOnlyList<SolveKey> Keys)> _seen = new();
+    private readonly ConcurrentQueue<(long Call, double[] At, IReadOnlyList<SolveKey> Keys, string? Fallback)> _seen = new();
+    private readonly ISolveStore _store;
     private long _calls;
     private int _bound;
     private int _solvedSeen;
@@ -40,16 +41,25 @@ internal sealed class StudyFieldRun
     /// <param name="store">The store behind the memo, or null to solve every channel.</param>
     /// <param name="study">The study, for its budget.</param>
     /// <param name="parameters">The parameters the study varies, whose values place an evaluation among the points.</param>
-    public StudyFieldRun(ISolveStore? store, StudyDocument study, IEnumerable<string> parameters)
+    /// <param name="basis">The study's field basis, or null for the default patterns.</param>
+    public StudyFieldRun(ISolveStore? store, StudyDocument study, IEnumerable<string> parameters, StudyFieldBasis? basis = null)
     {
         _memo = new SolveMemo(store);
         _cache = store as FieldCache;
         _study = study;
         _parameters = [.. parameters];
+        Basis = basis;
+        _store = basis is null ? _memo : new PlannedStore(_memo, basis);
     }
 
-    /// <summary>The store each evaluation builds its field through.</summary>
-    public ISolveStore Store => _memo;
+    /// <summary>
+    /// The store each evaluation builds its field through: the memo, which under a field basis
+    /// also says which plan each compiled point is built under (<see cref="IPlannedStore"/>).
+    /// </summary>
+    public ISolveStore Store => _store;
+
+    /// <summary>The study's field basis, or null for the default patterns.</summary>
+    public StudyFieldBasis? Basis { get; }
 
     /// <summary>The memo, for its counts.</summary>
     public SolveMemo Memo => _memo;
@@ -62,7 +72,9 @@ internal sealed class StudyFieldRun
     public void Record(CompiledModel model)
     {
         var call = Interlocked.Increment(ref _calls);
-        _seen.Enqueue((call, Values(model.Parameters), SolveHash.Of(model)));
+        var misfit = Basis?.Misfit(model);
+        var plan = misfit is null && Basis is { Plan.Groups.Count: > 0 } ? Basis.Plan : null;
+        _seen.Enqueue((call, Values(model.Parameters), SolveHash.Of(model, plan), misfit));
     }
 
     /// <summary>
@@ -116,8 +128,12 @@ internal sealed class StudyFieldRun
     /// The driver's points in its own order, as values of the varied parameters, the nominal
     /// excluded; null for a driver that evaluates one at a time, whose call order is its order.
     /// </param>
-    /// <returns>The keys, and what became of each channel in the cache (null without a cache or a channel).</returns>
-    public (IReadOnlyList<SolveKey> Solves, IReadOnlyList<FieldCacheUse>? Uses) Union(IReadOnlyList<double[]>? points)
+    /// <returns>
+    /// The keys, what became of each channel in the cache (null without a cache or a channel),
+    /// and each point that did not fit the field basis, with the reason.
+    /// </returns>
+    public (IReadOnlyList<SolveKey> Solves, IReadOnlyList<FieldCacheUse>? Uses, IReadOnlyList<string> Fallbacks) Union(
+        IReadOnlyList<double[]>? points)
     {
         int Position(double[] at)
         {
@@ -132,11 +148,12 @@ internal sealed class StudyFieldRun
             return points.Count;
         }
 
-        var ordered = points is null
+        var sorted = points is null
             ? _seen.OrderBy(seen => seen.Call)
             : _seen.OrderBy(seen => seen.Call == 1 ? -1 : Position(seen.At))
                 .ThenBy(seen => string.Join(';', seen.Keys.Select(key => string.Join(',', key.ChannelHashes))), StringComparer.Ordinal);
 
+        var ordered = sorted.ToList();
         var distinct = new HashSet<string>(StringComparer.Ordinal);
         List<SolveKey> solves = [.. ordered.SelectMany(seen => seen.Keys).Where(key => distinct.Add(
             string.Create(CultureInfo.InvariantCulture, $"{key.Field}|{key.GeometryHash}|{string.Join(',', key.ChannelHashes)}")))];
@@ -145,7 +162,99 @@ internal sealed class StudyFieldRun
             ? [.. used.DistinctBy(use => use.ChannelHash)]
             : (IReadOnlyList<FieldCacheUse>?)null;
 
-        return (solves, uses);
+        // One entry per point, told apart by value; each value written to round-trip.
+        List<string> fallbacks = [.. ordered
+            .Where(seen => seen.Fallback is not null)
+            .DistinctBy(seen => seen.At, PointComparer.Instance)
+            .Select(seen => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{string.Join(", ", _parameters.Select((name, k) => $"{name} = {seen.At[k]:R}"))}: {seen.Fallback}"))];
+
+        return (solves, uses, fallbacks);
+    }
+
+    /// <summary>
+    /// A store that says which plan each compiled point is built under: the study's field
+    /// basis when the point fits it, the default decomposition otherwise.
+    /// </summary>
+    internal interface IPlannedStore : ISolveStore
+    {
+        /// <summary>The plan a point's field is built under.</summary>
+        /// <param name="model">The point's compiled model.</param>
+        /// <returns>The plan, or null for the default decomposition.</returns>
+        FieldBasisPlan? PlanFor(CompiledModel model);
+    }
+
+    /// <summary>The memo, with the study's basis beside it.</summary>
+    private sealed class PlannedStore(SolveMemo memo, StudyFieldBasis basis) : IPlannedStore
+    {
+        public FieldBasisPlan? PlanFor(CompiledModel model) => basis.PlanFor(model);
+
+        public bool TryLoad(
+            SolveEntry entry,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out double[]? potential,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SolveRecord? record) =>
+            memo.TryLoad(entry, out potential, out record);
+
+        public void Save(SolveEntry entry, ReadOnlySpan<double> potential, SolveRecord record) =>
+            memo.Save(entry, potential, record);
+    }
+
+    /// <summary>Says what the study's fields cost, and under a field basis what its plan was.</summary>
+    /// <param name="announce">Where the lines go, or null.</param>
+    public void Announce(Action<string>? announce)
+    {
+        announce?.Invoke(Line());
+
+        if (Basis is not null)
+        {
+            announce?.Invoke(BasisLine(_seen.Where(seen => seen.Fallback is not null).Select(seen => seen.At).Distinct(PointComparer.Instance).Count()));
+        }
+    }
+
+    /// <summary>
+    /// The line a study that asked for a field basis prints about its plan: the groups, the
+    /// elements left out and why, the points that fell back; or that no element qualified.
+    /// </summary>
+    private string BasisLine(int fallbacks)
+    {
+        var skipped = string.Join("; ", Basis!.Skipped);
+
+        if (Basis.Plan.Groups.Count == 0)
+        {
+            return "  field basis: varying electrodes requested; no element qualifies ("
+                + (skipped.Length > 0 ? skipped : "no electrode moves between the sampled points") + ")";
+        }
+
+        var groups = string.Join("; ", Basis.Plan.Groups.OrderBy(pair => pair.Key).Select(pair =>
+            $"field {pair.Key}: " + string.Join(" | ", pair.Value.Select(group => string.Join("+", group)))));
+
+        var left = skipped.Length > 0 ? "; not planned: " + skipped : string.Empty;
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"  field basis: varying electrodes, {groups}; {fallbacks} point(s) fell back to their own patterns{left}");
+    }
+
+    /// <summary>Two points are one when every varied parameter holds the same value (NaN equal to NaN, -0 to 0).</summary>
+    private sealed class PointComparer : IEqualityComparer<double[]>
+    {
+        public static PointComparer Instance { get; } = new();
+
+        public bool Equals(double[]? x, double[]? y) =>
+            ReferenceEquals(x, y) || (x is not null && y is not null && x.SequenceEqual(y));
+
+        public int GetHashCode(double[] obj)
+        {
+            var hash = new HashCode();
+
+            foreach (var value in obj)
+            {
+                hash.Add(value);
+            }
+
+            return hash.ToHashCode();
+        }
     }
 
     /// <summary>The one line a study prints about its fields, as <c>run</c> does.</summary>

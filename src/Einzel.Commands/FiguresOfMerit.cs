@@ -1365,7 +1365,7 @@ public static class FiguresOfMerit
             });
         }
 
-        var (field, fieldWarnings) = Fields.FieldAssembly.BuildReported(model, store);
+        var (field, fieldWarnings) = Fields.FieldAssembly.BuildReported(model, store, PlanFor(model, store));
 
         if (model.Phases.Count > 0)
         {
@@ -2184,6 +2184,13 @@ public static class FiguresOfMerit
         SpaceChargeMode = "none",
     };
 
+    /// <summary>
+    /// The field basis plan a study's store builds this model under, or null - the default
+    /// decomposition - for any other store and for a point that does not fit the study's plan.
+    /// </summary>
+    private static Fields.Solved.FieldBasisPlan? PlanFor(CompiledModel model, ISolveStore? store) =>
+        (store as StudyFieldRun.IPlannedStore)?.PlanFor(model);
+
     /// <summary>Where and how fast an ion at a given fractional energy offset starts.</summary>
     /// <remarks>
     /// <b>Energy scales as the square of speed</b>, so a fractional energy offset is a
@@ -2211,11 +2218,11 @@ public static class FiguresOfMerit
             // Nowhere to carry a taint onto, so the only honest options are the two
             // FieldAssembly offers - refuse, or hide it - and hiding it is how the
             // segmented quadrupole sat at the wrong working point for a revision.
-            field = FieldAssembly.Build(model, store);
+            field = FieldAssembly.Build(model, store, PlanFor(model, store));
         }
         else
         {
-            var (built, fieldWarnings) = FieldAssembly.BuildReported(model, store);
+            var (built, fieldWarnings) = FieldAssembly.BuildReported(model, store, PlanFor(model, store));
 
             Forward(fieldWarnings, report);
             field = built;

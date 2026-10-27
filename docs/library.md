@@ -111,6 +111,38 @@ linear problem. `Create` refuses what a caller can get wrong: counts that
 disagree, a term naming a drive that does not exist, a non-finite weight or
 phase, a frequency that is not finite and positive.
 
+For many fields that differ in DC potentials, the builders do the split
+themselves: `FieldAssembly.BuildReported(model, store, plan)` takes a
+`FieldBasisPlan`, per solved element the groups of electrodes that get a DC
+channel of their own (one volt, weighted by the group's potential) while the
+rest keep their potentials in one fixed channel. Two models that differ only
+in a group's potential then have the same channel keys (`SolveHash.Of(model,
+plan)`) and share their solves through the store. A static element under a
+plan is a `WeightedSolvedField`, a time-free weighted sum, so it flies as a
+static field does; a driven one is the `DrivenSolvedField` it always was, with
+more channels. A plan of nothing is the default decomposition, bit for bit.
+
+What a plan refuses, and what it leaves alone:
+
+- **Groups are disjoint.** `new FieldBasisPlan(groups)` refuses an electrode
+  named twice within one element, in two groups or twice in one, an empty
+  group and a negative element index (`ArgumentException`); a static element
+  would otherwise count the electrode once per group.
+- **Every name is an electrode.** `BuildReported`, `Build`, `SolveHash.Of`
+  and the builders' `Holdings` refuse, before solving anything, an element the
+  model does not solve and a name the element does not declare.
+- **A group's electrodes hold one potential, or the element decides.** In a
+  static element such a group is a unit channel; one whose electrodes differ
+  stays in the fixed channel at their potentials. In a driven element a group
+  whose electrodes differ is a channel of its own, normalised to its leading
+  electrode, whose pattern changes whenever their ratio does.
+- **A driven group at 0 V has no channel.** It feeds no supply, so the keys
+  are shared between two potentials of a group that are both non-zero, not
+  between zero and non-zero; a static element keeps the unit channel at
+  weight zero.
+- **Left alone:** an edge profile, whose volts are its profile, and an element
+  that steps through stages, which keeps the default decomposition.
+
 ## The time-free trap
 
 `DrivenSolvedField` is an `ITimeVaryingField`, and every time-varying field is

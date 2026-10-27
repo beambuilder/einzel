@@ -429,7 +429,7 @@ public static class StudyCommand
         IReadOnlyList<double[]>? points,
         int maxParallelism)
     {
-        var (solves, uses) = fields.Union(points);
+        var (solves, uses, fallbacks) = fields.Union(points);
 
         var manifest = new RunManifest
         {
@@ -455,6 +455,7 @@ public static class StudyCommand
             FieldCache = uses,
             MaxParallelism = maxParallelism,
             FieldSeconds = fields.Memo.FieldSeconds,
+            FieldBasis = fields.Basis?.Record(fallbacks),
             Seeds = [seed],
             Extensions = extension is null ? [] : [extension.Identity],
             Interpreter = extension?.Interpreter,
@@ -528,8 +529,10 @@ public static class StudyCommand
             });
         }
 
-        // A budget in a unit that is not memory is refused here, before anything is solved.
+        // A budget in a unit that is not memory, or a basis this build does not know, is
+        // refused here, before anything is solved.
         _ = StudyBinding.MemoryBudget(study);
+        _ = StudyBinding.FieldBasis(study);
 
         // Relative to the study, not to the working directory: a study travels
         // with the project and should mean the same thing from anywhere in it.
@@ -592,7 +595,7 @@ public static class StudyCommand
         var inputHashes = RunInputs.Capture(document, modelPath, project.Root, absolute);
         var ledger = new WarningLedger();
 
-        var fields = new StudyFieldRun(store, study, channels.Select(channel => channel.Parameter));
+        var fields = new StudyFieldRun(store, study, channels.Select(channel => channel.Parameter), Basis(study, document, modelPath));
         var evaluate = Evaluate(
             figure.Name, project, study.EnergySpread, study.Ions, ledger, fields, out var extension);
 
@@ -607,7 +610,7 @@ public static class StudyCommand
             Path.GetDirectoryName(modelPath),
             study.MaxParallelism);
 
-        announce?.Invoke(fields.Line());
+        fields.Announce(announce);
 
         // The sweep's own order of points: its draws, then each channel's two extremes.
         var nominal = fields.Nominal;
@@ -724,7 +727,7 @@ public static class StudyCommand
         var inputHashes = RunInputs.Capture(document, modelPath, project.Root, absolute);
         var ledger = new WarningLedger();
 
-        var fields = new StudyFieldRun(store, study, [axis.Parameter]);
+        var fields = new StudyFieldRun(store, study, [axis.Parameter], Basis(study, document, modelPath));
         var evaluate = Evaluate(
             figure.Name, project, study.EnergySpread, study.Ions, ledger, fields, out var extension);
 
@@ -732,7 +735,7 @@ public static class StudyCommand
             document, axis, evaluate, Path.GetDirectoryName(modelPath),
             study.MaxParallelism);
 
-        announce?.Invoke(fields.Line());
+        fields.Announce(announce);
 
         // One conversion out of SI for the figure and one for the scan variable, so
         // nothing leaves here as a bare number under a label it does not match.
@@ -849,7 +852,7 @@ public static class StudyCommand
         var inputHashes = RunInputs.Capture(document, modelPath, project.Root, absolute);
         var ledger = new WarningLedger();
 
-        var fields = new StudyFieldRun(store, study, [axis.Parameter]);
+        var fields = new StudyFieldRun(store, study, [axis.Parameter], Basis(study, document, modelPath));
         var evaluate = Evaluate(
             figure.Name, project, study.EnergySpread, study.Ions, ledger, fields, out var extension);
 
@@ -863,7 +866,7 @@ public static class StudyCommand
             budget,
             Path.GetDirectoryName(modelPath));
 
-        announce?.Invoke(fields.Line());
+        fields.Announce(announce);
 
         var outcome = new BoundaryOutcome
         {
@@ -958,7 +961,7 @@ public static class StudyCommand
         var inputHashes = RunInputs.Capture(document, modelPath, project.Root, absolute);
         var ledger = new WarningLedger();
 
-        var fields = new StudyFieldRun(store, study, variables.Select(variable => variable.Parameter));
+        var fields = new StudyFieldRun(store, study, variables.Select(variable => variable.Parameter), Basis(study, document, modelPath));
 
         var result = Optimiser.Run(
             document,
@@ -976,7 +979,7 @@ public static class StudyCommand
             },
             Path.GetDirectoryName(modelPath));
 
-        announce?.Invoke(fields.Line());
+        fields.Announce(announce);
 
         var best = new Dictionary<string, MeasuredJson>(StringComparer.Ordinal);
 
@@ -1062,6 +1065,10 @@ public static class StudyCommand
 
         return survey;
     }
+
+    /// <summary>The study's field basis, or null for the default patterns.</summary>
+    private static StudyFieldBasis? Basis(StudyDocument study, ModelDocument document, string modelPath) =>
+        StudyFieldBasis.For(study, document, Path.GetDirectoryName(modelPath));
 
     /// <summary>An empty envelope, for a dry run that computed nothing.</summary>
     private static Core.Results.Measured Empty(FigureOfMeritInfo figure)

@@ -151,7 +151,7 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
     /// This is what <c>einzel run</c> builds for a driven solved element, without the solve and
     /// without the decomposition into channels: the caller chooses the basis fields and their
     /// weights. A solve-once, fly-many host builds its basis fields once with
-    /// <see cref="FieldAssembly.BuildReported"/>, and then one field per ion from here with that
+    /// <see cref="FieldAssembly.BuildReported(CompiledModel, ISolveStore)"/>, and then one field per ion from here with that
     /// ion's voltages and phase. The channels are shared, not copied, and every field involved
     /// is immutable, so many of these may sample the same channels from many threads.
     /// </para>

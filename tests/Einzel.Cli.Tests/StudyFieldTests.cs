@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Einzel.Commands;
 using Einzel.Core.Model;
 using Einzel.Core.Units;
@@ -95,8 +96,15 @@ public sealed class StudyFieldTests : IDisposable
         }
     }
 
-    /// <summary>A project holding the plates, and a scan of one of its parameters.</summary>
-    private string Scan(string name, string parameter, double from, double to, int points, string extra = "")
+    /// <summary>The plates with no drive: a static element whose every potential is one channel by default.</summary>
+    private static string StaticPlates =>
+        Regex.Replace(
+            Regex.Replace(Plates, @",\s*""driveAmplitude"": \{[^}]*\}", string.Empty),
+            @"""drive"": \{ ""frequency"": \{[^}]*\}, ""waveform"": ""sinusoid"" \},",
+            string.Empty);
+
+    /// <summary>A project holding the plates, driven and static, and a scan of one of their parameters.</summary>
+    private string Scan(string name, string parameter, double from, double to, int points, string extra = "", string model = "plates")
     {
         var models = Path.Combine(_root, "models");
 
@@ -105,6 +113,7 @@ public sealed class StudyFieldTests : IDisposable
             Assert.Equal(0, Run("init", _root).ExitCode);
             Directory.CreateDirectory(models);
             File.WriteAllText(Path.Combine(models, "plates.json"), Plates);
+            File.WriteAllText(Path.Combine(models, "static.json"), StaticPlates);
         }
 
         var study = Path.Combine(_root, "studies", name + ".json");
@@ -112,7 +121,7 @@ public sealed class StudyFieldTests : IDisposable
         File.WriteAllText(study, FormattableString.Invariant($$"""
             {
               "name": "{{name}}",
-              "model": "../models/plates.json",
+              "model": "../models/{{model}}.json",
               "figureOfMerit": "transmission",
               "ions": 3,
               {{extra}}
@@ -448,6 +457,308 @@ public sealed class StudyFieldTests : IDisposable
         Assert.Equal(0, Run("scan", amplitude).ExitCode);
         a = Cost(amplitude);
         Assert.Equal((0, 0, 2), (a.SolvingEvaluations, a.SolvedChannels, a.LoadedChannels));
+    }
+
+    /// <summary>
+    /// Under <c>"fieldBasis": "varyingElectrodes"</c> a DC scan solves the fixed channel, the moving
+    /// plate's unit channel and, when driven, the drive's once, and every point re-weights them;
+    /// its repeat loads them. Every point's figure is the default path's, which solves a pattern
+    /// per point. The manifest records the plan.
+    /// </summary>
+    /// <remarks>
+    /// Mutations: the study's store not handing its plan to the field build, the plan not
+    /// recorded, and the survey counting the default channels, each fail here.
+    /// </remarks>
+    [Theory]
+    [InlineData("plates", 3)]
+    [InlineData("static", 2)]
+    public void UnderTheVaryingElectrodesBasisADcScanSolvesItsChannelsOnce(string model, int channels)
+    {
+        var basis = Scan("basis", "U", 50, 250, 5, "\"fieldBasis\": \"varyingElectrodes\", \"maxParallelism\": 2,", model);
+        var patterns = Scan("patterns", "U", 50, 250, 5, "\"maxParallelism\": 2,", model);
+
+        var dry = JsonNode.Parse(Run("scan", basis, "--dry-run", "--json").Stdout)!["field"]!;
+        Assert.Equal((channels, 0, 1), ((int)dry["channels"]!, (int)dry["pointChannels"]!, (int)dry["solvingEvaluations"]!));
+
+        var cold = Run("scan", basis, "--json");
+        Assert.Equal(0, cold.ExitCode);
+        Assert.StartsWith(
+            FormattableString.Invariant($"  field: {channels} channel(s) solved, 0 loaded from the cache, {5 * channels} reused in memory, "),
+            FieldLine(cold.Stderr), StringComparison.Ordinal);
+        Assert.Contains("  field basis: varying electrodes, field 0: upper; 0 point(s) fell back", cold.Stderr, StringComparison.Ordinal);
+
+        var manifest = Manifest("basis");
+        var element = Assert.Single(manifest.FieldBasis!.Elements);
+        Assert.Equal((StudyFieldBasis.VaryingElectrodes, 0), (manifest.FieldBasis.Kind, element.Field));
+        Assert.Equal([["upper"]], element.Groups);
+        Assert.Equal(Assert.Single(manifest.Solves!).ChannelHashes, element.ChannelHashes);
+        Assert.Equal(channels, element.ChannelHashes.Count);
+        Assert.Empty(manifest.FieldBasis.Fallbacks);
+
+        Assert.StartsWith(
+            FormattableString.Invariant($"  field: 0 channel(s) solved, {channels} loaded from the cache, "),
+            FieldLine(Run("scan", basis, "--json").Stderr), StringComparison.Ordinal);
+
+        var direct = Run("scan", patterns, "--json");
+        Assert.Null(Manifest("patterns").FieldBasis);
+        Assert.Equal(
+            JsonNode.Parse(direct.Stdout)!["points"]!.ToJsonString(),
+            JsonNode.Parse(cold.Stdout)!["points"]!.ToJsonString());
+    }
+
+    /// <summary>
+    /// The basis is decided from the study's points, and a compiled model that departs from it -
+    /// here an electrode every point held fixed - is built with its own patterns and named.
+    /// </summary>
+    /// <remarks>Mutations: a fixed electrode's change, or a group whose electrodes part, not noticed, each fail here.</remarks>
+    [Fact]
+    public void AModelThatDoesNotFitTheBasisIsBuiltWithItsOwnPatterns()
+    {
+        var study = StudyCommand.Load(Scan("basis", "U", 50, 250, 5, "\"fieldBasis\": \"varyingElectrodes\",")).Study;
+        var document = ModelJson.Parse(Plates);
+        var basis = StudyFieldBasis.For(study, document, null)!;
+
+        Assert.Equal([["upper"]], basis.Plan.GroupsOf(0));
+        Assert.Same(basis.Plan, basis.PlanFor(ModelValidator.Validate(
+            document, new Dictionary<string, Quantity>(StringComparer.Ordinal) { ["U"] = Quantity.From(70.0, "V") }).Model!));
+
+        var moved = ModelValidator.Validate(ModelJson.Parse(Plates.Replace(
+            "\"potential\": { \"value\": -1, \"unit\": \"V\" }", "\"potential\": { \"value\": -3, \"unit\": \"V\" }", StringComparison.Ordinal))).Model!;
+        Assert.Equal("electrode 'lower' of field 0 holds -3 V, where every sampled point held -1 V", basis.Misfit(moved));
+        Assert.Null(basis.PlanFor(moved));
+
+        // Two plates the study moves together are one group, and a model where they part fits no more.
+        var together = Plates.Replace("\"potential\": { \"value\": -1, \"unit\": \"V\" }", "\"potential\": { \"expression\": \"U\", \"unit\": \"V\" }", StringComparison.Ordinal);
+        var pair = StudyFieldBasis.For(study, ModelJson.Parse(together), null)!;
+        Assert.Equal([["upper", "lower"]], pair.Plan.GroupsOf(0));
+        Assert.Contains("hold different potentials", pair.Misfit(moved), StringComparison.Ordinal);
+
+        // Two plates the study moves apart are two groups.
+        var apart = Plates.Replace("\"potential\": { \"value\": -1, \"unit\": \"V\" }", "\"potential\": { \"expression\": \"-U\", \"unit\": \"V\" }", StringComparison.Ordinal);
+        Assert.Equal([["upper"], ["lower"]], StudyFieldBasis.For(study, ModelJson.Parse(apart), null)!.Plan.GroupsOf(0));
+
+        Assert.Null(StudyFieldBasis.For(study with { FieldBasis = "patterns" }, document, null));
+    }
+
+    /// <summary>
+    /// A sweep's draws come from its seed before anything is evaluated, so the basis is decided
+    /// from every draw: two plates the channel extremes move together but the draws move apart are
+    /// two groups, no draw falls back, and the dry run counts the channels the run solves.
+    /// </summary>
+    /// <remarks>
+    /// Before, the plan came from the channel extremes alone, grouped the plates, and every draw
+    /// fell back to its own patterns while the dry run said one evaluation would solve.
+    /// Mutations: the draws not sampled, and the dry run's basis note given to a sweep, each fail here.
+    /// </remarks>
+    [Fact]
+    public void ASweepsBasisIsDecidedFromItsDrawsAndItsDryRunCountsWhatItSolves()
+    {
+        Scan("unused", "U", 0, 1, 2);
+        var coupled = Regex.Replace(StaticPlates, @"""parameters"": \{", """
+            "parameters": { "P": { "value": 2, "unit": "V" }, "Q": { "value": 3, "unit": "V" },
+              "P0": { "value": 2, "unit": "V" }, "Q0": { "value": 3, "unit": "V" }, "one": { "value": 1, "unit": "V" },
+            """)
+            .Replace("\"potential\": { \"expression\": \"U\", \"unit\": \"V\" }", "\"potential\": { \"expression\": \"P\", \"unit\": \"V\" }", StringComparison.Ordinal)
+            .Replace("\"potential\": { \"value\": -1, \"unit\": \"V\" }", "\"potential\": { \"expression\": \"P + (P - P0) * (Q - Q0) / one\", \"unit\": \"V\" }", StringComparison.Ordinal);
+        File.WriteAllText(Path.Combine(_root, "models", "coupled.json"), coupled);
+
+        var study = Path.Combine(_root, "studies", "sweep.json");
+        File.WriteAllText(study, """
+            {
+              "model": "../models/coupled.json",
+              "figureOfMerit": "transmission",
+              "ions": 3,
+              "fieldBasis": "varyingElectrodes",
+              "maxParallelism": 2,
+              "channels": [
+                { "parameter": "P", "halfWidth": 1, "unit": "V" },
+                { "parameter": "Q", "halfWidth": 1, "unit": "V" }
+              ],
+              "draws": 3, "seed": 4, "oneAtATime": true
+            }
+            """);
+
+        var dry = JsonNode.Parse(Run("sweep", study, "--dry-run", "--json").Stdout)!["field"]!;
+        Assert.Equal((2, 0, 1), ((int)dry["channels"]!, (int)dry["pointChannels"]!, (int)dry["solvingEvaluations"]!));
+        Assert.Null(dry["basisNote"]);
+
+        var run = Run("sweep", study, "--json");
+        Assert.Equal(0, run.ExitCode);
+        Assert.StartsWith("  field: 2 channel(s) solved, 0 loaded from the cache, ", FieldLine(run.Stderr), StringComparison.Ordinal);
+        Assert.Contains("field 0: upper | lower; 0 point(s) fell back to their own patterns", run.Stderr, StringComparison.Ordinal);
+
+        var manifest = RunManifest.FromJson(File.ReadAllText(Path.Combine(_root, "results", "sweep.sweep.manifest.json")))!;
+        Assert.Equal([["upper"], ["lower"]], Assert.Single(manifest.FieldBasis!.Elements).Groups);
+        Assert.Empty(manifest.FieldBasis.Fallbacks);
+    }
+
+    /// <summary>
+    /// An optimisation finds its points as it runs, and samples only the bounds of its first
+    /// three variables: here the fourth moves the plate every sample held fixed, so every
+    /// evaluation falls back - and is built the way the default path builds it, so the whole
+    /// optimisation is the default path's to the bit. Each fallback names its point to the bit,
+    /// and the dry run and the estimate say such points are not sampled.
+    /// </summary>
+    /// <remarks>
+    /// Mutations: a misfit built under the plan, a fallback not recorded or named with nine
+    /// digits (its point or the potentials), the dry run's or the estimate's note left out,
+    /// each fail here.
+    /// </remarks>
+    [Fact]
+    public void AnOptimisationsPointOutsideThePlanIsBuiltAsTheDefaultPathBuildsIt()
+    {
+        Scan("unused", "U", 0, 1, 2);
+        var four = Regex.Replace(StaticPlates, @"""parameters"": \{", """
+            "parameters": { "A": { "value": 2, "unit": "V" }, "B": { "value": 0, "unit": "V" },
+              "C": { "value": 0, "unit": "V" }, "D": { "value": -1.23456789012345, "unit": "V" },
+            """)
+            .Replace("\"potential\": { \"expression\": \"U\", \"unit\": \"V\" }", "\"potential\": { \"expression\": \"A + B + C\", \"unit\": \"V\" }", StringComparison.Ordinal)
+            .Replace("\"potential\": { \"value\": -1, \"unit\": \"V\" }", "\"potential\": { \"expression\": \"D\", \"unit\": \"V\" }", StringComparison.Ordinal);
+        File.WriteAllText(Path.Combine(_root, "models", "four.json"), four);
+
+        string Study(string name, string basis)
+        {
+            var path = Path.Combine(_root, "studies", name + ".json");
+            File.WriteAllText(path, $$"""
+                {
+                  "model": "../models/four.json",
+                  "figureOfMerit": "flightTime",
+                  {{basis}}
+                  "variables": [
+                    { "parameter": "A", "minimum": 1, "maximum": 3, "unit": "V" },
+                    { "parameter": "B", "minimum": -0.5, "maximum": 0.5, "unit": "V" },
+                    { "parameter": "C", "minimum": -0.5, "maximum": 0.5, "unit": "V" },
+                    { "parameter": "D", "minimum": 1.12345678901234, "maximum": 2, "unit": "V" }
+                  ],
+                  "algorithm": "nelderMead",
+                  "maximumEvaluations": 10
+                }
+                """);
+            return path;
+        }
+
+        var basis = Study("fourBasis", "\"fieldBasis\": \"varyingElectrodes\",");
+        var patterns = Study("fourPatterns", string.Empty);
+
+        var dry = JsonNode.Parse(Run("optimise", basis, "--dry-run", "--json").Stdout)!["field"]!;
+        Assert.Equal("search points are not sampled; a point that does not fit the plan solves its own patterns", (string?)dry["basisNote"]);
+        Assert.Contains("; search points are not sampled;", Run("optimise", basis, "--dry-run").Stdout, StringComparison.Ordinal);
+        Assert.Contains(
+            "Under the field basis the search points are not sampled",
+            (string?)JsonNode.Parse(Run("estimate", basis, "--json").Stdout)!["basis"],
+            StringComparison.Ordinal);
+
+        var planned = Run("optimise", basis, "--json");
+        var direct = Run("optimise", patterns, "--json");
+        Assert.Equal(direct.ExitCode, planned.ExitCode);
+
+        static string Outcome(string stdout)
+        {
+            var node = JsonNode.Parse(stdout)!.AsObject();
+            node.Remove("studyPath");
+            node.Remove("artifacts");
+            return node.ToJsonString();
+        }
+
+        Assert.Equal(Outcome(direct.Stdout), Outcome(planned.Stdout));
+
+        var record = RunManifest.FromJson(File.ReadAllText(Path.Combine(_root, "results", "fourBasis.optimise.manifest.json")))!.FieldBasis!;
+        Assert.Equal([["upper"]], Assert.Single(record.Elements).Groups);
+        Assert.Contains(
+            "A = 2, B = 0, C = 0, D = 1.12345678901234: electrode 'lower' of field 0 holds 1.12345678901234 V, where every sampled point held -1.23456789012345 V",
+            record.Fallbacks);
+        Assert.Contains(
+            FormattableString.Invariant($"; {record.Fallbacks.Count} point(s) fell back to their own patterns"),
+            planned.Stderr,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A study that asks for the basis and gets no plan says so on stderr and in the manifest:
+    /// an element whose geometry the study moves is named as skipped, with the reason, and a scan
+    /// that moves no electrode says that.
+    /// </summary>
+    /// <remarks>
+    /// Before, both ran the default path with no line and no record. Mutations: an empty plan
+    /// dropped (no basis at all), the skipped element not named, the record without its skipped
+    /// list, each fail here.
+    /// </remarks>
+    [Fact]
+    public void AStudyThatAsksForTheBasisAndGetsNoPlanSaysSo()
+    {
+        Scan("unused", "U", 0, 1, 2);
+        File.WriteAllText(
+            Path.Combine(_root, "models", "gap.json"),
+            Regex.Replace(StaticPlates, @"""parameters"": \{", "\"parameters\": { \"G\": { \"value\": 2.1, \"unit\": \"mm\" },")
+                .Replace("\"minY\": { \"value\": 2.1, \"unit\": \"mm\" }", "\"minY\": { \"expression\": \"G\", \"unit\": \"mm\" }", StringComparison.Ordinal));
+
+        var study = Path.Combine(_root, "studies", "gap.json");
+        File.WriteAllText(study, """
+            {
+              "name": "gap",
+              "model": "../models/gap.json",
+              "figureOfMerit": "transmission",
+              "ions": 3,
+              "fieldBasis": "varyingElectrodes",
+              "scan": { "parameter": "G", "from": 2.0, "to": 2.2, "unit": "mm", "points": 2 }
+            }
+            """);
+
+        var run = Run("scan", study, "--json");
+        Assert.Equal(0, run.ExitCode);
+        Assert.Contains(
+            "  field basis: varying electrodes requested; no element qualifies (field 0: geometry differs between sampled points)",
+            run.Stderr,
+            StringComparison.Ordinal);
+
+        var record = Manifest("gap").FieldBasis!;
+        Assert.Empty(record.Elements);
+        Assert.Equal(["field 0: geometry differs between sampled points"], record.Skipped);
+
+        var amplitude = Scan("amplitude", "V", 4, 7, 2, "\"fieldBasis\": \"varyingElectrodes\",");
+        Assert.Contains(
+            "  field basis: varying electrodes requested; no element qualifies (no electrode moves between the sampled points)",
+            Run("scan", amplitude, "--json").Stderr,
+            StringComparison.Ordinal);
+        Assert.Empty(Manifest("amplitude").FieldBasis!.Skipped);
+    }
+
+    /// <summary>
+    /// The record lists every channel of the plan, worked out from the plan and the study's points
+    /// rather than from the first evaluation: here the nominal holds the moving plate at 0 V, where
+    /// a driven group has no channel, and the record still names its unit channel beside the fixed
+    /// one and the drive's.
+    /// </summary>
+    /// <remarks>Mutation: the channels read from the nominal model alone fails here.</remarks>
+    [Fact]
+    public void ABasisRecordsEveryChannelOfItsPlanWhateverTheNominalHolds()
+    {
+        Scan("unused", "U", 0, 1, 2);
+        File.WriteAllText(
+            Path.Combine(_root, "models", "zero.json"),
+            Plates.Replace("\"U\": { \"value\": 2, \"unit\": \"V\" }", "\"U\": { \"value\": 0, \"unit\": \"V\" }", StringComparison.Ordinal));
+
+        var study = Scan("zero", "U", 1, 3, 3, "\"fieldBasis\": \"varyingElectrodes\",", "zero");
+        Assert.Equal(0, Run("scan", study, "--json").ExitCode);
+
+        var manifest = Manifest("zero");
+        var element = Assert.Single(manifest.FieldBasis!.Elements);
+        Assert.Equal(3, element.ChannelHashes.Count);
+        Assert.Equal(
+            manifest.Solves!.SelectMany(key => key.ChannelHashes).Distinct().Order(StringComparer.Ordinal),
+            element.ChannelHashes.Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>A field basis this build does not know is refused before anything is solved.</summary>
+    [Fact]
+    public void AnUnknownFieldBasisIsRefused()
+    {
+        var study = Scan("basis", "U", 50, 250, 2, "\"fieldBasis\": \"perElectrode\",");
+
+        var (exitCode, stdout, stderr) = Run("scan", study, "--json");
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("/fieldBasis", stdout + stderr, StringComparison.Ordinal);
     }
 
     /// <summary>

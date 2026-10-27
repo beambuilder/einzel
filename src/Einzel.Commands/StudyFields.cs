@@ -80,6 +80,13 @@ public sealed record StudyFieldSurvey
     /// otherwise).
     /// </summary>
     public required double PeakMiB { get; init; }
+
+    /// <summary>
+    /// Under a field basis whose driver finds its points as it runs (a boundary search, an
+    /// optimisation): that those points are not sampled, and one that does not fit the plan
+    /// solves its own patterns, which these counts do not include. Null otherwise.
+    /// </summary>
+    public string? BasisNote { get; init; }
 }
 
 /// <summary>Surveys a study's fields: see <see cref="StudyFieldSurvey"/>.</summary>
@@ -106,7 +113,12 @@ public static class StudyFields
             return null;
         }
 
-        var nominalKeys = SolveHash.Of(nominal);
+        // Under a field basis the keys are the plan's, so the survey counts the channels the
+        // study will actually solve.
+        var basis = StudyFieldBasis.For(study, document, directory);
+        IReadOnlyList<SolveKey> Keys(CompiledModel model) => SolveHash.Of(model, basis?.PlanFor(model));
+
+        var nominalKeys = Keys(nominal);
         var nominalChannels = nominalKeys.SelectMany(key => key.ChannelHashes).Distinct(StringComparer.Ordinal).ToList();
         var keys = new List<SolveKey>(nominalKeys);
         var added = new HashSet<string>(StringComparer.Ordinal);
@@ -121,7 +133,7 @@ public static class StudyFields
                 continue;
             }
 
-            var sampled = SolveHash.Of(compiled);
+            var sampled = Keys(compiled);
             var adds = sampled.SelectMany(key => key.ChannelHashes)
                 .Where(hash => !nominalChannels.Contains(hash, StringComparer.Ordinal))
                 .Distinct(StringComparer.Ordinal)
@@ -146,6 +158,12 @@ public static class StudyFields
         var atOnce = pointsSolve ? Math.Min(parallelism, Math.Max(1, evaluations - 1)) : Math.Min(solving, 1);
 
         var (solvePeak, channelBytes) = Memory(nominal);
+
+        if (basis is not null)
+        {
+            // The plan's channels, each the size the default decomposition's are.
+            channelBytes *= (double)nominalChannels.Count / Math.Max(1, SolveHash.Of(nominal).Sum(key => key.ChannelHashes.Count));
+        }
         var budget = (double)Budget(study, (long)channelBytes);
 
         return new StudyFieldSurvey
@@ -164,6 +182,9 @@ public static class StudyFields
             ChannelMiB = channelBytes / Mebibyte,
             BudgetMiB = budget / Mebibyte,
             PeakMiB = ((atOnce * solvePeak) + (pointChannels > 0 ? budget : channelBytes)) / Mebibyte,
+            BasisNote = basis is { SamplesEveryPoint: false }
+                ? "search points are not sampled; a point that does not fit the plan solves its own patterns"
+                : null,
         };
     }
 

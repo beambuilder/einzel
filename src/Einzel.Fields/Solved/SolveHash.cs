@@ -30,7 +30,7 @@ namespace Einzel.Fields.Solved;
 /// <para>
 /// <b>What is out, and why.</b> Names and labels, which the solver never reads. The mirror
 /// plane, the extrusion tilt and whether the boundary is reported as discontinuous, which
-/// are applied to a solved field afterwards (<see cref="GeometryBuilder.Build"/>,
+/// are applied to a solved field afterwards (<see cref="GeometryBuilder.Build(CompiledSolvedField, ISolveStore)"/>,
 /// <c>FieldAssembly</c>) and so let one solve serve several placements. Potentials, taps,
 /// drives and stages, which reach the solver only as a channel's pattern and are hashed
 /// there. Declaration order stays in: it decides how a pattern is normalised (the leading
@@ -217,7 +217,7 @@ public static class SolveHash
     /// <b>Before the solve, from the decomposition the solve itself makes.</b> A cache has to
     /// know the key before it can decide not to solve, so these cannot be read off the solved
     /// channels; they come from the same pattern list the builders solve
-    /// (<see cref="GeometryBuilder.Holdings"/>, <see cref="GeometryBuilder3D.Holdings"/>), and
+    /// (<see cref="GeometryBuilder.Holdings(CompiledSolvedField)"/>, <see cref="GeometryBuilder3D.Holdings(Geometry3D)"/>), and
     /// a test holds them equal to the keys of the channels that were actually solved.
     /// </para>
     /// <para>
@@ -225,9 +225,20 @@ public static class SolveHash
     /// touches no mesh.
     /// </para>
     /// </remarks>
-    public static IReadOnlyList<SolveKey> Of(CompiledModel model)
+    public static IReadOnlyList<SolveKey> Of(CompiledModel model) => Of(model, null);
+
+    /// <summary>The keys of every solved element of a model built under a plan, without solving anything.</summary>
+    /// <param name="model">The compiled model.</param>
+    /// <param name="plan">The plan the field is built under (<see cref="FieldBasisPlan"/>), or null for the default decomposition.</param>
+    /// <returns>One key per solved element, in document order; empty when none is solved.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// The plan names an element the model does not solve, or an electrode an element does not declare.
+    /// </exception>
+    public static IReadOnlyList<SolveKey> Of(CompiledModel model, FieldBasisPlan? plan)
     {
         ArgumentNullException.ThrowIfNull(model);
+        plan?.CheckElements(model);
 
         var keys = new List<SolveKey>();
 
@@ -238,11 +249,11 @@ public static class SolveHash
             if (element.Solve3D is { } volume)
             {
                 var geometry = Geometry3D.Of(volume);
-                keys.Add(Key(index, 3, Geometry(geometry), GeometryBuilder3D.Holdings(geometry)));
+                keys.Add(Key(index, 3, Geometry(geometry), GeometryBuilder3D.Holdings(geometry, plan?.GroupsOf(index))));
             }
             else if (element.Solve is { } plane)
             {
-                keys.Add(Key(index, 2, Geometry(plane), GeometryBuilder.Holdings(plane)));
+                keys.Add(Key(index, 2, Geometry(plane), GeometryBuilder.Holdings(plane, plan?.GroupsOf(index))));
             }
         }
 

@@ -128,9 +128,15 @@ property, not the stencil, is what makes a full basis campaign tractable.
 
 **Basis superposition** matches a direct solve to 1.4e-11 V on a 4800 V scale.
 Solving once per electrode at unit potential turns voltage optimisation from a
-solve-per-iteration problem into arithmetic, which every sweep and optimiser
-depends on. It breaks the moment geometry changes, which is why tolerance work
-needs sensitivity fields rather than more superposition.
+solve-per-iteration problem into arithmetic. It breaks the moment geometry
+changes, which is why tolerance work needs sensitivity fields rather than more
+superposition. On real meshes with cut cells it holds to the solver's
+convergence rather than to round-off: on the 0.2 mm quadrupole a DC set summed
+from group channels differs from its direct solve by at most 3.9 uV of 1500 V
+(2.6e-9) and the RF channel by 7.0 uV (5.1e-8), on the two-dimensional lens by
+0.37 uV (1.4e-9). A `FieldBasisPlan` builds fields that way when a caller asks
+(`docs/library.md`); the default decomposition does not, so `run` keeps its
+bits.
 
 ## Cut cells
 
@@ -781,6 +787,32 @@ Measured on the funnel template, which is the device SYM-1 argues from:
 Two, not three - the two RF phases are exact negatives of one another, so they are
 one spatial pattern with one weight. Three phases that were not negatives, as a
 travelling-wave guide has, would be three.
+
+### A study's field basis
+
+The one constant supply is the fewest solves for one field and the most for a scan of
+DC: a funnel's resistor chain is one channel, and so is a quadrupole's DC, until a study
+moves one rod pair against the other and every point becomes a pattern of its own. A
+study that sets `"fieldBasis": "varyingElectrodes"` decides from its own points which
+electrodes move, and builds every point under a `FieldBasisPlan`: each group of electrodes
+that move together (equal potentials at every sampled point, exact doubles) is a supply of
+its own - one channel at one volt, weighted by its potential - and the electrodes nobody
+moves keep their potentials in one fixed channel, weighted one. The drive's channels are
+decomposed as before. The plan comes from the study definition, never from what a cache
+holds, so the same study builds the same fields wherever it runs.
+
+Superposition is exact to the solver's convergence, not to round-off: the sum of the
+channels differs from the direct solve of the same potentials by the residual each solve
+stopped at (3.9 uV of 1500 V on the quadrupole's DC, 0.37 uV on the lens). On the
+quadrupole's 31-point tune line every point's transmission equals the default path's, flight
+times agree to 8.6e-9 relative and arrival spreads to 1.9e-6, the largest at the stability
+edge where a trajectory is most sensitive; a static volume's flight times to 8.0e-9, the lens
+to 8.0e-10. A static element under the plan is a time-free weighted sum, so the integrator
+steps it as it steps a static field. Because the figures are not bitwise equal, anything
+derived from comparing them can move too, not only the figures: on a scan of two plates whose
+flight time was flat to fifteen digits the basis moved a warning's count from 6 of 8
+evaluations to 5 of 8, and on static plates it moved the interval the scan calls steepest, on
+differences of 1e-15.
 
 ### Measured
 

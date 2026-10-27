@@ -713,6 +713,33 @@ time re-reading the same two channels for every ion; it takes 73.3 s cold and 7.
 2.8 GB before). A DC scan of the same model still solves its DC pattern at every new value
 (about 30 s and 2.9 GB each). A second study of the same model loads what the first stored.
 
+**A DC scan can share its solves too.** `"fieldBasis": "varyingElectrodes"` asks the study
+to give the electrodes its own points move DC channels of their own. The nominal model and
+the study's points are compiled - every point of a scan, every draw of a sweep with its
+channel extremes, the ends of a boundary search, the bounds of an optimisation's first three
+variables; the electrodes whose potential differs between them are grouped by holding equal
+potentials at every one, each group becomes a channel at one volt weighted by its potential,
+and the electrodes nobody moves keep their potentials in one fixed channel. On the 0.2 mm
+quadrupole the 31-point tune line (U from 20.79 to 24.26 V, rods at `axis + U` and
+`axis - U`) solves four channels cold - the fixed one, one per rod pair, the RF - in 153 s,
+where the default path solves one DC pattern per point (30 s and 2.9 GB each); its repeat
+solves nothing. Every point's `transmission` is the default path's; `flightTime` agrees to
+8.6e-9 and `arrivalSpread` to 1.9e-6 relative, the largest at the stability edge. A static
+model's scan solves one channel per group and one fixed channel once (a static 3D quadrupole:
+3 solves against 6; the lens's V2: 1 against 5). The fields are the direct ones to the
+solver's convergence, not to the bit, so a result under the basis is not byte-identical to
+the default; the manifest's `fieldBasis` records the groups and the plan's channel hashes. A
+field evaluation costs one interpolation per channel, so warm points fly up to twice as long.
+A boundary search and an optimisation find their points as they run, so a point of theirs can
+fall outside the plan - an electrode every sample held fixed moves (one driven by an
+optimisation's fourth variable, say), a group's electrodes part; such a point is built the
+default way, bit for bit as the default path builds it, and named in `fieldBasis.fallbacks`.
+Their dry run and `estimate` say these points are not sampled and do not count their solves.
+An element whose geometry differs between the samples, or that steps through stages, keeps the
+default decomposition and is named in `fieldBasis.skipped`; a study that asks for the basis and
+gets no plan says so on stderr (`field basis: varying electrodes requested; no element
+qualifies (...)`). See `docs/numerics.md`, "A study's field basis".
+
 **The store is bounded.** It pins the first evaluation's channels and keeps others, least
 recently used first, within four times the nominal channels' size; `memoryBudget` in the
 study (`{ "value": 2, "unit": "GiB" }`; `B`, `kB`, `MB`, `GB`, `KiB`, `MiB`, `GiB`) sets
