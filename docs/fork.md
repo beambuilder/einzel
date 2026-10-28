@@ -149,6 +149,19 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A drive can be written as an expression of the phase or as a table over one
+  period, and an expression of a square wave is the rectangular drive to the
+  bit.** `RfWaveform.Analytic` compiles its text once
+  (`ExpressionEvaluator.Compile`, the same parser and arithmetic as the
+  interpreter, bitwise equal on every operator and function); `Tabulated` reads
+  `phase,value` text (`WaveformTable`) and interpolates linearly or by the
+  periodic cubic spline, converging on a cosine as N^-2 and N^-4 (ratio 3.9-4.0
+  and 16.0-16.2 per doubling, N = 16 to 128). A compiled expression is fifty to
+  seventy-five times faster per call than interpreting its text (after JIT
+  warm-up), and a table costs a binary search and one cubic. Every shape
+  declares breakpoints (a rectangular wave its two edges), which the cycle mean
+  uses and the integrator does not land on yet. No document change; the model
+  format follows. [Numerics](numerics.md#landing-on-a-switch). PR #20.
 - **The validation corpus passes through the CLI alone, and the batch driver is
   retired.** At `c43eace` the four reference cases run from the public surface
   only: `einzel run` for the einzel lens and the DC quadrupole, `einzel fly`
