@@ -126,7 +126,7 @@ public static class ModelValidator
         // stages per element failed to do.
         var timeline = Timeline(document, Restage, fieldErrors);
 
-        var fields = ValidateFields(document.Fields, p, timeline, fieldErrors);
+        var fields = ValidateFields(document.Fields, p, timeline, fieldErrors, sourceDirectory);
 
         // A field that failed to compile is not evidence that nothing can
         // accelerate the ion, it is evidence that we cannot tell. Saying otherwise
@@ -621,7 +621,8 @@ public static class ModelValidator
         IReadOnlyList<FieldDocument>? fields,
         IReadOnlyDictionary<string, Quantity> p,
         IReadOnlyList<PhaseSurface> timeline,
-        List<EinzelError> errors)
+        List<EinzelError> errors,
+        string? directory)
     {
         if (fields is null || fields.Count == 0)
         {
@@ -634,7 +635,7 @@ public static class ModelValidator
 
         for (var i = 0; i < fields.Count; i++)
         {
-            var element = CompileField(fields[i], $"/fields/{i}", p, timeline, errors);
+            var element = CompileField(fields[i], $"/fields/{i}", p, timeline, errors, directory);
 
             if (element is not null)
             {
@@ -766,7 +767,8 @@ public static class ModelValidator
         string path,
         IReadOnlyDictionary<string, Quantity> p,
         IReadOnlyList<PhaseSurface> timeline,
-        List<EinzelError> errors)
+        List<EinzelError> errors,
+        string? directory)
     {
         // Before the element itself, so that "a solved element may not declare a region"
         // is reported even when the solve is also wrong. Hiding one mistake behind another
@@ -796,7 +798,7 @@ public static class ModelValidator
             return null;
         }
 
-        var baseline = CompileOnce(field, path, p, timeline, errors);
+        var baseline = CompileOnce(field, path, p, timeline, errors, directory);
 
         if (baseline is null)
         {
@@ -824,7 +826,7 @@ public static class ModelValidator
             // reported anything wrong with this element against the same document, and
             // reporting it once per phase as well would turn one mistake into a wall.
             var ignored = new List<EinzelError>();
-            var state = CompileOnce(field, path, phase.Surface, timeline, ignored);
+            var state = CompileOnce(field, path, phase.Surface, timeline, ignored, directory);
             if (state is null)
             {
                 return baseline;
@@ -836,7 +838,7 @@ public static class ModelValidator
             // the silent half-instrument the model-level timeline was built to prevent.
             if (phase.EndSurface is not null)
             {
-                var endState = CompileOnce(field, path, phase.EndSurface, timeline, ignored);
+                var endState = CompileOnce(field, path, phase.EndSurface, timeline, ignored, directory);
                 if (endState is not null && !Same(state, endState))
                 {
                     errors.Add(new EinzelError
@@ -1011,7 +1013,8 @@ public static class ModelValidator
         string path,
         IReadOnlyDictionary<string, Quantity> p,
         IReadOnlyList<PhaseSurface> timeline,
-        List<EinzelError> errors)
+        List<EinzelError> errors,
+        string? directory)
     {
         switch (field.Type)
         {
@@ -1205,10 +1208,10 @@ public static class ModelValidator
             }
 
             case "solved2d":
-                return CompileSolvedField(field.Solve, $"{path}/solve", p, timeline, errors);
+                return CompileSolvedField(field.Solve, $"{path}/solve", p, timeline, errors, directory);
 
             case "solved3d":
-                return CompileSolved3D(field.Solve3d, $"{path}/solve3d", p, timeline, errors);
+                return CompileSolved3D(field.Solve3d, $"{path}/solve3d", p, timeline, errors, directory);
 
             default:
                 errors.Add(new EinzelError
@@ -2448,7 +2451,8 @@ public static class ModelValidator
         string path,
         IReadOnlyDictionary<string, Quantity> p,
         IReadOnlyList<PhaseSurface> timeline,
-        List<EinzelError> errors)
+        List<EinzelError> errors,
+        string? directory)
     {
         if (solve is null)
         {
@@ -2571,7 +2575,7 @@ public static class ModelValidator
 
         // Before the electrodes, because an electrode's taps name the generators they
         // are taps on. It read the other way round when a solve could only have one.
-        var drives = Drives(solve.Drive, solve.Drives, path, p, errors);
+        var drives = Drives(solve.Drive, solve.Drives, path, p, errors, directory);
 
         var electrodes = new List<CompiledElectrode3D>();
         var taken = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -2819,7 +2823,8 @@ public static class ModelValidator
         string path,
         IReadOnlyDictionary<string, Quantity> p,
         IReadOnlyList<PhaseSurface> timeline,
-        List<EinzelError> errors)
+        List<EinzelError> errors,
+        string? directory)
     {
         if (solve is null)
         {
@@ -2874,7 +2879,7 @@ public static class ModelValidator
 
         // Before the electrodes, because a tap names the generator it is on and the
         // name has to resolve to something.
-        var drives = Drives(solve.Drive, solve.Drives, path, p, errors);
+        var drives = Drives(solve.Drive, solve.Drives, path, p, errors, directory);
 
         var electrodes = new List<CompiledElectrode>();
         var taken = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -3038,7 +3043,8 @@ public static class ModelValidator
         IReadOnlyList<DriveDocument>? several,
         string path,
         IReadOnlyDictionary<string, Quantity> p,
-        List<EinzelError> errors)
+        List<EinzelError> errors,
+        string? directory)
     {
         if (single is not null && several is not null)
         {
@@ -3056,7 +3062,7 @@ public static class ModelValidator
 
         if (single is not null)
         {
-            var one = Drive(single, $"{path}/drive", p, errors);
+            var one = Drive(single, $"{path}/drive", p, errors, directory);
 
             return one is null ? [] : [one];
         }
@@ -3070,7 +3076,7 @@ public static class ModelValidator
 
         for (var k = 0; k < several.Count; k++)
         {
-            var built = Drive(several[k], $"{path}/drives/{k}", p, errors);
+            var built = Drive(several[k], $"{path}/drives/{k}", p, errors, directory);
 
             if (built is null)
             {
@@ -3300,7 +3306,8 @@ public static class ModelValidator
         DriveDocument? drive,
         string path,
         IReadOnlyDictionary<string, Quantity> p,
-        List<EinzelError> errors)
+        List<EinzelError> errors,
+        string? directory)
     {
         if (drive is null)
         {
@@ -3328,7 +3335,12 @@ public static class ModelValidator
             return null;
         }
 
-        var waveform = drive.Waveform switch
+        if (drive.Waveform is { IsShortForm: false } shape)
+        {
+            return Shaped(drive, shape, frequency.Value.SiValue, path, p, errors, directory);
+        }
+
+        var waveform = drive.Waveform?.Type switch
         {
             null or "sinusoid" => DriveWaveform.Sinusoid,
             "rectangular" => DriveWaveform.Rectangular,
@@ -3342,7 +3354,7 @@ public static class ModelValidator
                 Code = ErrorCodes.SchemaInvalid,
                 Path = $"{path}/waveform",
                 Constraint = "a drive waveform must be 'sinusoid' or 'rectangular'",
-                Observed = new ObservedValue(0.0, drive.Waveform ?? "(none)"),
+                Observed = new ObservedValue(0.0, drive.Waveform?.Type ?? "(none)"),
                 Suggestion =
                     "'sinusoid' is what a resonant circuit produces and gives the Mathieu equation; "
                     + "'rectangular' is what a switching supply produces and gives Meissner's",
@@ -3351,14 +3363,21 @@ public static class ModelValidator
             return null;
         }
 
-        var duty = drive.DutyCycle ?? 0.5;
+        var duty = Duty(drive.DutyCycle, $"{path}/dutyCycle", errors);
+
+        return duty is null ? null : new CompiledDrive(frequency.Value.SiValue, waveform.Value, duty.Value);
+    }
+
+    private static double? Duty(double? declared, string path, List<EinzelError> errors)
+    {
+        var duty = declared ?? 0.5;
 
         if (duty is <= 0.0 or >= 1.0)
         {
             errors.Add(new EinzelError
             {
                 Code = ErrorCodes.ValueOutOfBounds,
-                Path = $"{path}/dutyCycle",
+                Path = path,
                 Constraint = "a duty cycle is the fraction of a cycle spent high, strictly between 0 and 1",
                 Observed = new ObservedValue(duty, "1"),
                 Suggestion = "0.5 is a balanced square wave; 0.61 is a typical digital mass-filter setting",
@@ -3367,7 +3386,303 @@ public static class ModelValidator
             return null;
         }
 
-        return new CompiledDrive(frequency.Value.SiValue, waveform.Value, duty);
+        return duty;
+    }
+
+    /// <summary>A drive whose waveform is the object form: one of five shapes and its own keys.</summary>
+    private static CompiledDrive? Shaped(
+        DriveDocument drive,
+        WaveformDocument shape,
+        double frequencyHz,
+        string path,
+        IReadOnlyDictionary<string, Quantity> p,
+        List<EinzelError> errors,
+        string? directory)
+    {
+        var at = $"{path}/waveform";
+        DriveWaveform? kind = shape.Type switch
+        {
+            "sinusoid" => DriveWaveform.Sinusoid,
+            "rectangular" => DriveWaveform.Rectangular,
+            "analytic" => DriveWaveform.Analytic,
+            "tabulated" => DriveWaveform.Tabulated,
+            "harmonic" => DriveWaveform.Harmonic,
+            _ => null,
+        };
+
+        if (kind is null)
+        {
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{at}/type",
+                Constraint = "a waveform type must be one of " + string.Join(", ", WaveformDocument.Types),
+                Observed = new ObservedValue(0.0, shape.Type ?? "(none)"),
+                Suggestion = "write 'analytic' with an expression of the phase p, 'tabulated' with a file "
+                    + "of one sampled period, or 'harmonic' with terms; 'sinusoid' and 'rectangular' "
+                    + "are the two supplies a short name already spells",
+            });
+
+            return null;
+        }
+
+        // A key of another shape is refused rather than ignored: an expression beside a
+        // table would otherwise read as a drive it does not describe.
+        (string Key, bool Present, DriveWaveform Owner)[] keys =
+        [
+            ("expression", shape.Expression is not null, DriveWaveform.Analytic),
+            ("file", shape.File is not null, DriveWaveform.Tabulated),
+            ("interpolation", shape.Interpolation is not null, DriveWaveform.Tabulated),
+            ("terms", shape.Terms is not null, DriveWaveform.Harmonic),
+            ("dutyCycle", shape.DutyCycle is not null, DriveWaveform.Rectangular),
+        ];
+        var valid = true;
+
+        foreach (var (key, _, owner) in keys.Where(k => k.Present && k.Owner != kind))
+        {
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{at}/{key}",
+                Constraint = $"'{key}' belongs to a {owner.ToString().ToLowerInvariant()} waveform, not a {shape.Type} one",
+                Suggestion = key == "dutyCycle"
+                    ? "a duty cycle belongs to a rectangular wave; any other shape carries its asymmetry in "
+                        + "its own expression, table or terms"
+                    : "remove the key, or change the type to the shape it describes",
+            });
+            valid = false;
+        }
+
+        // A sinusoid and a harmonic sum are smooth, and a rectangular wave declares its own
+        // edges at 0 and its duty cycle; a breakpoint there would be a second, conflicting say.
+        if (shape.Breakpoints is not null && kind is not (DriveWaveform.Analytic or DriveWaveform.Tabulated))
+        {
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{at}/breakpoints",
+                Constraint = $"a {shape.Type} waveform takes no breakpoints",
+                Suggestion = "a sinusoid and a harmonic sum have no jumps or kinks, and a rectangular wave "
+                    + "declares its own edges; breakpoints are for an analytic or tabulated shape",
+            });
+            valid = false;
+        }
+
+        if (drive.DutyCycle is not null && (kind != DriveWaveform.Rectangular || shape.DutyCycle is not null))
+        {
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{path}/dutyCycle",
+                Constraint = kind == DriveWaveform.Rectangular
+                    ? "the duty cycle is declared both beside the waveform and inside it"
+                    : "a duty cycle belongs to a rectangular wave",
+                Observed = new ObservedValue(drive.DutyCycle.Value, "1"),
+                Suggestion = "declare the duty cycle once, inside a rectangular waveform; any other shape "
+                    + "carries its asymmetry in its own expression, table or terms",
+            });
+            valid = false;
+        }
+
+        var breakpoints = shape.Breakpoints ?? [];
+
+        for (var i = 0; i < breakpoints.Count; i++)
+        {
+            if (!(breakpoints[i] >= 0.0 && breakpoints[i] < 1.0) || (i > 0 && !(breakpoints[i] > breakpoints[i - 1])))
+            {
+                errors.Add(new EinzelError
+                {
+                    Code = ErrorCodes.ValueOutOfBounds,
+                    Path = $"{at}/breakpoints/{i}",
+                    Constraint = "breakpoints are phases in cycles, strictly ascending in [0, 1)",
+                    Observed = new ObservedValue(breakpoints[i], "1"),
+                    Suggestion = "list each jump or kink of the shape once, in order; phase 1 is phase 0 "
+                        + "of the next cycle",
+                });
+                valid = false;
+            }
+        }
+
+        if (!valid)
+        {
+            return null;
+        }
+
+        var compiled = new CompiledDrive(frequencyHz, kind.Value, 0.5) { Breakpoints = [.. breakpoints] };
+
+        switch (kind)
+        {
+            case DriveWaveform.Rectangular:
+                var inside = shape.DutyCycle is not null;
+                var duty = Duty(shape.DutyCycle ?? drive.DutyCycle, inside ? $"{at}/dutyCycle" : $"{path}/dutyCycle", errors);
+                return duty is null ? null : compiled with { DutyCycle = duty.Value };
+
+            case DriveWaveform.Analytic:
+                return Analytic(shape.Expression, $"{at}/expression", breakpoints, p, errors) is { } bindings
+                    ? compiled with { Expression = shape.Expression, Bindings = bindings }
+                    : null;
+
+            case DriveWaveform.Tabulated:
+                return Tabulated(shape, at, compiled, errors, directory);
+
+            case DriveWaveform.Harmonic:
+                return Harmonics(shape.Terms, $"{at}/terms", errors) is { } terms ? compiled with { Terms = terms } : null;
+
+            default:
+                return compiled;
+        }
+    }
+
+    /// <summary>
+    /// Compiles an analytic shape and probes it where the field layer will: 4096 uniform
+    /// phases, each breakpoint and the phase just below it. Returns the bound parameters.
+    /// </summary>
+    private static Dictionary<string, Quantity>? Analytic(
+        string? expression,
+        string path,
+        IReadOnlyList<double> breakpoints,
+        IReadOnlyDictionary<string, Quantity> p,
+        List<EinzelError> errors)
+    {
+        Func<double, double> shape;
+
+        try
+        {
+            shape = ExpressionEvaluator.Compile(expression ?? string.Empty, p, "p", path);
+        }
+        catch (EinzelException failure)
+        {
+            errors.Add(failure.Error);
+            return null;
+        }
+
+        var last = Math.BitDecrement(1.0);
+        var probes = Enumerable.Range(0, 4096).Select(k => k / 4096.0)
+            .Concat(breakpoints)
+            .Concat(breakpoints.Select(b => b > 0.0 ? Math.BitDecrement(b) : last));
+
+        foreach (var phase in probes)
+        {
+            var value = shape(phase);
+
+            if (!double.IsFinite(value))
+            {
+                errors.Add(new EinzelError
+                {
+                    Code = ErrorCodes.SchemaInvalid,
+                    Path = path,
+                    Constraint = $"the waveform is {value} at phase {phase:R}; a drive must be finite over the whole cycle",
+                    Observed = new ObservedValue(phase, "1"),
+                    Suggestion = "keep a logarithm's or a square root's argument positive and every divisor "
+                        + "away from zero; a supply cannot deliver an infinite voltage at any instant",
+                });
+                return null;
+            }
+        }
+
+        return ExpressionEvaluator.References(expression!)
+            .Where(p.ContainsKey)
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(name => name, name => p[name], StringComparer.Ordinal);
+    }
+
+    /// <summary>Reads a tabulated shape's file, relative to the model's directory.</summary>
+    private static CompiledDrive? Tabulated(
+        WaveformDocument shape, string at, CompiledDrive compiled, List<EinzelError> errors, string? directory)
+    {
+        WaveformInterpolation? interpolation = shape.Interpolation switch
+        {
+            null or "linear" => WaveformInterpolation.Linear,
+            "cubic" => WaveformInterpolation.Cubic,
+            _ => null,
+        };
+
+        if (interpolation is null)
+        {
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{at}/interpolation",
+                Constraint = "a table's interpolation is 'linear' or 'cubic'",
+                Observed = new ObservedValue(0.0, shape.Interpolation!),
+                Suggestion = "'linear' joins the samples with straight lines and keeps every corner; "
+                    + "'cubic' is the periodic spline, smooth and accurate on a smooth shape",
+            });
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(shape.File))
+        {
+            errors.Add(Missing($"{at}/file", "a tabulated waveform needs a file",
+                "name a 'phase,value' table of one period, relative to the model file"));
+            return null;
+        }
+
+        try
+        {
+            // Relative to the model file, or to the working directory for a document read
+            // from a string - the rule gas imports follow.
+            var text = File.ReadAllText(Path.GetFullPath(shape.File, directory ?? Directory.GetCurrentDirectory()));
+            var table = WaveformTable.Parse(text, $"{at}/file");
+            return compiled with { Table = table, TablePath = shape.File, Interpolation = interpolation.Value };
+        }
+        catch (EinzelException failure)
+        {
+            errors.Add(failure.Error);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{at}/file",
+                Constraint = $"the waveform table '{shape.File}' could not be read: {ex.Message}",
+                Observed = new ObservedValue(0.0, shape.File),
+                Suggestion = "give the path relative to the model file, and check that the file exists and is readable",
+            });
+            return null;
+        }
+    }
+
+    private static List<DriveHarmonic>? Harmonics(
+        IReadOnlyList<HarmonicTermDocument>? terms, string at, List<EinzelError> errors)
+    {
+        if (terms is null || terms.Count == 0)
+        {
+            errors.Add(Missing(at, "a harmonic waveform needs at least one term",
+                "add {\"order\": 1, \"amplitude\": 1} for the fundamental; an empty series is a drive "
+                    + "of zero volts, better said by not declaring a drive"));
+            return null;
+        }
+
+        var compiled = new List<DriveHarmonic>(terms.Count);
+
+        for (var i = 0; i < terms.Count; i++)
+        {
+            var (order, amplitude, phase) = (terms[i].Order, terms[i].Amplitude, terms[i].Phase ?? 0.0);
+            var key = order is not >= 0 ? "order"
+                : amplitude is not { } a || !double.IsFinite(a) ? "amplitude"
+                : !double.IsFinite(phase) ? "phase"
+                : null;
+
+            if (key is not null)
+            {
+                errors.Add(new EinzelError
+                {
+                    Code = ErrorCodes.ValueOutOfBounds,
+                    Path = $"{at}/{i}/{key}",
+                    Constraint = "a harmonic term needs an order of 0 or more and a finite amplitude and phase",
+                    Suggestion = "order 1 is the drive frequency and order 0 a constant offset; the phase is "
+                        + "in cycles, so 0.5 is antiphase",
+                });
+                return null;
+            }
+
+            compiled.Add(new DriveHarmonic(order!.Value, amplitude!.Value, phase));
+        }
+
+        return compiled;
     }
 
     private static SolveSymmetry Symmetry(string? declared, string path, List<EinzelError> errors)

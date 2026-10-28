@@ -276,11 +276,39 @@ instrument and almost always a mistake.
 | | |
 | --- | --- |
 | `frequency` | On the solve. The one thing every electrode shares |
-| `waveform` | `sinusoid` (Mathieu) or `rectangular` (Meissner). Their stability boundaries are in different places: the square-wave cut-off is q = 0.712 against a sinusoid's 0.908 |
-| `dutyCycle` | Rectangular only. Away from one half the wave carries a mean of 2d - 1, which enters the equation of motion exactly where a DC offset would - the trick of a digital mass filter |
+| `waveform` | `sinusoid` (Mathieu) or `rectangular` (Meissner). Their stability boundaries are in different places: the square-wave cut-off is q = 0.712 against a sinusoid's 0.908. Or an object with a `type`, below |
+| `dutyCycle` | Rectangular only. Away from one half the wave carries a mean of 2d - 1, which enters the equation of motion exactly where a DC offset would - the trick of a digital mass filter. Beside an object form only a rectangular one takes it, and not if the object carries its own |
 | `driveAmplitude` | Per electrode, zero to peak, **signed**. A negative amplitude is the same as a half-cycle of phase |
 | `drivePhase` | Per electrode, as a fraction of a cycle. Zero when omitted; a half is antiphase; a ramp along a structure is a travelling wave |
 | `potential` | Still the DC part, and still what an undriven electrode holds |
+
+### Any shape of cycle
+
+The two names are the short form. The object form spells every shape, the two
+named ones included (schema 0.15; a 0.14 document reads unchanged):
+
+```json
+"waveform": { "type": "analytic", "expression": "1 - 2*floor(2*p)", "breakpoints": [0, 0.5] }
+"waveform": { "type": "tabulated", "file": "drive.csv", "interpolation": "cubic" }
+"waveform": { "type": "harmonic", "terms": [{ "order": 1, "amplitude": 1 }, { "order": 3, "amplitude": 0.33, "phase": 0.5 }] }
+"waveform": { "type": "rectangular", "dutyCycle": 0.61 }
+```
+
+| `type` | Keys | |
+| --- | --- | --- |
+| `sinusoid` | none | The same drive as the name |
+| `rectangular` | `dutyCycle` (default 0.5) | The same drive as the name with `dutyCycle` beside it |
+| `analytic` | `expression`, `breakpoints` | An expression of the phase `p` (cycles, in [0, 1)) and the model's parameters, dimensionless. It may use every function a placement expression may; a parameter named `p` is refused, because the phase would shadow it. It is compiled and probed at validation, and again at the field build: it must be finite at 4096 uniform phases, at each breakpoint and just below it |
+| `tabulated` | `file`, `interpolation`, `breakpoints` | One period of `phase,value` rows, relative to the model file: an optional header line, `.` decimals, phases strictly ascending in [0, 1), at least three rows; the period closes on itself, so phase 1 is the first row again. `interpolation` is `linear` (default) or `cubic`, the periodic spline. The validator reads the file and refuses a bad row at `.../waveform/file`, naming the line; `run`, `fly`, the studies and `verify` record and re-check its SHA-256 in the manifest's `inputHashes`, as they do a gas field |
+| `harmonic` | `terms` | `{order, amplitude, phase}` per term, at least one; order 0 is a constant, the phase is in cycles (0 when omitted) |
+
+`breakpoints` (analytic and tabulated only) lists the phases where the shape jumps or
+kinks, strictly ascending in [0, 1). The cycle mean splits its quadrature there, so a
+declared jump costs nothing in the mean and an undeclared one up to 2/1024 of it; the
+integrator does not land on them yet. A key that belongs to another shape, a
+`dutyCycle` beside anything but a rectangular wave, and an unknown `type` are refused
+at their own pointer. Values are relative to `driveAmplitude` and are not clamped:
+[-1, 1] is the convention, not a limit, and a harmonic series already exceeds it.
 
 An amplitude with no `drive` block is **refused**, naming the electrode. A document
 that thinks it declared RF and did not is the expensive kind of silence.
@@ -311,7 +339,25 @@ negates it in the ramp rather than leaving a reader to infer it from a minus sig
 φ)) is a fixed pair of quadrature components with constant coefficients, so the
 decomposition resolves every phase into the same two supplies — 96 rings at 96
 phases is two basis solves. A rectangular drive cannot be decomposed that way, and
-there each distinct phase is its own supply and the solve count says so.
+there each distinct phase is its own supply and the solve count says so. **Any other
+shape costs one channel per distinct phase** too - analytic, tabulated and harmonic
+alike, which is exact for any shape - so three electrodes tapped at phases 0, 0.25
+and 0.4 are two channels under a sinusoid and three under every other shape
+(`WaveformDocumentFieldTests`). Where the taps share one pattern the shapes cost the
+same: the corpus quadrupole at 0.4 mm (all four rods at one phase), flown with
+the 48-ion corpus list in a fresh project each:
+
+| `waveform` | Channels | Cache |
+| --- | --- | --- |
+| `"sinusoid"` | 2 | 17.4 MB |
+| `"rectangular"` | 2 | 17.4 MB |
+| `analytic`, `1 - 2*floor(2*p)` | 2 | 17.4 MB |
+| `tabulated`, 64-sample cosine, cubic | 2 | 17.4 MB |
+| `harmonic`, one term | 2 | 17.4 MB |
+
+The two channels are the DC set and the rods' one RF pattern, and the channel hashes
+are the same under all five: the shape is not in the cache key, so a new shape at a
+rectangular drive's phases reuses its entries.
 
 ## Three dimensions
 
@@ -1265,6 +1311,19 @@ fundamental — a comb reaching order 120 carries information a hundred and twen
 faster than its own repeat rate, and a controller told only the fundamental would step
 over every one of those oscillations while its error estimator agreed the step was
 accurate. For the field the step was shown. It was not shown the field.
+
+A `harmonic` object is that same series, so its highest order sets the cap. An
+`analytic` or `tabulated` shape has no order to read: its period is the drive's, the
+cap is that period over the steps per period, as for a rectangular wave, and a feature
+much narrower than a twentieth of a cycle inside it is not seen by the cap. Landing on
+declared breakpoints is not built yet.
+
+**Prefer a cubic table for a smooth measured period.** A linear table has a kink at
+every sample, and the integrator's error control sees each one, so flights slow as the
+table grows. Measured on the corpus quadrupole's q line (4,848 flights): the built-in
+sinusoid takes 44 s; a linear cosine table of N = 8, 64 and 512 samples 52, 109 and
+219 s; a cubic one 45-55 s for N = 8 to 512. The cubic table reaches the built-in
+sinusoid's verdicts at N = 32, the linear one only at N = 512.
 
 Measured: the guide's wave repeats at 0.5 MHz and its confinement at 3 MHz, and the
 assembled field reports **333.33 ns** — the confinement's period, not the wave's.

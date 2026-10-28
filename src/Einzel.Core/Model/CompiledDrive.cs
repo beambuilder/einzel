@@ -13,7 +13,22 @@ public enum DriveWaveform
 
     /// <summary>What a switching supply produces. Gives the Meissner equation.</summary>
     Rectangular,
+
+    /// <summary>An expression of the phase: <see cref="CompiledDrive.Expression"/>.</summary>
+    Analytic,
+
+    /// <summary>A sampled period: <see cref="CompiledDrive.Table"/>.</summary>
+    Tabulated,
+
+    /// <summary>A sum of harmonics: <see cref="CompiledDrive.Terms"/>.</summary>
+    Harmonic,
 }
+
+/// <summary>One harmonic of a drive, validated.</summary>
+/// <param name="Order">Which multiple of the drive frequency; zero is a constant.</param>
+/// <param name="Amplitude">Relative to the drive amplitude.</param>
+/// <param name="Phase">In cycles.</param>
+public readonly record struct DriveHarmonic(int Order, double Amplitude, double Phase);
 
 /// <summary>
 /// The drive a solved geometry is operated with, validated and reduced to SI.
@@ -57,4 +72,45 @@ public enum DriveWaveform
 /// </para>
 /// </remarks>
 public sealed record CompiledDrive(
-    double FrequencyHz, DriveWaveform Waveform, double DutyCycle, string Name = "");
+    double FrequencyHz, DriveWaveform Waveform, double DutyCycle, string Name = "")
+{
+    /// <summary>For an analytic drive, the expression of <c>p</c>; otherwise null.</summary>
+    public string? Expression { get; init; }
+
+    /// <summary>The model parameters the expression names, with the values they had here.</summary>
+    public IReadOnlyDictionary<string, Units.Quantity>? Bindings { get; init; }
+
+    /// <summary>For a tabulated drive, the samples read from <see cref="TablePath"/>.</summary>
+    public WaveformTable? Table { get; init; }
+
+    /// <summary>For a tabulated drive, the file as the document names it.</summary>
+    public string? TablePath { get; init; }
+
+    /// <summary>For a tabulated drive, how the samples are joined.</summary>
+    public WaveformInterpolation Interpolation { get; init; }
+
+    /// <summary>For a harmonic drive, its terms.</summary>
+    public IReadOnlyList<DriveHarmonic>? Terms { get; init; }
+
+    /// <summary>Declared phases where an analytic or tabulated shape jumps or kinks.</summary>
+    public IReadOnlyList<double> Breakpoints { get; init; } = [];
+
+    /// <summary>Member-wise equality, lists and bindings element by element.</summary>
+    /// <param name="other">The other drive.</param>
+    /// <returns>Whether both are the same generator.</returns>
+    public bool Equals(CompiledDrive? other) =>
+        other is not null
+        && FrequencyHz.Equals(other.FrequencyHz) && Waveform == other.Waveform
+        && DutyCycle.Equals(other.DutyCycle) && Name == other.Name
+        && Expression == other.Expression && Equals(Table, other.Table)
+        && TablePath == other.TablePath && Interpolation == other.Interpolation
+        && Same(Terms, other.Terms) && Same(Breakpoints, other.Breakpoints)
+        && Same(Bindings?.OrderBy(b => b.Key, StringComparer.Ordinal).ToList(),
+            other.Bindings?.OrderBy(b => b.Key, StringComparer.Ordinal).ToList());
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(FrequencyHz, Waveform, DutyCycle, Name, Expression, Table);
+
+    private static bool Same<T>(IReadOnlyList<T>? a, IReadOnlyList<T>? b) =>
+        ReferenceEquals(a, b) || (a is not null && b is not null && a.SequenceEqual(b));
+}

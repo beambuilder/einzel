@@ -199,9 +199,12 @@ public static class ModelSchema
     /// reading it, ignoring the field it does not know, and reporting a different flight
     /// with no indication that anything was dropped. A tilted extrusion axis is the same
     /// case in a sharper form: an older build would solve the untilted cross-section and
-    /// report a converging analyser as a parallel one.
+    /// report a converging analyser as a parallel one. 0.15 lets a drive's waveform be an
+    /// object (an expression of the phase, a sampled period, a harmonic series); a 0.14
+    /// build would refuse such a document rather than misread it, and every 0.14 document
+    /// reads unchanged.
     /// </remarks>
-    public const string CurrentVersion = "0.14";
+    public const string CurrentVersion = "0.15";
 
     /// <summary>Versions this build can read.</summary>
     /// <remarks>
@@ -211,7 +214,7 @@ public static class ModelSchema
     /// </remarks>
     public static IReadOnlyList<string> SupportedVersions { get; } =
         ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12",
-         "0.13", "0.14"];
+         "0.13", "0.14", "0.15"];
 }
 
 /// <summary>The ion being tracked.</summary>
