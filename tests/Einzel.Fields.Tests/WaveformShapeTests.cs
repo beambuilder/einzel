@@ -196,16 +196,26 @@ public sealed class WaveformShapeTests(ITestOutputHelper output)
                 sink += shape.At(i * 0.000123457);
             }
 
-            var before = GC.GetAllocatedBytesForCurrentThread();
+            // Five passes, and the smallest counts: an allocation per call would show
+            // in every pass as at least 1e5 objects, while the JIT's own tier-up of the
+            // delegate or the loop (a few kilobytes, once, on whichever pass it lands)
+            // must not fail the check. Ubuntu CI saw 2,712 bytes on a single pass.
+            var smallest = long.MaxValue;
 
-            for (var i = 0; i < 100_000; i++)
+            for (var pass = 0; pass < 5; pass++)
             {
-                sink += shape.At(i * 0.000123457);
+                var before = GC.GetAllocatedBytesForCurrentThread();
+
+                for (var i = 0; i < 100_000; i++)
+                {
+                    sink += shape.At(i * 0.000123457);
+                }
+
+                smallest = Math.Min(smallest, GC.GetAllocatedBytesForCurrentThread() - before);
             }
 
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-            output.WriteLine($"{shape.GetType().Name}: {allocated} bytes over 1e5 calls (sum {sink:G3})");
-            Assert.Equal(0, allocated);
+            output.WriteLine($"{shape.GetType().Name}: {smallest} bytes over 1e5 calls (sum {sink:G3})");
+            Assert.Equal(0, smallest);
         }
     }
 
