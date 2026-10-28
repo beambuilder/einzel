@@ -46,11 +46,85 @@ public static class ExpressionEvaluator
             throw Failure(path, "an expression may not be empty", "supply an expression, for example 'depth * 0.5'");
         }
 
-        var parser = new Parser(expression, parameters, path);
+        var parser = new Parser(expression, parameters, path, null);
         var value = parser.ParseExpression();
         parser.ExpectEnd();
 
-        return value;
+        return value.Value;
+    }
+
+    /// <summary>
+    /// Compiles an expression of one free variable into a function, with every parameter
+    /// bound as a constant.
+    /// </summary>
+    /// <param name="expression">The expression text.</param>
+    /// <param name="parameters">Parameters already resolved to quantities, bound once here.</param>
+    /// <param name="variable">The name of the free variable, which is dimensionless.</param>
+    /// <param name="path">JSON Pointer to the expression, for the error object.</param>
+    /// <returns>The expression as a function of the variable, dimensionless in and out.</returns>
+    /// <exception cref="EinzelException">
+    /// The expression is malformed, names anything but the variable and a declared
+    /// parameter, is dimensionally inconsistent, has a dimensioned result, or a parameter
+    /// carries the variable's name.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// What a waveform written as text needs: the integrator asks for the drive at every
+    /// step, and <see cref="Evaluate"/> walks the text and checks dimensions each time it
+    /// is called. Here the text is parsed once, by the same parser, and the dimension
+    /// check runs once on the way through; what comes out is a tree of closures over
+    /// doubles, with every sub-expression that does not read the variable folded to the
+    /// number <see cref="Evaluate"/> would have given it. The closures capture nothing
+    /// mutable, so one compiled function serves any number of threads.
+    /// </para>
+    /// <para>
+    /// <strong>The same arithmetic, to the bit.</strong> Each operator and function applies
+    /// the same double operation the interpreter applies to a quantity's SI value, in the
+    /// same order, so the compiled function and <see cref="Evaluate"/> with the variable
+    /// bound as a parameter agree exactly wherever <see cref="Evaluate"/> succeeds. Where
+    /// it would refuse a value - a logarithm of a non-positive number, an arcsine outside
+    /// [-1, 1], a modulus by zero - the refusal depends on the variable and cannot run at
+    /// compile time, so the function returns what the arithmetic gives (NaN or an
+    /// infinity) and the caller samples it and refuses a non-finite result.
+    /// </para>
+    /// </remarks>
+    public static Func<double, double> Compile(
+        string expression, IReadOnlyDictionary<string, Quantity> parameters, string variable, string path)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentException.ThrowIfNullOrWhiteSpace(variable);
+
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            throw Failure(
+                path,
+                "an expression may not be empty",
+                $"supply an expression of '{variable}', for example '1 - 2*floor(2*{variable})'");
+        }
+
+        // Refused rather than resolved one way or the other: either reading makes a
+        // document whose meaning depends on a rule nobody wrote down in it.
+        if (parameters.ContainsKey(variable))
+        {
+            throw Failure(
+                path,
+                $"the variable '{variable}' shadows the parameter of the same name",
+                $"rename the parameter; inside this expression '{variable}' is the free variable");
+        }
+
+        var parser = new Parser(expression, parameters, path, variable);
+        var node = parser.ParseExpression();
+        parser.ExpectEnd();
+
+        if (!node.Value.Dimension.IsDimensionless)
+        {
+            throw Failure(
+                path,
+                $"the expression must be dimensionless, but has dimension {node.Value.Dimension}",
+                "divide by a parameter of the same dimension, for example volts / amplitude");
+        }
+
+        return node.Function;
     }
 
     /// <summary>The parameter names an expression refers to.</summary>
@@ -116,12 +190,69 @@ public static class ExpressionEvaluator
             Suggestion = suggestion,
         });
 
+    /// <summary>
+    /// A parsed value: its quantity, and for a compiled expression how it depends on the
+    /// free variable.
+    /// </summary>
+    /// <remarks>
+    /// <c>Run</c> is null for anything that does not read the variable, so a constant
+    /// sub-expression folds to one number at compile time and <see cref="Evaluate"/>,
+    /// which has no variable, never builds a delegate. For one that does, <c>Value</c>
+    /// carries the dimension the check needs and a placeholder magnitude (zero) that no
+    /// result reads. The one place it surfaces is a units error raised on such an operand:
+    /// the error's observed value then shows that placeholder, while its dimension, which
+    /// is what the error is about, is right.
+    /// </remarks>
+    private readonly record struct Node(Quantity Value, Func<double, double>? Run)
+    {
+        public Func<double, double> Function
+        {
+            get
+            {
+                if (Run is not null)
+                {
+                    return Run;
+                }
+
+                var constant = Value.SiValue;
+                return _ => constant;
+            }
+        }
+
+        public static Node Combine(Node left, Node right, Quantity value, Func<double, double, double> op)
+        {
+            if (left.Run is null && right.Run is null)
+            {
+                return new Node(value, null);
+            }
+
+            if (left.Run is null)
+            {
+                var a = left.Value.SiValue;
+                var g = right.Run!;
+                return new Node(value, x => op(a, g(x)));
+            }
+
+            var f = left.Run;
+
+            if (right.Run is null)
+            {
+                var b = right.Value.SiValue;
+                return new Node(value, x => op(f(x), b));
+            }
+
+            var h = right.Run;
+            return new Node(value, x => op(f(x), h(x)));
+        }
+    }
+
     /// <summary>Recursive-descent parser over the expression grammar.</summary>
-    private sealed class Parser(string text, IReadOnlyDictionary<string, Quantity> parameters, string path)
+    private sealed class Parser(
+        string text, IReadOnlyDictionary<string, Quantity> parameters, string path, string? variable)
     {
         private int _position;
 
-        public Quantity ParseExpression()
+        public Node ParseExpression()
         {
             var left = ParseTerm();
 
@@ -131,11 +262,13 @@ public static class ExpressionEvaluator
 
                 if (Match('+'))
                 {
-                    left += ParseTerm();
+                    var right = ParseTerm();
+                    left = Node.Combine(left, right, left.Value + right.Value, static (a, b) => a + b);
                 }
                 else if (Match('-'))
                 {
-                    left -= ParseTerm();
+                    var right = ParseTerm();
+                    left = Node.Combine(left, right, left.Value - right.Value, static (a, b) => a - b);
                 }
                 else
                 {
@@ -144,7 +277,7 @@ public static class ExpressionEvaluator
             }
         }
 
-        private Quantity ParseTerm()
+        private Node ParseTerm()
         {
             var left = ParseUnary();
 
@@ -154,11 +287,13 @@ public static class ExpressionEvaluator
 
                 if (Match('*'))
                 {
-                    left *= ParseUnary();
+                    var right = ParseUnary();
+                    left = Node.Combine(left, right, left.Value * right.Value, static (a, b) => a * b);
                 }
                 else if (Match('/'))
                 {
-                    left /= ParseUnary();
+                    var right = ParseUnary();
+                    left = Node.Combine(left, right, left.Value / right.Value, static (a, b) => a / b);
                 }
                 else
                 {
@@ -167,20 +302,22 @@ public static class ExpressionEvaluator
             }
         }
 
-        private Quantity ParseUnary()
+        private Node ParseUnary()
         {
             SkipWhitespace();
 
             if (Match('-'))
             {
-                return -ParseUnary();
+                var inner = ParseUnary();
+                var run = inner.Run;
+                return new Node(-inner.Value, run is null ? null : x => -run(x));
             }
 
             Match('+');
             return ParsePrimary();
         }
 
-        private Quantity ParsePrimary()
+        private Node ParsePrimary()
         {
             SkipWhitespace();
 
@@ -214,7 +351,7 @@ public static class ExpressionEvaluator
                 + "abs, sqrt, log, floor, mod, min, max, cosPi, sinPi, asinPi");
         }
 
-        private Quantity ParseNumber()
+        private Node ParseNumber()
         {
             var start = _position;
 
@@ -229,11 +366,11 @@ public static class ExpressionEvaluator
 
             return double.TryParse(literal, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var value)
-                ? Quantity.Number(value)
+                ? new Node(Quantity.Number(value), null)
                 : throw Failure(path, $"'{literal}' is not a number", "use a decimal literal such as 0.5 or 1e-3");
         }
 
-        private Quantity ParseIdentifier()
+        private Node ParseIdentifier()
         {
             var start = _position;
 
@@ -250,9 +387,14 @@ public static class ExpressionEvaluator
                 return ParseCall(name);
             }
 
+            if (variable is not null && name == variable)
+            {
+                return new Node(Quantity.Number(0.0), static x => x);
+            }
+
             if (parameters.TryGetValue(name, out var value))
             {
-                return value;
+                return new Node(value, null);
             }
 
             throw Failure(
@@ -263,9 +405,9 @@ public static class ExpressionEvaluator
                     : $"declared parameters are: {string.Join(", ", parameters.Keys.Order(StringComparer.Ordinal))}");
         }
 
-        private Quantity ParseCall(string name)
+        private Node ParseCall(string name)
         {
-            var arguments = new List<Quantity>();
+            var arguments = new List<Node>();
 
             // Whether each argument was *written* as a literal zero, which `min` and `max`
             // need in order to accept one against a dimensioned operand. The text and not
@@ -295,7 +437,55 @@ public static class ExpressionEvaluator
                 }
             }
 
-            return Apply(name, arguments, literalZero);
+            var values = arguments.ConvertAll(argument => argument.Value);
+            var constant = arguments.TrueForAll(argument => argument.Run is null);
+            var value = Apply(name, values, literalZero, constant);
+
+            return constant ? new Node(value, null) : new Node(value, Lift(name, arguments));
+        }
+
+        /// <summary>
+        /// A function applied to arguments that read the free variable, as the same double
+        /// operation <see cref="Apply"/> performs on their SI values.
+        /// </summary>
+        /// <remarks>
+        /// Reached only after <see cref="Apply"/> has accepted the name, the argument count
+        /// and the dimensions. A literal zero that <c>min</c> and <c>max</c> lend a dimension
+        /// to is still zero, so the operands here are the arguments as written.
+        /// </remarks>
+        private static Func<double, double> Lift(string name, List<Node> arguments)
+        {
+            var f = arguments[0].Function;
+            var g = arguments.Count > 1 ? arguments[1].Function : f;
+
+            return name switch
+            {
+                "abs" => x => Math.Abs(f(x)),
+                "sqrt" => x => Math.Sqrt(f(x)),
+                "floor" => x => Math.Floor(f(x)),
+                "cosPi" => x => double.CosPi(f(x)),
+                "sinPi" => x => double.SinPi(f(x)),
+                "asinPi" => x => Math.Asin(f(x)) / Math.PI,
+                "log" => x => Math.Log(f(x)),
+                "mod" => x =>
+                {
+                    var a = f(x);
+                    var b = g(x);
+                    return a - (Math.Floor(a / b) * b);
+                },
+                "min" => x =>
+                {
+                    var a = f(x);
+                    var b = g(x);
+                    return a.CompareTo(b) <= 0 ? a : b;
+                },
+                _ => x =>
+                {
+                    var a = f(x);
+                    var b = g(x);
+                    return a.CompareTo(b) >= 0 ? a : b;
+                },
+            };
         }
 
         /// <summary>
@@ -356,7 +546,12 @@ public static class ExpressionEvaluator
             return trimmed.IndexOf('0') >= 0;
         }
 
-        private Quantity Apply(string name, List<Quantity> arguments, List<bool> literalZero)
+        /// <remarks>
+        /// <paramref name="checkValues"/> is false only for a compiled expression whose
+        /// arguments read the variable: a refusal that depends on a value cannot be made
+        /// before the value exists, and the caller samples the compiled function instead.
+        /// </remarks>
+        private Quantity Apply(string name, List<Quantity> arguments, List<bool> literalZero, bool checkValues)
         {
             switch (name)
             {
@@ -402,7 +597,7 @@ public static class ExpressionEvaluator
                         return Quantity.Number(Math.Floor(arguments[0].SiValue));
                     }
 
-                    if (arguments[1].SiValue == 0.0)
+                    if (checkValues && arguments[1].SiValue == 0.0)
                     {
                         throw Failure(path, "mod by zero", "use a non-zero divisor");
                     }
@@ -471,7 +666,7 @@ public static class ExpressionEvaluator
                     // it, and NaN would travel silently into a placement - which is the
                     // failure this project has already had four times over, a quantity
                     // that is not a number reaching a serialiser long after the mistake.
-                    if (Math.Abs(arguments[0].SiValue) > 1.0)
+                    if (checkValues && Math.Abs(arguments[0].SiValue) > 1.0)
                     {
                         throw Failure(
                             path,
@@ -510,7 +705,7 @@ public static class ExpressionEvaluator
                     // non-positive argument means the ratio was built the wrong way up
                     // or an electrode has collapsed, and either way the number that
                     // came out of it would be propagated into a geometry.
-                    if (!(arguments[0].SiValue > 0.0))
+                    if (checkValues && !(arguments[0].SiValue > 0.0))
                     {
                         throw Failure(
                             path,

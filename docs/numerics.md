@@ -718,6 +718,22 @@ returns infinity for a continuously driven field, however fast: a sinusoid has n
 discontinuity, and a rectangular one is handled by the steps-per-cycle cap rather
 than by landing on every edge.
 
+A drive written as an expression of the phase or as a table over one period is held
+to the same rule. An expression is compiled once into a function over doubles and
+called at every step, fifty to seventy-five times faster than interpreting the
+text per step (measured after JIT warm-up), and agrees with the interpreter to the
+bit, so an expression of a square wave is the rectangular drive exactly. A table
+is a binary search and one cubic per call, linear or the periodic spline. Either
+may declare **breakpoints**,
+the phases where it jumps or kinks, and today only the cycle mean reads them: it is
+an eight-point Gauss-Legendre rule over 1024 panels with the panel edges on the
+breakpoints, exact to rounding between them (a square wave's mean is zero to the
+bit, a 0.3 duty cycle's within 3.3e-16 of -0.4), while a jump left undeclared lands
+inside a panel and costs up to 2/1024 of the mean (7.5e-5 measured at duty 0.3). A
+table's mean is its interpolant's exact integral. The integrator does not land on
+breakpoints yet; until it does, a jump inside a step is bounded by the same 20
+steps per cycle a rectangular edge is.
+
 ### Measured
 
 The check is that a sequenced run equals the same flight computed as **two separate
