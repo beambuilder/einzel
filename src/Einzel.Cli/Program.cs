@@ -132,6 +132,7 @@ public static class Program
             "render" => Render(args, options),
             "ext" => Ext(args, options),
             "cache" => Cache(args, options),
+            "waveform" => Waveform(args, options),
             "compare" => Compare(options),
             "schema" => Schema(options),
             "templates" => Catalog(options, "template"),
@@ -1962,6 +1963,36 @@ public static class Program
         }
     }
 
+    /// <summary>Waveform tools: <c>fit</c> today, <c>import</c> of measured traces to come.</summary>
+    private static int Waveform(string[] args, CommandLine options)
+    {
+        const string usage = "usage: einzel waveform fit <table.csv> --orders N [--json]";
+        var action = args.Length > 1 && !args[1].StartsWith('-') ? args[1] : null;
+        var invariant = CultureInfo.InvariantCulture;
+
+        if (action != "fit"
+            || options.Positional.Count < 2
+            || !int.TryParse(options.Value("orders"), NumberStyles.None, invariant, out var orders))
+        {
+            Console.Error.WriteLine(usage);
+            return (int)ExitCode.ValidationFailure;
+        }
+
+        var outcome = WaveformFitCommand.Execute(options.Positional[1], orders);
+
+        if (options.Has("json"))
+        {
+            return Emit(outcome);
+        }
+
+        Console.Out.Write(CommandJson.Write(outcome.Waveform));
+        Console.Out.WriteLine(string.Create(
+            invariant,
+            $"orders 0 to {outcome.Orders} fitted to {outcome.Samples} samples: residual rms {outcome.ResidualRms:G3}, max {outcome.ResidualMax:G3}"));
+
+        return (int)ExitCode.Success;
+    }
+
     /// <summary>The extension authoring loop: list, test, register.</summary>
     private static int Ext(string[] args, CommandLine options)
     {
@@ -2997,6 +3028,9 @@ public static class Program
           ext list | test | register    the extension authoring loop
           cache status [dir]            the solved fields .einzel/cache keeps for the next run
           cache clear | prune [dir]     delete them all, or only what no run will load
+          waveform fit <csv> --orders N the harmonic series closest to a sampled period,
+                                        as a model's waveform object (waveform import
+                                        of measured traces will sit beside it)
           agents-md [dir]               regenerate the platform layer of AGENTS.md
 
         release tooling:

@@ -306,6 +306,178 @@ public abstract record RfWaveform
 
             return new Harmonic(terms);
         }
+
+        /// <summary>
+        /// The harmonic series of orders 0 to <paramref name="orders"/> closest to one
+        /// period of samples, in the least-squares sense.
+        /// </summary>
+        /// <param name="phases">Sample phases in cycles, in any order and at any spacing.</param>
+        /// <param name="values">The waveform at each phase.</param>
+        /// <param name="orders">The highest order to fit; order zero is the constant.</param>
+        /// <returns>
+        /// Every order from 0 to <paramref name="orders"/>, and what the series misses at the
+        /// samples.
+        /// </returns>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="orders"/> is negative.</exception>
+        /// <exception cref="ArgumentException">
+        /// The lists differ in length, a sample is not finite, there are fewer than
+        /// <c>2·orders + 1</c> samples, or the phases are too few or too clustered to tell
+        /// one order from another.
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// <strong>Least squares rather than a Fourier transform</strong>, because a
+        /// measured period is rarely sampled uniformly. On uniform samples the two agree:
+        /// the cosine and sine columns are orthogonal there, so the solution is the discrete
+        /// Fourier coefficients. The design matrix (a constant, then <c>cos 2πkp</c> and
+        /// <c>sin 2πkp</c> per order) is solved by Householder QR, not the normal equations,
+        /// which would square its condition number on clustered phases.
+        /// </para>
+        /// <para>
+        /// Each pair <c>a cos 2πkp + b sin 2πkp</c> becomes one term of amplitude
+        /// <c>√(a² + b²)</c> and phase <c>atan2(-b, a) / 2π</c>, in (-½, ½]; order zero
+        /// keeps its sign in the amplitude and has phase zero. The residual is measured
+        /// with <see cref="At"/> on the returned series, so it is what a drive built from
+        /// the series would miss.
+        /// </para>
+        /// </remarks>
+        public static HarmonicFit Fit(IReadOnlyList<double> phases, IReadOnlyList<double> values, int orders)
+        {
+            ArgumentNullException.ThrowIfNull(phases);
+            ArgumentNullException.ThrowIfNull(values);
+            ArgumentOutOfRangeException.ThrowIfNegative(orders);
+            var count = phases.Count;
+
+            if (values.Count != count)
+            {
+                throw new ArgumentException($"{count} phases but {values.Count} values", nameof(values));
+            }
+
+            // In long, so an order near int.MaxValue is refused here rather than overflowing.
+            if (count < (2L * orders) + 1)
+            {
+                throw new ArgumentException(
+                    $"{count} samples cannot determine {(2L * orders) + 1} coefficients (orders 0 to {orders}); "
+                    + $"give at least {(2L * orders) + 1} samples or fit fewer orders",
+                    nameof(phases));
+            }
+
+            var columns = (2 * orders) + 1;
+
+            if (Enumerable.Range(0, count).Any(i => !double.IsFinite(phases[i]) || !double.IsFinite(values[i])))
+            {
+                throw new ArgumentException("every phase and value must be finite", nameof(values));
+            }
+
+            // Column-major design matrix: QR works a column at a time.
+            var a = new double[columns][];
+            a[0] = [.. Enumerable.Repeat(1.0, count)];
+
+            for (var k = 1; k <= orders; k++)
+            {
+                a[(2 * k) - 1] = [.. phases.Select(p => double.CosPi(2.0 * k * p))];
+                a[2 * k] = [.. phases.Select(p => double.SinPi(2.0 * k * p))];
+            }
+
+            var y = values.ToArray();
+            var diagonal = new double[columns];
+
+            for (var j = 0; j < columns; j++)
+            {
+                var v = a[j];
+                var norm = Math.Sqrt(Dot(v, v, j));
+                var original = Math.Sqrt(Dot(v, v, 0));
+
+                // A column the earlier ones already span leaves nothing to reflect: the
+                // phases do not distinguish this order from lower ones.
+                if (!(norm > RankTolerance * original))
+                {
+                    throw new ArgumentException(
+                        $"the phases do not determine order {(j + 1) / 2}: too few distinct phases, "
+                        + "or they cluster in too small a part of the period",
+                        nameof(phases));
+                }
+
+                var alpha = v[j] > 0.0 ? -norm : norm;
+                v[j] -= alpha;
+                var vv = Dot(v, v, j);
+
+                foreach (var target in a.Skip(j + 1).Append(y))
+                {
+                    var f = 2.0 * Dot(v, target, j) / vv;
+
+                    for (var i = j; i < count; i++)
+                    {
+                        target[i] -= f * v[i];
+                    }
+                }
+
+                diagonal[j] = alpha;
+            }
+
+            var c = new double[columns];
+
+            for (var j = columns - 1; j >= 0; j--)
+            {
+                var sum = y[j];
+
+                for (var l = j + 1; l < columns; l++)
+                {
+                    sum -= a[l][j] * c[l];
+                }
+
+                c[j] = sum / diagonal[j];
+            }
+
+            var terms = new List<HarmonicTerm>(orders + 1) { new(0, c[0], 0.0) };
+
+            for (var k = 1; k <= orders; k++)
+            {
+                var (cos, sin) = (c[(2 * k) - 1], c[2 * k]);
+                var phase = double.Atan2Pi(-sin, cos) / 2.0;
+
+                // Into (-1/2, 1/2] as documented: atan2 gives -1/2 for a negative cosine
+                // part with a sine part of -0, and adding zero turns -0 into 0.
+                phase = (phase <= -0.5 ? phase + 1.0 : phase) + 0.0;
+                terms.Add(new HarmonicTerm(k, Math.Sqrt((cos * cos) + (sin * sin)), phase));
+            }
+
+            var series = new Harmonic(terms);
+            var residuals = Enumerable.Range(0, count).Select(i => values[i] - series.At(phases[i])).ToArray();
+
+            return new HarmonicFit(
+                series,
+                Math.Sqrt(residuals.Sum(r => r * r) / count),
+                residuals.Max(Math.Abs));
+        }
+
+        /// <summary>
+        /// How small a column may become, relative to its own length, once the columns
+        /// before it are projected out, before the fit calls the orders indistinguishable.
+        /// </summary>
+        /// <remarks>
+        /// It guards against a division by a pivot that is zero or round-off, which would
+        /// return infinite or meaningless coefficients: phases bunched into a small part of
+        /// the period, or repeated, make the cosine and sine columns of high orders nearly
+        /// combinations of the lower ones. 1e-10 leaves about six significant digits in a
+        /// coefficient solved against such a pivot. A fit that passes but is ill-conditioned
+        /// near the limit is not hidden: its large, cancelling coefficients show in the
+        /// series between the samples, and the residual is measured on the returned series,
+        /// so lost precision at the samples shows there too.
+        /// </remarks>
+        private const double RankTolerance = 1e-10;
+
+        private static double Dot(double[] u, double[] v, int from)
+        {
+            var sum = 0.0;
+
+            for (var i = from; i < u.Length; i++)
+            {
+                sum += u[i] * v[i];
+            }
+
+            return sum;
+        }
     }
 
     /// <summary>
@@ -741,3 +913,9 @@ public abstract record RfWaveform
 /// quarter exactly quadrature, with no rounding in either.
 /// </param>
 public readonly record struct HarmonicTerm(int Order, double Amplitude, double Phase);
+
+/// <summary>A harmonic series fitted to samples, and what it misses at them.</summary>
+/// <param name="Waveform">The series, every order from zero to the one asked for.</param>
+/// <param name="ResidualRms">The root-mean-square of sample minus series, over the samples.</param>
+/// <param name="ResidualMax">The largest magnitude of sample minus series.</param>
+public sealed record HarmonicFit(RfWaveform.Harmonic Waveform, double ResidualRms, double ResidualMax);
