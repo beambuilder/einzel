@@ -112,7 +112,14 @@ public interface ITimeVaryingField : IElectrostaticField
     /// The field computes its phase in doubles, and at the nominal instant that phase can
     /// still be an ulp or two short of the breakpoint, so a step ending there would see the
     /// old level. The crossing is judged on the phase alone, so it holds for every shape: each
-    /// wraps its phase as <c>phase - Math.Floor(phase)</c> before comparing it.
+    /// wraps its phase as <c>phase - Math.Floor(phase)</c> before comparing it, and the test
+    /// repeats that wrap operation for operation, so it agrees with the field whatever the
+    /// rounding.
+    /// </para>
+    /// <para>
+    /// Right-continuous: the value at the breakpoint phase itself belongs to the post-edge
+    /// side, as <see cref="Analytic.RfWaveform.Breakpoints"/> requires of every shape. A shape
+    /// written the other way round flips one ulp later than reported.
     /// </para>
     /// <para>
     /// Distinct from <see cref="NextSwitchAfter"/>: a switch changes the state, an edge is a

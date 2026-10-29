@@ -468,7 +468,8 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
     /// The earliest crossing over every (drive, breakpoint, tap phase) the field holds, each
     /// judged on the phase <c>(f * t) + phase</c> exactly as the weights compute it. The phase
     /// alone decides the side of an edge, whatever the shape, because every shape wraps its
-    /// phase as <c>phase - Math.Floor(phase)</c> before comparing it.
+    /// phase as <c>phase - Math.Floor(phase)</c> before comparing it, and the crossing test
+    /// repeats that wrap, so it agrees with the field whatever the rounding.
     /// </para>
     /// <para>
     /// The schedule is the union over every stage, built once, and not narrowed to the stage
@@ -478,7 +479,12 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
     /// A term whose amplitude is exactly zero in a stage, at the start and the end of a ramp,
     /// contributes nothing there and is left out; any non-zero amplitude, however small,
     /// puts its tap's edges in. The decision is on the compiled term, not on the field it
-    /// makes.
+    /// makes. The base terms enter only when there are no stages: with stages every instant,
+    /// before the first boundary and after the last, is evaluated on a stage's terms.
+    /// </para>
+    /// <para>
+    /// Right-continuous, as the waveforms are: at <c>t*</c> the wrapped phase equals or
+    /// exceeds the breakpoint and the shape reads its post-edge value there.
     /// </para>
     /// </remarks>
     public double NextEdgeAfter(double timeSeconds)
@@ -526,7 +532,13 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
             }
         }
 
-        Add(_harmonics, null);
+        // The base terms are what the weights read only when there are no stages: with
+        // boundaries every instant falls in a stage, so a base tap would land on nothing.
+        if (_boundaries.Length == 0)
+        {
+            Add(_harmonics, null);
+        }
+
         for (var s = 0; s < _stageHarmonics.Length; s++)
         {
             Add(_stageHarmonics[s], s < _stageEndHarmonics.Length ? _stageEndHarmonics[s] : null);

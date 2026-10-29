@@ -63,6 +63,12 @@ public abstract record RfWaveform
     /// model asks for it, which a later change adds; until then a jump inside a step is held
     /// to the steps-per-cycle cap.
     /// </para>
+    /// <para>
+    /// Right-continuous: at a wrapped phase equal to a breakpoint the shape reads its
+    /// post-edge value, as <c>wrapped &lt; DutyCycle</c> does for the rectangular wave. An
+    /// <see cref="Analytic"/> expression written with the opposite convention (<c>p &lt;= b</c>)
+    /// flips one ulp after the instant a field reports.
+    /// </para>
     /// </remarks>
     public virtual IReadOnlyList<double> Breakpoints => [];
 

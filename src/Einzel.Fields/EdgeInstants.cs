@@ -57,8 +57,8 @@ internal static class EdgeInstants
     public static double Next<TClock>(in TClock clock, double frequencyHz, double phaseCycles, double breakpoint, double afterSeconds)
         where TClock : struct, IPhaseClock
     {
-        // The crossing of cycle n is behind iff phase >= n + b exactly, so the first one
-        // ahead is cycle floor(phase - b) + 1. Rounding `phase - b` up to an integer can
+        // The crossing of cycle n is behind iff phase >= n + b (as the waveform wraps and
+        // compares it), so the first one ahead is cycle floor(phase - b) + 1. Rounding `phase - b` up to an integer can
         // only raise the floor by one (rounding is monotone and integers are doubles), so
         // the floor computed here is that cycle or the one before, and one test says which.
         var n = Math.Floor(clock.PhaseAt(afterSeconds) - breakpoint);
@@ -161,8 +161,9 @@ internal static class EdgeInstants
     {
         public bool IsPast(double timeSeconds)
         {
-            // The waveform wraps as `phase - Floor(phase)`, which is exact, so this is
-            // `phase >= n + b` in exact arithmetic: the comparison the waveform makes.
+            // The waveform's own wrap arithmetic, `phase - Floor(phase)` compared with the
+            // breakpoint, repeated operation for operation: the wrap rounds for phases in
+            // (-0.5, 0), and repeating it keeps the test in agreement with the field anyway.
             var phase = Clock.PhaseAt(timeSeconds);
             var cycle = Math.Floor(phase);
             return cycle > Cycle || (cycle == Cycle && phase - cycle >= Breakpoint);

@@ -311,11 +311,13 @@ public sealed class SequencedField : ITimeVaryingField
     /// </remarks>
     public double NextSwitchAfter(double timeSeconds)
     {
-        foreach (var boundary in _boundaries)
+        // Indexed, not foreach: the boundaries are an IReadOnlyList, whose enumerator is
+        // boxed, and this runs once per step and once per edge query.
+        for (var i = 0; i < _boundaries.Count; i++)
         {
-            if (boundary > timeSeconds)
+            if (_boundaries[i] > timeSeconds)
             {
-                return boundary;
+                return _boundaries[i];
             }
         }
 

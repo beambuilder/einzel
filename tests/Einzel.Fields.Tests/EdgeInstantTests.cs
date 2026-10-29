@@ -117,9 +117,46 @@ public sealed class EdgeInstantTests(ITestOutputHelper output)
     public void AnOperatingPointKeepsTheDrivesEdges()
     {
         // The operating point holds which stage, not where in the cycle: the drive still runs.
-        var field = Solved(new RfWaveform.Rectangular(0.5), Megahertz, 0.0);
+        // Staged, so that holding it builds the copy rather than returning the field itself.
+        IReadOnlyList<IReadOnlyList<WeightTerm>> Channel(double phase) => [[new WeightTerm(0, 1.0, phase)]];
+        var field = new DrivenSolvedField(
+            [new Uniform()], [0.0], Channel(0.0), [Megahertz], [new RfWaveform.Rectangular(0.3)],
+            [10.0e-6, 20.0e-6],
+            [[0.0], [0.0]],
+            [Channel(0.0), Channel(0.25)]);
 
-        Assert.Equal(field.NextEdgeAfter(3.0e-6), field.AtOperatingPoint(1.0e-6).NextEdgeAfter(3.0e-6));
+        foreach (var held in new[] { 5.0e-6, 15.0e-6 })
+        {
+            var copy = field.AtOperatingPoint(held);
+            Assert.NotSame(field, copy);
+
+            foreach (var t in new[] { 0.0, 3.0e-6, 12.0e-6, 25.0e-6 })
+            {
+                Assert.Equal(field.NextEdgeAfter(t), copy.NextEdgeAfter(t));
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(-0.25)]
+    [InlineData(-0.75)]
+    [InlineData(-0.4)]
+    public void ANegativeTapPhaseFlipsWhereTheFieldDoes(double phase)
+    {
+        // Duty 0.7 puts the breakpoint of cycle -1 at phase -0.3, where the waveform's wrap
+        // `phase - Floor(phase)` rounds: the crossing is judged through that rounding.
+        var field = Solved(new RfWaveform.Rectangular(0.7), Megahertz, phase);
+
+        var t = 0.0;
+        for (var i = 1; i <= 10; i++)
+        {
+            var next = field.NextEdgeAfter(t);
+            Assert.True(next > t, $"edge {i} at {next:R} s, after {t:R} s");
+            Assert.NotEqual(field.WeightAt(0, Math.BitDecrement(next)), field.WeightAt(0, next));
+            t = next;
+        }
+
+        Assert.True(t < 10.0 / Megahertz, $"ten edges end at {t:R} s");
     }
 
     [Fact]
@@ -210,13 +247,13 @@ public sealed class EdgeInstantTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(0.5)]
-    [InlineData(0.3)]
-    public void NominalInstantsAreOftenStillPreEdge(double duty)
+    [InlineData(0.5, 60, 0)]
+    [InlineData(0.3, 111, 75)]
+    public void NominalInstantsAreOftenStillPreEdge(double duty, int quadrupoleCount, int solvedCount)
     {
-        // Counted and reported: derivation.md predicts the ideal quadrupole's share from a
-        // Python replica of its arithmetic. The assertion is only that the count is the
-        // field's own, i.e. that every nominal instant is within reach of a reported one.
+        // Counted and pinned: derivation.md predicts the ideal quadrupole's share from a
+        // Python replica of its arithmetic, and IEEE-754 doubles give the same counts on any
+        // runner. Every nominal instant is also within reach of a reported one.
         var quadrupole = Quadrupole(new RfWaveform.Rectangular(duty));
         var solved = Solved(new RfWaveform.Rectangular(duty), Megahertz, 0.0);
 
@@ -239,10 +276,15 @@ public sealed class EdgeInstantTests(ITestOutputHelper output)
             return count;
         }
 
+        var quadrupolePreEdge = PreEdge(quadrupole, 0);
+        var solvedPreEdge = PreEdge(solved, 0);
+
         output.WriteLine(
             $"duty {duty}: pre-edge nominal instants of 200, n = 0..99 (n = 1..100): "
-            + $"ideal quadrupole {PreEdge(quadrupole, 0)} ({PreEdge(quadrupole, 1)}), "
-            + $"solved {PreEdge(solved, 0)} ({PreEdge(solved, 1)})");
+            + $"ideal quadrupole {quadrupolePreEdge} ({PreEdge(quadrupole, 1)}), "
+            + $"solved {solvedPreEdge} ({PreEdge(solved, 1)})");
+        Assert.Equal(quadrupoleCount, quadrupolePreEdge);
+        Assert.Equal(solvedCount, solvedPreEdge);
     }
 
     [Fact]
@@ -322,6 +364,15 @@ public sealed class EdgeInstantTests(ITestOutputHelper output)
         Assert.True(Math.Abs(next - 2.3e-6) <= 2 * Ulp(next), $"first edge of the second state at {next:R} s");
         AssertTwoSided(field, next, "the second state");
 
+        // Held, the sequence never leaves the state it pins, and that state's waveform keeps
+        // running: its edges come past the boundary, and nothing cuts them there.
+        var held = field.AtOperatingPoint(1.0e-6);
+        var past = held.NextEdgeAfter(t);
+        Assert.True(Math.Abs(past - 2.5e-6) <= 2 * Ulp(past), $"held: the first state's edge at {past:R} s");
+        AssertTwoSided(held, past, "held in the first state");
+        var heldSecond = field.AtOperatingPoint(3.0e-6).NextEdgeAfter(0.0);
+        Assert.True(Math.Abs(heldSecond - 0.3e-6) <= 2 * Ulp(heldSecond), $"held: the second state's edge at {heldSecond:R} s");
+
         var still = new SequencedField([FieldFreeSpace.Instance, FieldFreeSpace.Instance], [1.0e-6, 2.0e-6]);
         Assert.Equal(double.PositiveInfinity, still.NextEdgeAfter(0.0));
     }
@@ -355,7 +406,8 @@ public sealed class EdgeInstantTests(ITestOutputHelper output)
         // Forwarding the switch changes nothing a model builds today: a region is applied
         // only to an analytic element (FieldAssembly.Analytic), and both time-varying
         // analytic fields answer infinity. That is what keeps the default path's landings,
-        // and so its bits, as they were; a new analytic field with switches shows up here.
+        // and so its bits, as they were. The list is written by hand: a new time-varying
+        // analytic field has to be added to it to be covered.
         ITimeVaryingField[] analytic =
         [
             Quadrupole(new RfWaveform.Rectangular(0.3)),
@@ -380,6 +432,14 @@ public sealed class EdgeInstantTests(ITestOutputHelper output)
         [
             Solved(new RfWaveform.Rectangular(0.3), Megahertz, 0.0, 0.25),
             Quadrupole(new RfWaveform.Rectangular(0.3)),
+            new TimeShiftedField(Quadrupole(new RfWaveform.Rectangular(0.3)), 1.0 / 3.0e6),
+            new SequencedField(
+                [Solved(new RfWaveform.Rectangular(0.5), Megahertz, 0.0), Solved(new RfWaveform.Rectangular(0.3), Megahertz, 0.0)],
+                [2.2e-6, 1.0e-3]),
+            new DrivenSuperposedField(
+                [Solved(new RfWaveform.Rectangular(0.5), Megahertz, 0.0), FieldFreeSpace.Instance, Quadrupole(new RfWaveform.Rectangular(0.3))]),
+            OscillatingUniformField.Create(Vec3.UnitX, Quantity.From(1.0, "MHz"), new RfWaveform.Rectangular(0.3)),
+            Assert.IsAssignableFrom<ITimeVaryingField>(BoundedField.Around(Quadrupole(new RfWaveform.Rectangular(0.3)), Box())),
         ];
 
         foreach (var field in fields)
@@ -425,7 +485,7 @@ public sealed class EdgeInstantTests(ITestOutputHelper output)
         Assert.NotEqual(new RfWaveform.Rectangular(0.4), rectangular);
     }
 
-    [Fact]
+    [Fact(Skip = "A benchmark, not a test: run it by hand for the cost of a call (60 ns on one drive with two taps, Release, Windows).")]
     public void MeasureTheCostOfACall()
     {
         var field = Solved(new RfWaveform.Rectangular(0.5), Megahertz, 0.0, 0.5);

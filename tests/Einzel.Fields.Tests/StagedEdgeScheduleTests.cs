@@ -74,6 +74,26 @@ public sealed class StagedEdgeScheduleTests(ITestOutputHelper output)
         Assert.True(Math.Abs(first - 0.05e-6) <= 1.0e-21, $"first edge {first:R} s");
     }
 
+    /// <summary>
+    /// With stages every instant is evaluated on a stage's terms, so a base tap that every
+    /// stage holds at zero is never read and lands on nothing.
+    /// </summary>
+    [Fact]
+    public void ABaseTapEveryStageSilencesDeclaresNothing()
+    {
+        IReadOnlyList<IReadOnlyList<WeightTerm>> Channel(double amplitude) => [[new WeightTerm(0, amplitude, 0.25)]];
+
+        var field = new DrivenSolvedField(
+            [new Uniform()], [0.0], Channel(100.0), [1.0e6], [new RfWaveform.Rectangular(0.3)],
+            [10.0e-6, 20.0e-6],
+            [[0.0], [0.0]],
+            [Channel(0.0), Channel(0.0)]);
+
+        Assert.Equal(double.PositiveInfinity, field.NextEdgeAfter(0.0));
+        Assert.Equal(0.0, field.WeightAt(0, 5.0e-6));
+        Assert.Equal(0.0, field.WeightAt(0, 25.0e-6));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

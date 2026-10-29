@@ -149,6 +149,16 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A time-varying field reports the exact double at which each waveform edge
+  flips, not the nominal instant, which is often still pre-edge.**
+  `ITimeVaryingField.NextEdgeAfter(t)` returns the smallest `t* > t` at which
+  the field's own phase arithmetic is past a declared breakpoint, so one ulp
+  before it reads the old level; solved, quadrupole, uniform, shifted, sequenced,
+  superposed and bounded fields answer it, and nothing calls it yet. Of the 200
+  nominal instants in the first 100 periods, 60 (duty 0.5) and 111 (duty 0.3)
+  are still pre-edge on the ideal quadrupole's arithmetic, and 0 and 75 on the
+  solved field's. A call costs 60 ns on one drive with two taps and allocates
+  nothing; default-path runs are byte-identical. PR #23 (number assumed).
 - **A sampled period becomes the harmonic series a model takes, by least
   squares, with the residual it leaves.** `RfWaveform.Harmonic.Fit` solves for
   orders 0..N by Householder QR at any sample spacing and equals the discrete
