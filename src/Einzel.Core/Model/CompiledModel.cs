@@ -218,6 +218,12 @@ public sealed record CompiledModel
     /// <summary>How a diffusive run advances its density in time.</summary>
     public CompiledDensityStep DensityStep { get; init; } = new("explicit", 1.0);
 
+    /// <summary>
+    /// Whether a trajectory lands on every declared waveform edge (<c>transport.edges</c>
+    /// is <c>land</c>) rather than only on stage switches (<c>cap</c>, the default).
+    /// </summary>
+    public bool LandOnEdges { get; init; }
+
     /// <summary>The ion's launch speed, in metres per second.</summary>
     /// <returns>The speed after acceleration, including the energy offset.</returns>
     /// <remarks>

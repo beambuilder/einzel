@@ -44,6 +44,7 @@ public static class ModelSchemaWriter
         Write<ModelDocument>("Einzel model", "model", ModelSchema.CurrentVersion, null, new Dictionary<string, IReadOnlyList<string>>
         {
             ["WaveformDocument.type"] = WaveformDocument.Types,
+            ["TransportDocument.edges"] = ["cap", "land"],
             ["WaveformDocument.interpolation"] = ["linear", "cubic"],
         });
 

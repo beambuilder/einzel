@@ -100,6 +100,14 @@ internal static class DormandPrince54
     /// The instant the step starts at. Ignored by a static field; every stage of a
     /// driven one samples a different point in the cycle.
     /// </param>
+    /// <param name="endSampleSeconds">
+    /// The instant the two end stages (<c>c = 1</c>: the sixth stage and the derivative at
+    /// the result) sample the field at, or NaN, the default, for
+    /// <c><paramref name="timeSeconds"/> + <paramref name="stepSize"/></c> exactly as
+    /// before. A step landing on a waveform edge passes the instant one ulp before it, so
+    /// that the stages see the near side of the jump; the state still advances by
+    /// <paramref name="stepSize"/>.
+    /// </param>
     public static void Step(
         in PhaseState state,
         in PhaseDerivative k1,
@@ -110,9 +118,11 @@ internal static class DormandPrince54
         out Vec3 errorPosition,
         out Vec3 errorVelocity,
         out PhaseDerivative derivativeAtResult,
-        double timeSeconds = 0.0)
+        double timeSeconds = 0.0,
+        double endSampleSeconds = double.NaN)
     {
         var h = stepSize;
+        var landing = !double.IsNaN(endSampleSeconds);
 
         var k2 = Derivative(Offset(state, h, (A21, k1)), field, chargeToMass, timeSeconds + (C2 * h));
         var k3 = Derivative(Offset(state, h, (A31, k1), (A32, k2)), field, chargeToMass, timeSeconds + (C3 * h));
@@ -123,11 +133,11 @@ internal static class DormandPrince54
             field, chargeToMass, timeSeconds + (C5 * h));
         var k6 = Derivative(
             Offset(state, h, (A61, k1), (A62, k2), (A63, k3), (A64, k4), (A65, k5)),
-            field, chargeToMass, timeSeconds + (C6 * h));
+            field, chargeToMass, landing ? endSampleSeconds : timeSeconds + (C6 * h));
 
         result = Offset(state, h, (B1, k1), (B3, k3), (B4, k4), (B5, k5), (B6, k6));
 
-        var k7 = Derivative(result, field, chargeToMass, timeSeconds + (C7 * h));
+        var k7 = Derivative(result, field, chargeToMass, landing ? endSampleSeconds : timeSeconds + (C7 * h));
         derivativeAtResult = k7;
 
         var fourth = Offset(state, h, (E1, k1), (E3, k3), (E4, k4), (E5, k5), (E6, k6), (E7, k7));

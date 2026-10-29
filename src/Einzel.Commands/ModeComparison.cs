@@ -272,6 +272,7 @@ public static class ModeComparison
         var settings = new IntegrationSettings
         {
             RelativeTolerance = Math.Max(model.RelativeTolerance, 1e-8),
+            LandOnEdges = model.LandOnEdges,
             MaximumFlightTime = model.MaximumFlightTimeSi,
         };
 

@@ -299,6 +299,7 @@ public static class FlyCommand
         var settings = new IntegrationSettings
         {
             RelativeTolerance = model.RelativeTolerance,
+            LandOnEdges = model.LandOnEdges,
             MaximumFlightTime = model.MaximumFlightTimeSi,
         };
 
@@ -648,7 +649,7 @@ public static class FlyCommand
             ("ion", (m.MassSi, m.ChargeSi)),
             ("source", (m.SourcePosition, m.SourceDirection, m.AccelerationPotentialSi, m.EnergyFraction)),
             ("detector", (m.DetectorPoint, m.DetectorNormal)),
-            ("integration settings", (m.RelativeTolerance, m.SampleIntervalSi)),
+            ("integration settings", (m.RelativeTolerance, m.SampleIntervalSi, m.LandOnEdges)),
             ("maximum flight time", m.MaximumFlightTimeSi),
             ("gas", m.Gas),
         ];

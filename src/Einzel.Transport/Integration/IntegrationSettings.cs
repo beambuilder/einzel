@@ -109,6 +109,30 @@ public sealed record IntegrationSettings
 
     /// <summary>Smallest factor by which one step may shrink after a rejection.</summary>
     public double MinimumStepShrink { get; init; } = 0.1;
+
+    /// <summary>
+    /// Whether a step is cut to land on every edge a driven field declares
+    /// (<see cref="Einzel.Fields.ITimeVaryingField.NextEdgeAfter"/>) as well as on every
+    /// stage switch. False by default, which is the integrator of every earlier version
+    /// to the bit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// When true, the step is cut to the earlier of the next switch and the next edge.
+    /// The landing step samples its two end stages one ulp before the instant, which the
+    /// field's contract places on the near side; on acceptance the time is set to the
+    /// instant exactly and the derivative is evaluated there, on the far side, so the
+    /// end-of-step derivative is not reused across the jump. An instant closer than
+    /// <see cref="MinimumStep"/> is taken in place: the time is set to it and the
+    /// derivative re-evaluated without a step, which counts as neither an accepted nor a
+    /// rejected step.
+    /// </para>
+    /// <para>
+    /// Set from <c>transport.edges</c>: <c>land</c> is true, <c>cap</c> or an absent key
+    /// false.
+    /// </para>
+    /// </remarks>
+    public bool LandOnEdges { get; init; }
 }
 
 /// <summary>Why an integration stopped.</summary>

@@ -123,7 +123,8 @@ public interface ITimeVaryingField : IElectrostaticField
     /// </para>
     /// <para>
     /// Distinct from <see cref="NextSwitchAfter"/>: a switch changes the state, an edge is a
-    /// point within a periodic drive's cycle. Nothing reads this yet.
+    /// point within a periodic drive's cycle. Read by the integrator when
+    /// <c>IntegrationSettings.LandOnEdges</c> is set.
     /// </para>
     /// </remarks>
     double NextEdgeAfter(double timeSeconds) => double.PositiveInfinity;
