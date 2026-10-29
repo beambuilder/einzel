@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Einzel.Core.Model;
 using Einzel.Core.Units;
 
@@ -56,10 +57,17 @@ public abstract record RfWaveform
     /// two edges.
     /// </para>
     /// <para>
-    /// Today only <see cref="Mean"/> reads them, to put its quadrature panels' edges on the
-    /// jumps. The integrator does not land on them yet - a jump inside a step is held to
-    /// the steps-per-cycle cap exactly as a rectangular edge is - and landing on them is
-    /// the next piece of work.
+    /// <see cref="Mean"/> reads them, to put its quadrature panels' edges on the jumps, and a
+    /// field reports the instants it crosses them through
+    /// <see cref="ITimeVaryingField.NextEdgeAfter"/>. The integrator lands on them when a
+    /// model asks for it, which a later change adds; until then a jump inside a step is held
+    /// to the steps-per-cycle cap.
+    /// </para>
+    /// <para>
+    /// Right-continuous: at a wrapped phase equal to a breakpoint the shape reads its
+    /// post-edge value, as <c>wrapped &lt; DutyCycle</c> does for the rectangular wave. An
+    /// <see cref="Analytic"/> expression written with the opposite convention (<c>p &lt;= b</c>)
+    /// flips one ulp after the instant a field reports.
     /// </para>
     /// </remarks>
     public virtual IReadOnlyList<double> Breakpoints => [];
@@ -153,8 +161,36 @@ public abstract record RfWaveform
         public override double Mean => (2.0 * DutyCycle) - 1.0;
 
         /// <inheritdoc/>
-        /// <remarks>The rising edge at the start of the cycle and the falling one at the duty cycle.</remarks>
-        public override IReadOnlyList<double> Breakpoints => [0.0, DutyCycle];
+        /// <remarks>
+        /// The rising edge at the start of the cycle and the falling one at the duty cycle.
+        /// Built once and read-only: an edge schedule reads it once per field, and a shared
+        /// list a caller could write to would move every schedule built from it.
+        /// </remarks>
+        public override IReadOnlyList<double> Breakpoints
+        {
+            get
+            {
+                // Rebuilt when a `with` copy carried the list of the duty cycle it replaced.
+                var cached = _breakpoints;
+                if (cached is null || !cached[1].Equals(DutyCycle))
+                {
+                    cached = new ReadOnlyCollection<double>([0.0, DutyCycle]);
+                    _breakpoints = cached;
+                }
+
+                return cached;
+            }
+        }
+
+        private ReadOnlyCollection<double>? _breakpoints;
+
+        /// <summary>Equal when the duty cycles are; the cached breakpoint list takes no part.</summary>
+        /// <param name="other">The other waveform.</param>
+        /// <returns>Whether the two describe the same drive.</returns>
+        public bool Equals(Rectangular? other) => other is not null && DutyCycle.Equals(other.DutyCycle);
+
+        /// <inheritdoc/>
+        public override int GetHashCode() => DutyCycle.GetHashCode();
     }
 
     /// <summary>

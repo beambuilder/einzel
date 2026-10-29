@@ -311,15 +311,37 @@ public sealed class SequencedField : ITimeVaryingField
     /// </remarks>
     public double NextSwitchAfter(double timeSeconds)
     {
-        foreach (var boundary in _boundaries)
+        // Indexed, not foreach: the boundaries are an IReadOnlyList, whose enumerator is
+        // boxed, and this runs once per step and once per edge query.
+        for (var i = 0; i < _boundaries.Count; i++)
         {
-            if (boundary > timeSeconds)
+            if (_boundaries[i] > timeSeconds)
             {
-                return boundary;
+                return _boundaries[i];
             }
         }
 
         return double.PositiveInfinity;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The edges of the state in force, up to the next boundary and not including it: the
+    /// boundary is a switch, reported by <see cref="NextSwitchAfter"/>, and the edges after
+    /// it belong to the state that starts there, which answers once the time has reached
+    /// it. A held operating point never leaves its state, so its edges are not cut.
+    /// </remarks>
+    public double NextEdgeAfter(double timeSeconds)
+    {
+        if (At(timeSeconds) is not ITimeVaryingField driven)
+        {
+            return double.PositiveInfinity;
+        }
+
+        var edge = driven.NextEdgeAfter(timeSeconds);
+        var boundary = _operatingPoint is null ? NextSwitchAfter(timeSeconds) : double.PositiveInfinity;
+
+        return edge < boundary ? edge : double.PositiveInfinity;
     }
 
     /// <inheritdoc/>

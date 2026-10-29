@@ -58,6 +58,10 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
     // which is what a cycle average wants. See <see cref="AtOperatingPoint"/>.
     private readonly double? _operatingPoint;
 
+    // Every distinct (drive, breakpoint, tap phase) the field can cross, over every stage.
+    // Built once from the terms; see `NextEdgeAfter`.
+    private readonly EdgeTap[] _edgeTaps;
+
     /// <summary>The same field with its operating point held at an instant.</summary>
     private DrivenSolvedField(DrivenSolvedField source, double operatingPoint)
     {
@@ -91,6 +95,7 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
         _stageHarmonics = source._stageHarmonics;
         _stageEndDirect = source._stageEndDirect;
         _stageEndHarmonics = source._stageEndHarmonics;
+        _edgeTaps = source._edgeTaps;
         _operatingPoint = operatingPoint;
     }
 
@@ -125,6 +130,8 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
         _stageEndHarmonics = stageEndHarmonics is null
             ? new WeightTerm[][]?[_boundaries.Length]
             : [.. stageEndHarmonics.Select(stage => stage?.Select(h => h.ToArray()).ToArray())];
+
+        _edgeTaps = EdgeSchedule();
     }
 
     /// <summary>
@@ -454,6 +461,94 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
 
         return double.PositiveInfinity;
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// The earliest crossing over every (drive, breakpoint, tap phase) the field holds, each
+    /// judged on the phase <c>(f * t) + phase</c> exactly as the weights compute it. The phase
+    /// alone decides the side of an edge, whatever the shape, because every shape wraps its
+    /// phase as <c>phase - Math.Floor(phase)</c> before comparing it, and the crossing test
+    /// repeats that wrap, so it agrees with the field whatever the rounding.
+    /// </para>
+    /// <para>
+    /// The schedule is the union over every stage, built once, and not narrowed to the stage
+    /// in force: a tap that exists only in a later stage reports its edges from the start.
+    /// Landing on an instant where nothing jumps costs a step and changes no answer, and
+    /// choosing per stage would make the schedule depend on the operating point as well.
+    /// A term whose amplitude is exactly zero in a stage, at the start and the end of a ramp,
+    /// contributes nothing there and is left out; any non-zero amplitude, however small,
+    /// puts its tap's edges in. The decision is on the compiled term, not on the field it
+    /// makes. The base terms enter only when there are no stages: with stages every instant,
+    /// before the first boundary and after the last, is evaluated on a stage's terms.
+    /// </para>
+    /// <para>
+    /// Right-continuous, as the waveforms are: at <c>t*</c> the wrapped phase equals or
+    /// exceeds the breakpoint and the shape reads its post-edge value there.
+    /// </para>
+    /// </remarks>
+    public double NextEdgeAfter(double timeSeconds)
+    {
+        var next = double.PositiveInfinity;
+
+        foreach (var tap in _edgeTaps)
+        {
+            var frequency = _frequencies[tap.Drive];
+            var clock = new DriveClock(frequency, tap.Phase);
+            next = Math.Min(next, EdgeInstants.Next(clock, frequency, tap.Phase, tap.Breakpoint, timeSeconds));
+        }
+
+        return next;
+    }
+
+    private EdgeTap[] EdgeSchedule()
+    {
+        var taps = new HashSet<EdgeTap>();
+
+        void Add(WeightTerm[][]? channels, WeightTerm[][]? ends)
+        {
+            if (channels is null)
+            {
+                return;
+            }
+
+            for (var c = 0; c < channels.Length; c++)
+            {
+                for (var k = 0; k < channels[c].Length; k++)
+                {
+                    var term = channels[c][k];
+                    var end = ends?[c][k].Amplitude ?? 0.0;
+
+                    if (term.Drive < 0 || term.Drive >= _frequencies.Length || (term.Amplitude == 0.0 && end == 0.0))
+                    {
+                        continue;
+                    }
+
+                    foreach (var breakpoint in _waveforms[term.Drive].Breakpoints)
+                    {
+                        taps.Add(new EdgeTap(term.Drive, breakpoint, term.Phase));
+                    }
+                }
+            }
+        }
+
+        // The base terms are what the weights read only when there are no stages: with
+        // boundaries every instant falls in a stage, so a base tap would land on nothing.
+        if (_boundaries.Length == 0)
+        {
+            Add(_harmonics, null);
+        }
+
+        for (var s = 0; s < _stageHarmonics.Length; s++)
+        {
+            Add(_stageHarmonics[s], s < _stageEndHarmonics.Length ? _stageEndHarmonics[s] : null);
+        }
+
+        return [.. taps];
+    }
+
+    /// <summary>A breakpoint of a drive's waveform, seen through one tap's phase.</summary>
+    private readonly record struct EdgeTap(int Drive, double Breakpoint, double Phase);
 
     /// <summary>
     /// The primary drive frequency, in hertz - the fastest of them.

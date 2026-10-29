@@ -170,6 +170,17 @@ public sealed class DrivenBoundedField : BoundedField, ITimeVaryingField
 
     /// <inheritdoc/>
     /// <remarks>
+    /// Forwarded: the region scales the field by a factor of position alone, so it moves
+    /// no instant in time. Every inner this wraps today is analytic and answers infinity.
+    /// </remarks>
+    public double NextSwitchAfter(double timeSeconds) => _driven.NextSwitchAfter(timeSeconds);
+
+    /// <inheritdoc/>
+    /// <remarks>Forwarded, as the switches are.</remarks>
+    public double NextEdgeAfter(double timeSeconds) => _driven.NextEdgeAfter(timeSeconds);
+
+    /// <inheritdoc/>
+    /// <remarks>
     /// The region scales a potential by a factor of position alone, so it commutes with an
     /// average over time and can be applied to the mean rather than to every sample.
     /// </remarks>

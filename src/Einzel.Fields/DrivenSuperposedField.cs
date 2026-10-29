@@ -232,6 +232,23 @@ public sealed class DrivenSuperposedField : ITimeVaryingField, IConductorBounded
     }
 
     /// <inheritdoc/>
+    /// <remarks>The earliest edge any member reports, as for a switch.</remarks>
+    public double NextEdgeAfter(double timeSeconds)
+    {
+        var next = double.PositiveInfinity;
+
+        foreach (var element in _elements)
+        {
+            if (element is ITimeVaryingField driven)
+            {
+                next = Math.Min(next, driven.NextEdgeAfter(timeSeconds));
+            }
+        }
+
+        return next;
+    }
+
+    /// <inheritdoc/>
     public Vec3 ElectricFieldAt(in Vec3 position, double timeSeconds)
     {
         var total = Vec3.Zero;

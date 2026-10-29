@@ -145,6 +145,31 @@ public sealed class TimeShiftedField : ITimeVaryingField, IConductorBounded
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// Shifted back into this leg's own clock to the double, not by subtraction: the inner
+    /// field is read at <c>t + offset</c>, and <c>edge - offset</c> rounds, so the instant
+    /// returned is the smallest <c>c</c> whose <c>c + offset</c>, rounded as the field
+    /// reads it, is at or past the inner edge. The field read at <c>c</c> is then post-edge
+    /// and at the double before it pre-edge, as the contract asks.
+    /// </para>
+    /// </remarks>
+    public double NextEdgeAfter(double timeSeconds)
+    {
+        var inner = _inner.NextEdgeAfter(timeSeconds + _offsetSeconds);
+
+        return double.IsPositiveInfinity(inner)
+            ? inner
+            : EdgeInstants.FirstPast(new ShiftedPast(_offsetSeconds, inner), inner - _offsetSeconds);
+    }
+
+    /// <summary>The leg's instant, shifted as the field reads it, is at or past the inner edge.</summary>
+    private readonly record struct ShiftedPast(double OffsetSeconds, double InnerEdge) : IInstantTest
+    {
+        public bool IsPast(double timeSeconds) => timeSeconds + OffsetSeconds >= InnerEdge;
+    }
+
+    /// <inheritdoc/>
     public double SignedDistanceToDiscontinuity(in Vec3 position) =>
         _inner.SignedDistanceToDiscontinuity(position);
 

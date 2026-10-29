@@ -33,6 +33,7 @@ namespace Einzel.Fields.Analytic;
 public sealed class IdealQuadrupoleRf : ITimeVaryingField
 {
     private readonly double _inscribedRadiusSquared;
+    private readonly double[] _breakpoints;
 
     private IdealQuadrupoleRf(
         double directVolts,
@@ -49,6 +50,7 @@ public sealed class IdealQuadrupoleRf : ITimeVaryingField
         Waveform = waveform;
         Axis = axis;
         _inscribedRadiusSquared = inscribedRadius * inscribedRadius;
+        _breakpoints = [.. waveform.Breakpoints];
     }
 
     /// <summary>The shape of the drive. A sinusoid unless another is given.</summary>
@@ -190,6 +192,26 @@ public sealed class IdealQuadrupoleRf : ITimeVaryingField
     /// <inheritdoc/>
     /// <remarks>Never: an analytic drive runs one way for the whole flight.</remarks>
     public double NextSwitchAfter(double timeSeconds) => double.PositiveInfinity;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Judged on the phase <see cref="DriveAt"/> computes, <c>omega t / (2 pi)</c>, which is not
+    /// <c>f t</c> in doubles; that arithmetic is kept rather than changed, because changing it
+    /// would move the bits of every ideal-quadrupole result.
+    /// </remarks>
+    public double NextEdgeAfter(double timeSeconds)
+    {
+        var clock = new AngularClock(AngularFrequency);
+        var frequency = AngularFrequency / (2.0 * Math.PI);
+        var next = double.PositiveInfinity;
+
+        foreach (var breakpoint in _breakpoints)
+        {
+            next = Math.Min(next, EdgeInstants.Next(clock, frequency, 0.0, breakpoint, timeSeconds));
+        }
+
+        return next;
+    }
 
     /// <inheritdoc/>
     /// <remarks>An analytic field is defined everywhere and resolves everything.</remarks>
