@@ -106,6 +106,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel render still <model.json>` | Draw the viewport's shaded 3D picture to a PNG, headlessly - the same composition and camera the window uses |
 | `einzel render animation <spec.json>` | Draw a flight as numbered vector frames on the spec's declared time mapping (RND-7) |
 | `einzel cache status\|clear\|prune [dir]` | What the field cache keeps; delete all of it, or only what no run of this build will load (other solver versions or compute paths, half-written and orphaned files). `--dry-run` names the files and deletes nothing |
+| `einzel waveform fit <csv> --orders N` | The harmonic series of orders 0 to N closest to one sampled period, printed as a model's `harmonic` waveform object with its residual; see [below](#einzel-waveform-fit). `waveform import` of measured traces (B.3) will join it |
 | `einzel agents-md [dir]` | Regenerate the platform layer of `AGENTS.md` (PRJ-6) |
 | `einzel --version` | Engine version |
 
@@ -134,6 +135,53 @@ an unknown verb - "not built yet" and "you spelled it wrong" are different probl
 flag.** RND-7 makes the time mapping non-optional, so the interface is arranged such
 that there is no command line producing an animation without one. `--fps` is offered,
 because a frame rate is a property of the playback device rather than of the physics.
+
+### `einzel waveform fit`
+
+```
+einzel waveform fit drive.csv --orders 15
+```
+
+reads a `phase,value` table by exactly the rules a model's `tabulated` waveform file is
+read by (a file a model accepts is a file this fits, and a bad row is refused with the
+same `SCHEMA_INVALID` error naming the line, exit 1), fits every order from 0 to N by
+least squares, and prints the series as the object a drive's `waveform` takes, followed
+by one line with the residual (abridged here, for a 1024-sample square wave):
+
+```
+{
+  "type": "harmonic",
+  "terms": [
+    { "order": 0, "amplitude": 2.55E-17, "phase": 0 },
+    { "order": 1, "amplitude": 1.27324, "phase": -0.25 },
+    ...
+  ]
+}
+orders 0 to 15 fitted to 1024 samples: residual rms 0.159, max 0.969
+```
+
+Paste the object into the drive (`"waveform": { "type": "harmonic", "terms": [...] }`)
+and the model flies the series. `--json` writes one object instead: `table`, `samples`,
+`orders`, `waveform` (the same object), `residualRms` and `residualMax`, the residuals
+relative to the drive amplitude. `--orders` is required; more orders than the samples
+determine (`2N + 1` coefficients) is refused with `VALUE_OUT_OF_BOUNDS` and says how many
+the table supports, and so is a trace with enough samples bunched into too small a part of
+the period to separate the orders (a tenth of a cycle cannot tell order 10 from the lower
+ones); a missing or unreadable file is `SCHEMA_INVALID` naming the path. All exit 1. Every order is printed, the ones the data do not contain at rounding
+level, so the object is the fit and nothing has been dropped by a threshold.
+
+Least squares rather than an FFT, so the samples may be at any spacing; on a uniform grid
+the result is the discrete Fourier coefficients. The phase of each term is in cycles in
+(-1/2, 1/2] (an antiphase term is 1/2, never -1/2 or -0), in the convention the model uses: `amplitude * cos(2π(order·p + phase))`.
+
+**When a harmonic is the better drive than the table.** Either costs one channel per
+distinct phase, so the solve is the same. The difference is in the flight: a linear table
+has a corner at every sample and a cubic one a jump in its third derivative, which the
+step-size control meets as noise; a finite series has neither, so the integrator sees a
+smooth drive. The price is the residual - a square wave keeps its Gibbs overshoot at any
+order, and its largest residual stays near one at the jump - so a shape with real edges
+is better as the table (or an `analytic` expression with breakpoints), and a smooth
+measured shape is better as its series.
 
 ### The preview tier
 

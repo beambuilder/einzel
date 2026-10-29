@@ -92,7 +92,7 @@ followed.
 | **1** · Spine, project, CLI | Model, units, symmetry, DC solver, superposition, tricubic, integrator, schema, errors, result objects, manifests, CLI, VTU | **Complete**, and its acceptance is met: ACC-1 on a reflectron, the memo's mirror pair tracked end to end, GRD-1 enforced with no bypass, an agent building a DC model from prose |
 | **2** · Extensions, sweeps, shell, figures | Both extension runners, examples corpus v1, sensitivity fields, tolerance MC, optimisation, ILGPU, WPF shell, `Einzel.Render`, installer, update mechanism | **Split.** Sweeps, sensitivity fields, both optimisers, the sandboxed extension runner and `Einzel.Render` are done. The in-process runner, ILGPU, the shell, the installer, the update mechanism and **the examples corpus** are not |
 | **3** · RF and pressure | Time-domain RF, statistical diffusion, collision models, gas velocity import, sequencer, space charge, Class B analysis, density export | **Scope complete.** Every named deliverable is built, gas velocity import included. What is left is on the acceptance side: the funnel benchmark needs a §23 decision and an affordable driven diffusive step. **Class B is complete** - the secular spectrum against the Mathieu characteristic exponent, and isolation efficiency against notch width on an arbitrary waveform that recovers the published digital cut-off |
-| **4** · Traps, animation, MCP | Waveform excitation, multi-notch isolation, trap sequences, device library, animation, MCP | Trap sequences and the device library are largely done ahead of schedule. Waveforms are begun: a drive's cycle may be an expression of the phase, a sampled period or a harmonic series (Amendment 65). Animation and MCP are not started |
+| **4** · Traps, animation, MCP | Waveform excitation, multi-notch isolation, trap sequences, device library, animation, MCP | Trap sequences and the device library are largely done ahead of schedule. Waveforms are begun: a drive's cycle may be an expression of the phase, a sampled period or a harmonic series (Amendment 65), and `einzel waveform fit` turns a sampled period into the series (Amendment 66). Animation and MCP are not started |
 | **5** · Generalise and release | BEM, MSH interchange, CAD import, public repository | Not started |
 
 **Why it went this way, and whether that was right.** The order has been driven by
@@ -154,6 +154,36 @@ Einzel. **That, rather than a date, is the trigger.**
 ---
 
 ## Amendments to the specification
+
+### 66 - A sampled period can be fitted to the harmonic series a model takes
+
+**CLI-1, CLI-3.** A drive written as a table has a corner at every sample (linear) or a jump
+in its third derivative (cubic), which the step-size control sees; the same shape as a finite
+harmonic series is smooth and costs the same channels, but writing the terms meant fitting
+them by hand. `RfWaveform.Harmonic.Fit(phases, values, orders)` fits orders 0..N by least
+squares - Householder QR on the constant, cosine and sine columns, at any sample spacing - and
+returns the terms in the model's convention (amplitude `√(a² + b²)`, phase `atan2(-b, a)/2π`
+in cycles, order 0 signed) with the residual RMS and maximum measured on the returned series.
+On a uniform grid the result is the discrete Fourier coefficients. It refuses a negative order,
+fewer than `2N + 1` samples, a non-finite sample and phases that do not distinguish the orders.
+
+`einzel waveform fit <csv> --orders N [--json]` reads the table by `WaveformTable`, the
+reader of a model's `tabulated` file, so a malformed row is the same `SCHEMA_INVALID` error
+naming the line and exit 1; a missing `--orders` prints the usage line and exits 1; too many
+orders for the samples (counted in 64 bits, so an absurd `--orders` cannot overflow) and
+samples bunched too closely to separate the orders are `VALUE_OUT_OF_BOUNDS`, exit 1; a missing
+or unreadable file is `SCHEMA_INVALID` with its path, as a model's table is reported. Phases
+are written in (-1/2, 1/2], with -0 written 0. It prints the `harmonic` waveform
+object and the residual; `--json` emits `table`, `samples`, `orders`, `waveform`,
+`residualRms`, `residualMax`. `waveform` is a verb group: `import` of measured traces (B.3)
+joins `fit` there. No MCP tool mirrors it; the session surface is not a second CLI.
+
+Measured on this machine: a fit takes 1.7 ms for 512 samples at 15 orders, 9.9 ms at 50; 8.4
+and 60 ms for 4096 samples. A square wave at 1024 midpoint samples gives `4/(πn)` on the odd
+orders to 1e-3 and leaves an RMS residual of 0.259, 0.159 and 0.0897 at 5, 15 and 50 orders.
+The printed object pasted into a driven model weighs its channel as the tabulated original
+does at every sample phase within the reported maximum residual (`WaveformFitSurfaceTests`).
+No schema or solver change.
 
 ### 65 - A drive's waveform may be an expression, a sampled period or a harmonic series
 

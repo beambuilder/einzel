@@ -149,6 +149,18 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A sampled period becomes the harmonic series a model takes, by least
+  squares, with the residual it leaves.** `RfWaveform.Harmonic.Fit` solves for
+  orders 0..N by Householder QR at any sample spacing and equals the discrete
+  Fourier coefficients on a uniform grid (to 1e-12 against the direct sums); it
+  recovers a four-term series from 40 random phases to 1e-10. `einzel waveform
+  fit <csv> --orders N [--json]` reads the table as a model's `tabulated` file
+  is read and prints the `harmonic` object ready to paste, with the residual
+  RMS and maximum; the pasted object weighs a driven field as the table does at
+  every sample within that maximum. A 1024-sample square wave leaves an RMS
+  residual of 0.259, 0.159 and 0.0897 at 5, 15 and 50 orders; a fit takes
+  1.7 ms (512 samples, 15 orders) to 60 ms (4096 samples, 50 orders). SPEC
+  Amendment 66; [CLI](cli.md#einzel-waveform-fit). PR #22 (number assumed).
 - **A model can write any drive shape, and an expression of a square wave flies
   the corpus quadrupole exactly as the rectangular drive does.** `waveform` takes
   the two names as before or an object of type `analytic` (an expression of `p`
