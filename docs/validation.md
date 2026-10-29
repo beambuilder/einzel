@@ -299,9 +299,12 @@ covering everything.
   the Ion Processor now has both figures of merit it needs — turn-around time and
   emittance — but not the trap geometry to measure them on, and the segmented
   quadrupole needs three dimensions.
-- **No waveform library.** A drive is a sinusoid or a rectangular wave; there is no
-  way to declare an arbitrary waveform, which spec section 9 lists as one of the
-  excitations an electrode may carry, and no multi-notch isolation waveform.
+- **No measured-trace import and no published non-sinusoidal reference.** A drive may
+  be a sinusoid, a rectangular wave, an expression of the phase, a sampled period or a
+  harmonic series (schema 0.15), and `transport.edges: land` lands on its declared
+  breakpoints, checked against the exact Meissner solution. What is missing is reading
+  a measured scope trace into a drive (B.3) and validation against published
+  square-wave and SIMION results (B.4).
 - **A trajectory run still has no cost estimate.** A diffusive one now does, exactly
   - its step is stability-limited and computable before the run - but trajectory
   integration's cost depends on the path, which depends on the field, which is the

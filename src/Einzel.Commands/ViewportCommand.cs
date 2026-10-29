@@ -302,6 +302,7 @@ public static class ViewportCommand
         var settings = new IntegrationSettings
         {
             RelativeTolerance = model.RelativeTolerance,
+            LandOnEdges = model.LandOnEdges,
             MaximumFlightTime = model.MaximumFlightTimeSi,
         };
 

@@ -55,7 +55,7 @@ public sealed class SequencerTests(ITestOutputHelper output)
     };
 
     private static TrajectoryResult Fly(
-        CompiledSolvedField solve, PhaseState start, double seconds, double tolerance = 1e-11)
+        CompiledSolvedField solve, PhaseState start, double seconds, double tolerance = 1e-11, bool land = false)
     {
         var field = GeometryBuilder.Build(solve).Field;
 
@@ -63,10 +63,60 @@ public sealed class SequencerTests(ITestOutputHelper output)
             start,
             Peptide,
             field,
-            new IntegrationSettings { RelativeTolerance = tolerance, MaximumFlightTime = seconds });
+            new IntegrationSettings { RelativeTolerance = tolerance, MaximumFlightTime = seconds, LandOnEdges = land });
     }
 
     private static PhaseState Start => new(new Vec3(0.0, 0.0, 0.0), new Vec3(0.0, 0.0, 0.0));
+
+    [Fact]
+    public void LandingOnTheSwitchStitchesAtLeastAsCloselyAsTheDefault()
+    {
+        // The test above under transport.edges = land: the landing step samples its end
+        // stages one ulp before the switch, the time is set to the switch exactly and the
+        // derivative is evaluated there in the new state. The stitched route is two plain
+        // flights either way.
+        //
+        // Measured (relative gap, cap then land): 1.0e-8 and 2.3e-7 at 1e-8, 4.6e-8 and
+        // 2.0e-8 at 1e-10, 1.3e-9 and 1.0e-9 at 1e-12. At 1e-8 the gap says nothing about
+        // the switch: against the stitched flight at 1e-12 cap, land and the stitched route
+        // itself are all 6e-7 to 8.5e-7 out, and cap agrees with the stitched route only
+        // because it takes the same steps up to the switch. Land takes 22 steps where cap
+        // takes 53. So the gap is bounded there as the default's is, and held to the
+        // default's only where it measures the switch: at 1e-10, where land is 1.1e-8 from
+        // the tight flight and cap 3.6e-8, and at 1e-12.
+        const double Volts = 200.0;
+        const double Half = 1e-6;
+
+        output.WriteLine("tolerance     cap gap       land gap      (relative)");
+
+        foreach (var tolerance in new[] { 1e-8, 1e-10, 1e-12 })
+        {
+            var geometry = Geometry(
+                Volts,
+                [
+                    new CompiledStage("push", Half, [Plate(Volts)]),
+                    new CompiledStage("pull", Half, [Plate(-Volts)]),
+                ]);
+            var first = Fly(Geometry(Volts, []), Start, Half, tolerance);
+            var second = Fly(Geometry(-Volts, []), first.FinalState, Half, tolerance);
+            var cap = Fly(geometry, Start, 2.0 * Half, tolerance);
+            var land = Fly(geometry, Start, 2.0 * Half, tolerance, land: true);
+
+            var scale = Math.Abs(second.FinalState.Position.X);
+            var capGap = (cap.FinalState.Position - second.FinalState.Position).Length / scale;
+            var landGap = (land.FinalState.Position - second.FinalState.Position).Length / scale;
+
+            output.WriteLine($"{tolerance,9:E0}   {capGap,10:E3}   {landGap,10:E3}");
+
+            Assert.Equal(TrajectoryOutcome.MaximumFlightTimeReached, land.Outcome);
+            Assert.True(landGap < 1e-6, $"at {tolerance:E0} land leaves {landGap:E3}");
+
+            if (tolerance < 1e-9)
+            {
+                Assert.True(landGap <= capGap, $"at {tolerance:E0} land leaves {landGap:E3}, cap {capGap:E3}");
+            }
+        }
+    }
 
     [Fact]
     public void ASequencedRunEqualsTheSameFlightStitchedFromTwoRuns()

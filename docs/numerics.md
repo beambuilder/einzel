@@ -712,11 +712,67 @@ averages two different fields into a single answer - plausible, and wrong.
 
 Unlike a boundary in space this needs **no root-find at all**, because the time is
 known in advance. The integrator asks the field when it next switches and refuses
-to take a step past it, so it lands on the boundary exactly and the next step
-starts in the new state with the derivative recomputed there. `NextSwitchAfter`
+to take a step past it, so it lands on the boundary and the next step starts in the
+new state. By default (`transport.edges` absent or `cap`) the derivative the next
+step starts from is not recomputed: it is the last stage of the landing step (FSAL),
+sampled at `t + h`, which is the switch or within an ulp of it. `NextSwitchAfter`
 returns infinity for a continuously driven field, however fast: a sinusoid has no
-discontinuity, and a rectangular one is handled by the steps-per-cycle cap rather
-than by landing on every edge.
+discontinuity. A rectangular edge is not a switch, and under the default it is
+handled by the steps-per-cycle cap and by the error controller rejecting the steps
+that straddle it - about 35 rejections per edge, measured below.
+
+### Landing on every edge: `transport.edges: land`
+
+With `"edges": "land"` the integrator also lands on every declared waveform
+breakpoint: the edges of a rectangular drive, the breakpoints an expression or a
+table declares. Four rules make the landing exact:
+
+- **The instant is the field's own flip.** `ITimeVaryingField.NextEdgeAfter` returns
+  the smallest double at which the field's evaluation is past the breakpoint, computed
+  with the field's own arithmetic, so one ulp before it the field is on the old level
+  and at it on the new one. The step is cut to the earlier of that and the next switch.
+- **The landing step samples the near side.** Its two `c = 1` stages (the sixth stage
+  and the derivative at the result) are sampled at one ulp before the instant; the state
+  still advances by the full cut step.
+- **The next step restarts on the far side.** On acceptance the time is set to the
+  instant exactly, not to the compensated sum, and the derivative is evaluated there.
+  One extra field evaluation per landing; the FSAL value is not reused across the jump.
+- **An instant already reached is taken in place.** When the next instant is closer
+  than the minimum step, or is the next double after the current time (two taps whose
+  flips differ by an ulp; above about 8 ms an ulp exceeds the 1e-18 s minimum step),
+  the time is set to it and the derivative re-evaluated without a step. That counts as
+  neither an accepted nor a rejected step.
+
+A model with no breakpoints, rectangular drives or stages flies identically under
+either value, to the bit (`EdgeLandingTests` pins it on a sinusoidal quadrupole).
+
+**Measured** on the ideal quadrupole with a rectangular drive (100 u, 1 MHz,
+r0 = 4 mm, start (1, 0.5) mm at rest) against the exact transfer-matrix solution of
+the Meissner equation, rtol 1e-11, error relative to `max(|ref|, x0)` and
+`max(|ref|, omega x0)`:
+
+| case | cap error | land error | cap rejected | land rejected | cap steps | land steps |
+| --- | --- | --- | --- | --- | --- | --- |
+| d 0.5, q 0.5, 1 T | 8.3e-10 | 9.2e-13 | 33 | 0 | 166 | 140 |
+| d 0.5, q 0.5, 10 T | 1.6e-8 | 9.2e-12 | 704 | 0 | 1904 | 1373 |
+| d 0.5, q 0.5, 100 T | 1.8e-7 | 9.2e-11 | 7372 | 0 | 19168 | 13703 |
+| d 0.5, q 0.45, 100 T | 5.4e-8 | 6.3e-11 | 7421 | 15 | 19200 | 13716 |
+| d 0.5, q 0.7, 20 T | 3.2e-9 | 1.1e-11 | 1491 | 30 | 4373 | 3296 |
+| d 0.3, q 0.4, 5 T | 1.5e-8 | 1.2e-11 | 344 | 4 | 906 | 644 |
+
+The rejections the cap paid at every edge are gone, the steps fall by about 28 per
+cent, and the error falls by three orders of magnitude to the tolerance's own level;
+it still grows about linearly with the number of periods. At rtol 1e-9 the 100-period
+q = 0.5 row is 1.3e-5 under `cap` and 1.5e-8 under `land`. 10^5 consecutive edges
+(50 ms) at duty 0.5 and 0.3 reach the flight time exactly without underflow, and the
+same chain with a second edge one ulp after every real one takes each twin in place
+(100,001 in-place landings, 2.95 million steps against 2.95 million without the twins).
+
+The default stays `cap` until the B.4 validation decides the flip. It has two known
+hazards that `land` removes and the default keeps, so that every existing document
+computes what it did: a landing that falls one ulp short of a switch leaves the next
+query answering the same switch an ulp away (a one-ulp step), and the landing step's
+last stage is sampled at `t + h`, on either side of the switch depending on rounding.
 
 A drive written as an expression of the phase or as a table over one period is held
 to the same rule. An expression is compiled once into a function over doubles and
@@ -730,9 +786,10 @@ an eight-point Gauss-Legendre rule over 1024 panels with the panel edges on the
 breakpoints, exact to rounding between them (a square wave's mean is zero to the
 bit, a 0.3 duty cycle's within 3.3e-16 of -0.4), while a jump left undeclared lands
 inside a panel and costs up to 2/1024 of the mean (7.5e-5 measured at duty 0.3). A
-table's mean is its interpolant's exact integral. The integrator does not land on
-breakpoints yet; until it does, a jump inside a step is bounded by the same 20
-steps per cycle a rectangular edge is.
+table's mean is its interpolant's exact integral. Under the default the integrator
+does not land on breakpoints, and a jump inside a step is bounded by the same 20
+steps per cycle a rectangular edge is; under `transport.edges: land` it lands on
+every declared one (below). An undeclared jump is landed on by neither.
 
 ### Measured
 
@@ -740,17 +797,24 @@ The check is that a sequenced run equals the same flight computed as **two separ
 runs stitched together** - the same physics written two ways, needing no closed
 form to compare against.
 
-| Integrator tolerance | Disagreement, relative |
-| --- | --- |
-| 1e-8 | 1.0e-8 |
-| 1e-10 | 4.6e-8 |
-| 1e-12 | 1.3e-9 |
+| Integrator tolerance | Disagreement, relative (`cap`) | Disagreement, relative (`land`) |
+| --- | --- | --- |
+| 1e-8 | 1.0e-8 | 2.3e-7 |
+| 1e-10 | 4.6e-8 | 2.0e-8 |
+| 1e-12 | 1.3e-9 | 1.0e-9 |
 
 Parts per billion at every tolerance, which is round-off between two different step
 sequences rather than the parts per thousand a straddled switch would leave. It is
 not monotone, because which steps each route happens to take is luck rather than a
 trend - what matters is that the disagreement is at round-off from the start, not
 that it shrinks.
+
+Under `land` the gap at 1e-10 halves and the one at 1e-12 falls a little. The 1e-8 row
+is not a measure of the switch: against the stitched flight at 1e-12, `cap`, `land`
+and the stitched route at 1e-8 are all 6e-7 to 8.5e-7 out, and `cap` agrees with the
+stitched route because it takes the same steps up to the switch, while `land` takes 22
+steps where `cap` takes 53. At 1e-10, `land` is 1.1e-8 from the tight flight and `cap`
+3.6e-8.
 
 Stages that share a spatial pattern share their solve, so a trap that holds at one
 voltage and pushes at another costs one basis field, not three.

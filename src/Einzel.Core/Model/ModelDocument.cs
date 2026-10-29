@@ -202,9 +202,10 @@ public static class ModelSchema
     /// report a converging analyser as a parallel one. 0.15 lets a drive's waveform be an
     /// object (an expression of the phase, a sampled period, a harmonic series); a 0.14
     /// build would refuse such a document rather than misread it, and every 0.14 document
-    /// reads unchanged.
+    /// reads unchanged. 0.16 adds <c>transport.edges</c>; a document without it flies as
+    /// it did under 0.15, to the bit.
     /// </remarks>
-    public const string CurrentVersion = "0.15";
+    public const string CurrentVersion = "0.16";
 
     /// <summary>Versions this build can read.</summary>
     /// <remarks>
@@ -214,7 +215,7 @@ public static class ModelSchema
     /// </remarks>
     public static IReadOnlyList<string> SupportedVersions { get; } =
         ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12",
-         "0.13", "0.14", "0.15"];
+         "0.13", "0.14", "0.15", "0.16"];
 }
 
 /// <summary>The ion being tracked.</summary>
@@ -746,6 +747,30 @@ public sealed record TransportDocument
     /// configures nothing is a document that thinks it configured something.
     /// </remarks>
     public SpaceChargeGridDocument? SpaceChargeGrid { get; init; }
+
+    /// <summary>
+    /// How a step meets an instant at which a drive jumps: <c>cap</c> (the default when
+    /// absent) or <c>land</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>cap</c> keeps the integrator of every earlier version to the bit: a step is
+    /// capped at a twentieth of the shortest drive period and is cut to land on a stage
+    /// switch of the sequence, and on nothing else. A rectangular edge inside a step is
+    /// left to the error controller, which meets it by rejecting steps.
+    /// </para>
+    /// <para>
+    /// <c>land</c> also cuts the step to every declared waveform breakpoint (the edges of
+    /// a rectangular wave, the breakpoints of an expression or a table), at the exact
+    /// instant the field's own evaluation flips. The landing step samples its last stages
+    /// on the near side of the edge, the next step restarts on the far side, and an edge
+    /// closer than the minimum step is taken in place. A model without breakpoints,
+    /// rectangular drives or stages flies identically under either value. The edges are
+    /// in time: the key sits under <c>transport</c> and has nothing to do with the edges
+    /// of a solved domain.
+    /// </para>
+    /// </remarks>
+    public string? Edges { get; init; }
 
 }
 

@@ -722,6 +722,7 @@ public static class SequencedRun
         var settings = new IntegrationSettings
         {
             RelativeTolerance = model.RelativeTolerance,
+            LandOnEdges = model.LandOnEdges,
             MaximumFlightTime = durationSeconds,
         };
 

@@ -127,6 +127,7 @@ public static class PreviewCommand
             new IntegrationSettings
             {
                 RelativeTolerance = tolerance,
+                LandOnEdges = model.LandOnEdges,
                 MaximumFlightTime = model.MaximumFlightTimeSi,
             },
             detector);

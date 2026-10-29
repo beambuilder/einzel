@@ -211,6 +211,7 @@ public static class ModelValidator
             SpaceChargeMode = transport.SpaceCharge,
             SpaceChargeGrid = transport.SpaceChargeGrid,
             DensityStep = transport.DensityStep,
+            LandOnEdges = transport.LandOnEdges,
             Parameters = surface,
         };
 
@@ -4404,7 +4405,8 @@ public static class ModelValidator
         CompiledDensityGrid? DensityGrid,
         string SpaceCharge,
         CompiledSpaceChargeGrid? SpaceChargeGrid,
-        CompiledDensityStep DensityStep);
+        CompiledDensityStep DensityStep,
+        bool LandOnEdges);
 
     /// <summary>Every transport mode this run uses, the model's and every phase's.</summary>
     /// <remarks>
@@ -4606,12 +4608,32 @@ public static class ModelValidator
             return null;
         }
 
+        // Case-sensitive like every other enumerated value in a document: "Land" is a
+        // typo, and reading it as either value would fly a document its author did not
+        // write.
+        if (transport.Edges is not (null or "cap" or "land"))
+        {
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = "/transport/edges",
+                Constraint = "a waveform edge is met by one of the methods this build has",
+                Observed = new ObservedValue(0.0, transport.Edges),
+                Suggestion = "\"cap\", the default, caps each step at a twentieth of the drive period "
+                    + "and lands on stage switches only, as every earlier version did; \"land\" also "
+                    + "lands on every declared waveform breakpoint, at the instant the field flips",
+            });
+
+            return null;
+        }
+
         var chargeGrid = SpaceChargeGrid(transport, errors);
         var densityStep = DensityStep(transport, modes, errors);
 
         return new TransportValues(
             transport.Mode, transport.RelativeTolerance, ceiling.Value.SiValue, sample,
-            gas, mobility, densityGrid, transport.SpaceCharge, chargeGrid, densityStep);
+            gas, mobility, densityGrid, transport.SpaceCharge, chargeGrid, densityStep,
+            transport.Edges is "land");
     }
 
     /// <summary>

@@ -149,6 +149,20 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A step that lands on every rectangular edge, sampling the near side and
+  restarting on the far side, removes the 35 rejected steps per edge the cap
+  pays and three orders of magnitude of error.** `transport.edges: land`
+  (schema 0.16; default `cap`, unchanged to the bit) cuts each step to the
+  earlier of the next switch and `NextEdgeAfter`, samples the landing step's two
+  `c = 1` stages one ulp before the instant, sets the time to it exactly and
+  re-evaluates the derivative there, and takes an instant closer than the minimum
+  step or one ulp ahead in place. On the ideal quadrupole against the exact
+  Meissner solution at rtol 1e-11, q = 0.5: 1.6e-8 to 9.2e-12 at 10 periods and
+  1.8e-7 to 9.2e-11 at 100, rejected steps 7372 to 0 and accepted 19168 to
+  13703; 10^5 edges, and 10^5 pairs of edges an ulp apart, fly without underflow.
+  The stitched sequencer gap at 1e-10 goes from 4.6e-8 to 2.0e-8. SPEC
+  Amendment 67; [numerics](numerics.md#landing-on-every-edge-transportedges-land).
+  PR #24 (number assumed).
 - **A time-varying field reports the exact double at which each waveform edge
   flips, not the nominal instant, which is often still pre-edge.**
   `ITimeVaryingField.NextEdgeAfter(t)` returns the smallest `t* > t` at which

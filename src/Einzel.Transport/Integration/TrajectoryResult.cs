@@ -51,9 +51,16 @@ public sealed record TrajectoryResult
     public string? StruckSurface { get; init; }
 
     /// <summary>Accepted steps.</summary>
+    /// <remarks>
+    /// Under <see cref="IntegrationSettings.LandOnEdges"/> an edge or switch closer than
+    /// the minimum step is taken in place, by setting the time to it and re-evaluating the
+    /// derivative. That is not a step: it is counted here no more than in
+    /// <see cref="RejectedSteps"/>, and shows only as one field evaluation.
+    /// </remarks>
     public required int AcceptedSteps { get; init; }
 
     /// <summary>Rejected steps.</summary>
+    /// <remarks>An in-place landing (see <see cref="AcceptedSteps"/>) is not counted here.</remarks>
     public required int RejectedSteps { get; init; }
 
     /// <summary>Field evaluations, the cost measure that matters once fields are solved and interpolated.</summary>
