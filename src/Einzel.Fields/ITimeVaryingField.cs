@@ -89,11 +89,37 @@ public interface ITimeVaryingField : IElectrostaticField
     /// </para>
     /// <para>
     /// Infinity for a field driven by a continuous waveform, however fast: a
-    /// sinusoid has no discontinuity, and a rectangular one is handled by the
-    /// step-per-cycle cap rather than by landing on every edge.
+    /// sinusoid has no discontinuity. The jumps and kinks a waveform declares within
+    /// its cycle are not switches: they are reported by <see cref="NextEdgeAfter"/>,
+    /// and the integrator lands on them when a model asks for it, which a later change adds.
     /// </para>
     /// </remarks>
     double NextSwitchAfter(double timeSeconds) => double.PositiveInfinity;
+
+    /// <summary>
+    /// When the field next crosses a breakpoint its waveforms declare, after a given instant.
+    /// </summary>
+    /// <param name="timeSeconds">The instant to look forward from.</param>
+    /// <returns>
+    /// The smallest double <c>t*</c> greater than <paramref name="timeSeconds"/> at which this
+    /// field's own evaluation is on the post-edge side of a declared waveform breakpoint, or
+    /// positive infinity when no declared breakpoint lies ahead.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Exact to the double, not the nominal <c>(n + b - phase) / f</c>: evaluating the field at
+    /// <c>Math.BitDecrement(t*)</c> gives the pre-edge value and at <c>t*</c> the post-edge one.
+    /// The field computes its phase in doubles, and at the nominal instant that phase can
+    /// still be an ulp or two short of the breakpoint, so a step ending there would see the
+    /// old level. The crossing is judged on the phase alone, so it holds for every shape: each
+    /// wraps its phase as <c>phase - Math.Floor(phase)</c> before comparing it.
+    /// </para>
+    /// <para>
+    /// Distinct from <see cref="NextSwitchAfter"/>: a switch changes the state, an edge is a
+    /// point within a periodic drive's cycle. Nothing reads this yet.
+    /// </para>
+    /// </remarks>
+    double NextEdgeAfter(double timeSeconds) => double.PositiveInfinity;
 
     /// <summary>
     /// The mesh the <em>oscillating</em> part of the field is known on: the finest

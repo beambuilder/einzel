@@ -324,6 +324,26 @@ public sealed class SequencedField : ITimeVaryingField
 
     /// <inheritdoc/>
     /// <remarks>
+    /// The edges of the state in force, up to the next boundary and not including it: the
+    /// boundary is a switch, reported by <see cref="NextSwitchAfter"/>, and the edges after
+    /// it belong to the state that starts there, which answers once the time has reached
+    /// it. A held operating point never leaves its state, so its edges are not cut.
+    /// </remarks>
+    public double NextEdgeAfter(double timeSeconds)
+    {
+        if (At(timeSeconds) is not ITimeVaryingField driven)
+        {
+            return double.PositiveInfinity;
+        }
+
+        var edge = driven.NextEdgeAfter(timeSeconds);
+        var boundary = _operatingPoint is null ? NextSwitchAfter(timeSeconds) : double.PositiveInfinity;
+
+        return edge < boundary ? edge : double.PositiveInfinity;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
     /// Taken from the first state. Every phase of one element is the same geometry with
     /// different numbers on it — the validator refuses a phase that moves metal — so the
     /// discontinuity surfaces are the same throughout.

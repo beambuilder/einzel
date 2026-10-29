@@ -40,12 +40,14 @@ public sealed class OscillatingUniformField : ITimeVaryingField
     private readonly Vec3 _amplitude;
     private readonly double _frequencyHz;
     private readonly RfWaveform _waveform;
+    private readonly double[] _breakpoints;
 
     private OscillatingUniformField(Vec3 amplitude, double frequencyHz, RfWaveform waveform)
     {
         _amplitude = amplitude;
         _frequencyHz = frequencyHz;
         _waveform = waveform;
+        _breakpoints = [.. waveform.Breakpoints];
     }
 
     /// <summary>Creates an oscillating uniform field.</summary>
@@ -101,6 +103,21 @@ public sealed class OscillatingUniformField : ITimeVaryingField
 
             return 1.0 / (_frequencyHz * highest);
         }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Judged on the phase the field computes, <c>t * f</c>.</remarks>
+    public double NextEdgeAfter(double timeSeconds)
+    {
+        var clock = new TimesFrequencyClock(_frequencyHz);
+        var next = double.PositiveInfinity;
+
+        foreach (var breakpoint in _breakpoints)
+        {
+            next = Math.Min(next, EdgeInstants.Next(clock, _frequencyHz, 0.0, breakpoint, timeSeconds));
+        }
+
+        return next;
     }
 
     /// <inheritdoc/>
