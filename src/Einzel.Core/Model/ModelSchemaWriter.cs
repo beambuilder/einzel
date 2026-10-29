@@ -41,7 +41,11 @@ public static class ModelSchemaWriter
     /// <summary>Writes the model format as a JSON Schema document.</summary>
     /// <returns>The schema, as indented JSON text with a trailing newline.</returns>
     public static string Write() =>
-        Write<ModelDocument>("Einzel model", "model", ModelSchema.CurrentVersion, null, null);
+        Write<ModelDocument>("Einzel model", "model", ModelSchema.CurrentVersion, null, new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["WaveformDocument.type"] = WaveformDocument.Types,
+            ["WaveformDocument.interpolation"] = ["linear", "cubic"],
+        });
 
     /// <summary>Writes any document type as a JSON Schema document.</summary>
     /// <typeparam name="T">The document type to describe.</typeparam>
@@ -190,6 +194,23 @@ public static class ModelSchemaWriter
         PropertyInfo property, IReadOnlyDictionary<string, string> documentation, IDictionary<string, JsonNode> definitions)
     {
         var type = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+
+        // The one property that reads a name or an object: say both, or a document
+        // written from the schema could only ever use one of the spellings.
+        if (type == typeof(WaveformDocument))
+        {
+            return new JsonObject
+            {
+                ["anyOf"] = new JsonArray(
+                    new JsonObject
+                    {
+                        ["type"] = "string",
+                        ["enum"] = new JsonArray([.. WaveformDocument.Names.Select(v => (JsonNode)v)]),
+                    },
+                    ForType(type, documentation, definitions)),
+            };
+        }
+
         return ForType(type, documentation, definitions);
     }
 

@@ -13,6 +13,27 @@ internal static class RunInputs
             yield return (velocity, "/transport/gas/velocityField/path");
         if (document.Transport?.Gas?.PressureField?.Path is string pressure && !string.IsNullOrWhiteSpace(pressure))
             yield return (pressure, "/transport/gas/pressureField/path");
+
+        // A tabulated drive's period is read at validation, so it is an input like a gas
+        // field: hashed before the run, checked after it and by verify.
+        var fields = document.Fields ?? [];
+        for (var i = 0; i < fields.Count; i++)
+        {
+            foreach (var (solve, single, several) in new[]
+            {
+                ("solve", fields[i].Solve?.Drive, fields[i].Solve?.Drives),
+                ("solve3d", fields[i].Solve3d?.Drive, fields[i].Solve3d?.Drives),
+            })
+            {
+                var drives = (several ?? []).Select((d, k) => (Drive: (DriveDocument?)d, Pointer: $"drives/{k}"))
+                    .Prepend((Drive: single, Pointer: "drive"));
+                foreach (var (drive, pointer) in drives)
+                {
+                    if (drive?.Waveform is { Type: "tabulated", File: string file } && !string.IsNullOrWhiteSpace(file))
+                        yield return (file, $"/fields/{i}/{solve}/{pointer}/waveform/file");
+                }
+            }
+        }
     }
 
     internal static IEnumerable<string> ImportedPaths(ModelDocument document) =>

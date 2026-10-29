@@ -899,7 +899,9 @@ public sealed record DriveDocument
     public QuantityValue? Frequency { get; init; }
 
     /// <summary>
-    /// One of <c>sinusoid</c> or <c>rectangular</c>. A sinusoid when omitted.
+    /// The shape of one cycle: <c>sinusoid</c> or <c>rectangular</c>, or an object
+    /// <c>{"type": ...}</c> that also spells <c>analytic</c>, <c>tabulated</c> and
+    /// <c>harmonic</c> shapes. A sinusoid when omitted.
     /// </summary>
     /// <remarks>
     /// Not a detail of the supply. A sinusoid gives the Mathieu equation and a
@@ -907,11 +909,13 @@ public sealed record DriveDocument
     /// different places - the square-wave low-mass cut-off is q = 0.712 against a
     /// sinusoid's 0.908.
     /// </remarks>
-    public string? Waveform { get; init; }
+    [System.Text.Json.Serialization.JsonConverter(typeof(WaveformDocumentConverter))]
+    public WaveformDocument? Waveform { get; init; }
 
     /// <summary>
     /// Fraction of the cycle at the positive level, for a rectangular wave. One
-    /// half when omitted.
+    /// half when omitted. Beside an object form only a rectangular one takes it, and
+    /// that one may carry it inside instead, but not in both places.
     /// </summary>
     /// <remarks>
     /// Away from one half the wave carries a mean of 2d - 1, which enters the

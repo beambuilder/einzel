@@ -149,6 +149,21 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A model can write any drive shape, and an expression of a square wave flies
+  the corpus quadrupole exactly as the rectangular drive does.** `waveform` takes
+  the two names as before or an object of type `analytic` (an expression of `p`
+  and the model's parameters), `tabulated` (a `phase,value` file beside the
+  model, read and checked by `validate`, hashed into `inputHashes` and re-checked
+  by `verify`) or `harmonic` (terms); `schemaVersion` 0.15, every 0.14 document
+  reads unchanged and `validate --json` on all 101 shipped examples, tests and
+  templates is byte-identical. On the 0.4 mm corpus quadrupole the 48-ion corpus
+  list under `"rectangular"` and under `1 - 2*floor(2*p)` with breakpoints
+  [0, 0.5] gives byte-identical trajectory files and the same two channel
+  hashes; every shape costs the quadrupole the same two channels (17.4 MB), and
+  a shape other than the sinusoid costs one channel per distinct phase where
+  taps differ. Reading a 512-row table adds no measurable time to `validate`
+  (212 ms against 209 ms, process wall, median of 11). SPEC Amendment 65;
+  [Model format](model-format.md#any-shape-of-cycle). PR #21 (number assumed).
 - **A drive can be written as an expression of the phase or as a table over one
   period, and an expression of a square wave is the rectangular drive to the
   bit.** `RfWaveform.Analytic` compiles its text once

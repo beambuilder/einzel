@@ -1075,11 +1075,8 @@ public static class GeometryBuilder3D
         {
             frequencies.Add(drive.FrequencyHz);
 
-            waveforms.Add(drive.Waveform == Core.Model.DriveWaveform.Rectangular
-                ? new Analytic.RfWaveform.Rectangular(drive.DutyCycle)
-                : new Analytic.RfWaveform.Sinusoid());
-
-            quadrature.Add(drive.Waveform != Core.Model.DriveWaveform.Rectangular);
+            waveforms.Add(GeometryBuilder.Shape(drive));
+            quadrature.Add(drive.Waveform == Core.Model.DriveWaveform.Sinusoid);
         }
 
         if (frequencies.Count == 0)

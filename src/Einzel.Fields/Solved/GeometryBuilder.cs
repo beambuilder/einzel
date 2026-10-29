@@ -1582,14 +1582,27 @@ public static class GeometryBuilder
         {
             frequencies.Add(drive.FrequencyHz);
 
-            waveforms.Add(drive.Waveform == DriveWaveform.Rectangular
-                ? new RfWaveform.Rectangular(drive.DutyCycle)
-                : new RfWaveform.Sinusoid());
+            waveforms.Add(Shape(drive));
 
-            quadrature.Add(drive.Waveform != DriveWaveform.Rectangular);
+            // Only a sinusoid splits into a cos and a sin channel; every other shape is
+            // one channel per distinct phase, which is exact for any shape.
+            quadrature.Add(drive.Waveform == DriveWaveform.Sinusoid);
         }
 
         return (frequencies, waveforms, quadrature);
     }
+
+    /// <summary>The field layer's waveform for a validated drive, compiled here once.</summary>
+    internal static RfWaveform Shape(Core.Model.CompiledDrive drive) => drive.Waveform switch
+    {
+        DriveWaveform.Rectangular => new RfWaveform.Rectangular(drive.DutyCycle),
+        DriveWaveform.Analytic => new RfWaveform.Analytic(
+            drive.Expression!, drive.Bindings!, drive.Breakpoints),
+        DriveWaveform.Tabulated => new RfWaveform.Tabulated(
+            drive.Table!.Phases, drive.Table.Values, drive.Interpolation, drive.Breakpoints),
+        DriveWaveform.Harmonic => new RfWaveform.Harmonic(
+            [.. drive.Terms!.Select(t => new HarmonicTerm(t.Order, t.Amplitude, t.Phase))]),
+        _ => new RfWaveform.Sinusoid(),
+    };
 
 }
