@@ -353,6 +353,7 @@ public static class RegimeCommand
         var settings = new IntegrationSettings
         {
             RelativeTolerance = model.RelativeTolerance,
+            LandOnEdges = model.LandOnEdges,
             MaximumFlightTime = model.MaximumFlightTimeSi,
         };
 

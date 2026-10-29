@@ -283,8 +283,48 @@ public static class TrajectoryIntegrator
             // averages two different fields into a single answer. Unlike a boundary
             // in space this needs no root-find - the time is known - so the step is
             // simply cut to land on it. The next step then starts in the new state,
-            // with the derivative recomputed there.
-            if (driven is not null)
+            // with the derivative at the end of the step, which was sampled at the switch
+            // and so is already the new state's.
+            //
+            // Under LandOnEdges the step is also cut to a waveform's edge, and every
+            // landing - edge or switch - follows stricter rules: the two end stages sample
+            // one ulp before the instant, which is the near side by the field's contract;
+            // on acceptance the time is set to the instant exactly, not to a compensated
+            // sum that may fall an ulp short of it, and the derivative is evaluated there,
+            // on the far side. An instant closer than the minimum step is taken in place,
+            // as a collision is, so that two edges an ulp apart cannot underflow the step.
+            var landing = false;
+            var landAt = double.PositiveInfinity;
+
+            if (driven is not null && settings.LandOnEdges)
+            {
+                landAt = Math.Min(driven.NextSwitchAfter(time.Total), driven.NextEdgeAfter(time.Total));
+
+                if (double.IsFinite(landAt))
+                {
+                    var toLanding = landAt - time.Total;
+
+                    // Both Next*After contracts are strictly after, so this cannot spin in place.
+                    System.Diagnostics.Debug.Assert(landAt > time.Total, "an edge or switch at or before the current time");
+
+                    if ((toLanding < settings.MinimumStep || landAt <= Math.BitIncrement(time.Total))
+                        && landAt <= settings.MaximumFlightTime)
+                    {
+                        time = default;
+                        time.Add(landAt);
+                        derivative = DormandPrince54.Derivative(in state, field, chargeToMass, time.Total);
+                        fieldEvaluations++;
+                        continue;
+                    }
+
+                    if (toLanding <= step)
+                    {
+                        step = toLanding;
+                        landing = true;
+                    }
+                }
+            }
+            else if (driven is not null)
             {
                 var switchAt = driven.NextSwitchAfter(time.Total);
 
@@ -331,6 +371,13 @@ public static class TrajectoryIntegrator
                 }
             }
 
+            // A collision due strictly earlier cut the step short of the landing, and the
+            // step no longer ends on the instant.
+            if (landing && step < landAt - time.Total)
+            {
+                landing = false;
+            }
+
             if (step < settings.MinimumStep)
             {
                 outcome = time.Total >= settings.MaximumFlightTime
@@ -342,7 +389,7 @@ public static class TrajectoryIntegrator
             DormandPrince54.Step(
                 in state, in derivative, step, field, chargeToMass,
                 out var candidate, out var errorPosition, out var errorVelocity, out var candidateDerivative,
-                time.Total);
+                time.Total, landing ? Math.BitDecrement(landAt) : double.NaN);
             fieldEvaluations += 6;
 
             var error = ErrorNorm(in state, in candidate, in errorPosition, in errorVelocity, settings);
@@ -434,6 +481,19 @@ public static class TrajectoryIntegrator
             time.Add(step);
             state = candidate;
             derivative = candidateDerivative;
+
+            if (landing)
+            {
+                // The end-of-step derivative was sampled on the near side of the jump. The snap is
+                // defensive: the compensated sum t + (L - t) can fall an ulp either side of L. Short,
+                // the in-place rule above would catch it at one extra evaluation; long, the time would
+                // be one double late. Neither occurs in any measured case (mutant M8 survives).
+                time = default;
+                time.Add(landAt);
+                derivative = DormandPrince54.Derivative(in state, field, chargeToMass, time.Total);
+                fieldEvaluations++;
+            }
+
             accepted++;
             recorder?.Offer(time.Total, in state, force: false);
 

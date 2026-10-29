@@ -950,6 +950,22 @@ independent of integration steps — though only in one direction: the stream ca
 be coarser than the steps, never finer, because there is no dense output to
 interpolate within a step.
 
+`edges` (schema 0.16) says how a trajectory step meets an instant at which a drive
+jumps. `"cap"`, the default when the key is absent, is the integrator of every earlier
+version to the bit: each step is capped at a twentieth of the shortest drive period and
+is cut to land on a sequence's stage switches, and a rectangular edge inside a step is
+left to the error controller. `"land"` also lands on every declared waveform breakpoint
+(a rectangular edge, an expression's or a table's `breakpoints`) at the instant the
+field flips, samples the landing step's end on the near side and restarts on the far
+side; see [numerics](numerics.md#landing-on-every-edge-transportedges-land). On the
+ideal quadrupole it removes the 35 rejected steps per edge the default pays and takes
+the 100-period error from 1.8e-7 to 9.2e-11 at rtol 1e-11. The default stays `cap`
+until the validation against published square-wave results (B.4) decides it, so that
+no existing document changes its answer. A model without breakpoints, rectangular
+drives or stages flies identically under either. The edges are in time; they have
+nothing to do with the edges of a solved domain. Any other value is refused at
+`/transport/edges`.
+
 `statisticalDiffusion` is a declared peer mode that this build does not implement.
 Asking for it is a regime violation with a distinct exit code, not a silent
 substitution.

@@ -2293,6 +2293,7 @@ public static class RunCommand
         var settings = new IntegrationSettings
         {
             RelativeTolerance = model.RelativeTolerance,
+            LandOnEdges = model.LandOnEdges,
             MaximumFlightTime = model.MaximumFlightTimeSi,
         };
 

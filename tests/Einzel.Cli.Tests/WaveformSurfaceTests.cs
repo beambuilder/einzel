@@ -124,18 +124,22 @@ public sealed class WaveformSurfaceTests : IDisposable
             ["sinusoid", "rectangular", "analytic", "tabulated", "harmonic"],
             properties["type"]!["enum"]!.AsArray().Select(v => (string)v!));
         Assert.Equal(["linear", "cubic"], properties["interpolation"]!["enum"]!.AsArray().Select(v => (string)v!));
-        Assert.Equal("0.15", (string)schema["x-schemaVersion"]!);
+        Assert.Equal("0.16", (string)schema["x-schemaVersion"]!);
     }
 
     /// <summary>
     /// Every shipped example and template validates to the same compiled drives when its
-    /// version is moved to 0.15 and each short-form waveform is rewritten as the object form
-    /// (a rectangular wave's duty cycle moved inside). What may differ is exactly that: the
-    /// <c>schemaVersion</c> string and the spelling of the waveform; the validity, the error
-    /// list and every compiled drive may not.
+    /// version is moved to 0.15 or 0.16 and each short-form waveform is rewritten as the
+    /// object form (a rectangular wave's duty cycle moved inside). What may differ is exactly
+    /// that: the <c>schemaVersion</c> string and the spelling of the waveform; the validity,
+    /// the error list, every compiled drive and the edge rule (<c>cap</c>, since no shipped
+    /// document names one) may not.
     /// </summary>
-    [Fact]
-    public void EveryShippedDocumentMeansTheSameInEitherSpelling()
+    /// <param name="version">The version the document is moved to.</param>
+    [Theory]
+    [InlineData("0.15")]
+    [InlineData("0.16")]
+    public void EveryShippedDocumentMeansTheSameInEitherSpelling(string version)
     {
         var documents = ExampleModels.Names.Select(n => ("example " + n, ExampleModels.Read(n), (string?)n))
             .Concat(DeviceTemplates.Names().Select(n => ("template " + n, DeviceTemplates.Read(n), (string?)null)));
@@ -152,7 +156,7 @@ public sealed class WaveformSurfaceTests : IDisposable
             }
 
             var node = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip })!;
-            node["schemaVersion"] = "0.15";
+            node["schemaVersion"] = version;
             rewritten += Rewrite(node);
 
             var before = ModelValidator.Validate(ModelJson.Parse(text), null, directory);
@@ -166,6 +170,7 @@ public sealed class WaveformSurfaceTests : IDisposable
             if (before.IsValid)
             {
                 Assert.Equal(Drives(before.Model!), Drives(after.Model!));
+                Assert.False(after.Model!.LandOnEdges, name);
             }
         }
 

@@ -444,6 +444,7 @@ public static class EstimateCommand
             var settings = new Transport.Integration.IntegrationSettings
             {
                 RelativeTolerance = coarse.RelativeTolerance,
+                LandOnEdges = coarse.LandOnEdges,
                 MaximumFlightTime = window,
                 MaximumSteps = PilotStepCeiling,
             };
