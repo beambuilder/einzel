@@ -959,7 +959,9 @@ left to the error controller. `"land"` also lands on every declared waveform bre
 field flips, samples the landing step's end on the near side and restarts on the far
 side; see [numerics](numerics.md#landing-on-every-edge-transportedges-land). On the
 ideal quadrupole it removes the 35 rejected steps per edge the default pays and takes
-the 100-period error from 1.8e-7 to 9.2e-11 at rtol 1e-11. The default stays `cap`
+the 100-period error from 1.8e-7 to 9.2e-11 at rtol 1e-11. Under `"land"` the
+twentieth-of-a-period cap counts only drives that vary between their breakpoints, so a
+rectangular drive alone no longer caps the step. The default stays `cap`
 until the validation against published square-wave results (B.4) decides it, so that
 no existing document changes its answer. A model without breakpoints, rectangular
 drives or stages flies identically under either. The edges are in time; they have

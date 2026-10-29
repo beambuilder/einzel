@@ -106,6 +106,11 @@ public sealed class OscillatingUniformField : ITimeVaryingField
     }
 
     /// <inheritdoc/>
+    /// <remarks>Infinite for a waveform constant between its breakpoints.</remarks>
+    public double ShortestSmoothPeriodSeconds =>
+        _waveform.ConstantBetweenBreakpoints ? double.PositiveInfinity : ShortestPeriodSeconds;
+
+    /// <inheritdoc/>
     /// <remarks>Judged on the phase the field computes, <c>t * f</c>.</remarks>
     public double NextEdgeAfter(double timeSeconds)
     {

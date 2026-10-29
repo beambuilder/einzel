@@ -181,6 +181,15 @@ public sealed class IdealQuadrupoleRf : ITimeVaryingField
     public double ShortestPeriodSeconds => 2.0 * Math.PI / AngularFrequency;
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Infinite for a waveform constant between its breakpoints, otherwise
+    /// <see cref="ShortestPeriodSeconds"/> as it stands, harmonic orders ignored, so that a
+    /// smooth drive caps exactly as it did.
+    /// </remarks>
+    public double ShortestSmoothPeriodSeconds =>
+        Waveform.ConstantBetweenBreakpoints ? double.PositiveInfinity : ShortestPeriodSeconds;
+
+    /// <inheritdoc/>
     public double MonochromaticPeriodSeconds => AmplitudeVolts == 0.0
         ? double.PositiveInfinity : ShortestPeriodSeconds / Waveform.SingleHarmonicOrder;
 

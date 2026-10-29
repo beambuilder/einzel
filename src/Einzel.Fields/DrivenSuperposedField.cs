@@ -171,6 +171,26 @@ public sealed class DrivenSuperposedField : ITimeVaryingField, IConductorBounded
     }
 
     /// <inheritdoc/>
+    /// <remarks>The shortest any time-varying member declares, as for the period.</remarks>
+    public double ShortestSmoothPeriodSeconds
+    {
+        get
+        {
+            var shortest = double.PositiveInfinity;
+
+            foreach (var element in _elements)
+            {
+                if (element is ITimeVaryingField driven)
+                {
+                    shortest = Math.Min(shortest, driven.ShortestSmoothPeriodSeconds);
+                }
+            }
+
+            return shortest;
+        }
+    }
+
+    /// <inheritdoc/>
     public double ResolutionLength
     {
         get

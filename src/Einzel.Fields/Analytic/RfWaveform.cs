@@ -72,6 +72,20 @@ public abstract record RfWaveform
     /// </remarks>
     public virtual IReadOnlyList<double> Breakpoints => [];
 
+    /// <summary>
+    /// True when the value does not change between consecutive declared
+    /// <see cref="Breakpoints"/>, so a step that lands on every breakpoint needs no
+    /// steps-per-cycle cap for accuracy.
+    /// </summary>
+    /// <remarks>
+    /// Only a shape constant by construction answers true: the rectangular wave. A smooth
+    /// shape varies everywhere, an <see cref="Analytic"/> expression cannot be known constant,
+    /// and a <see cref="Tabulated"/> shape interpolates between its samples. Read through
+    /// <see cref="ITimeVaryingField.ShortestSmoothPeriodSeconds"/>, which leaves such drives
+    /// out of the period the integrator caps on when it lands on edges.
+    /// </remarks>
+    public virtual bool ConstantBetweenBreakpoints => false;
+
     /// <summary>The only non-zero harmonic order, zero for no drive, or NaN for a broad spectrum.</summary>
     public double SingleHarmonicOrder => this switch
     {
@@ -159,6 +173,10 @@ public abstract record RfWaveform
 
         /// <inheritdoc/>
         public override double Mean => (2.0 * DutyCycle) - 1.0;
+
+        /// <inheritdoc/>
+        /// <remarks>Plus one before the duty cycle, minus one after it.</remarks>
+        public override bool ConstantBetweenBreakpoints => true;
 
         /// <inheritdoc/>
         /// <remarks>

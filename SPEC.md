@@ -155,6 +155,30 @@ Einzel. **That, rather than a date, is the trigger.**
 
 ## Amendments to the specification
 
+### 68 - Under edge landing, a drive constant between its edges does not cap the step
+
+**ACC-4.** Amendment 67 kept the cap of 20 steps per drive period under `transport.edges:
+land`, so its measurement isolated the landing. Once every step ends on the next edge, a
+rectangular drive is constant over every step and the cap bounds nothing for it.
+`RfWaveform.ConstantBetweenBreakpoints` (true for `rectangular` only: an expression cannot be
+known constant, a table interpolates) and `ITimeVaryingField.ShortestSmoothPeriodSeconds`
+(the shortest period of a drive that varies between its breakpoints, infinity when none
+does; by default `ShortestPeriodSeconds`; solved, quadrupole and uniform fields skip the
+constant drives, superposed, sequenced (minimum over every state), shifted and bounded
+fields forward) let the integrator cap on that period under `land`. Under `cap` the cap is
+`ShortestPeriodSeconds / 20` as before, and every other reader of the period keeps
+`ShortestPeriodSeconds`. Between two edges of a purely rectangular model the step is
+bounded by the controller, `MaximumStep`, the resolution cap and the next landing.
+
+Measured on the Meissner rows of Amendment 67: at rtol 1e-9 and 1e-11 every row is
+bit-identical (final state, accepted and rejected steps), because the controller already
+takes 55 to 165 steps a period. At rtol 1e-6, q = 0.5 over 100 periods takes 16.0 instead
+of 21.9 steps a period, error 6.8e-5 instead of 6.7e-6; at q = 0.7 over 20 periods the error
+falls from 3.4e-4 to 6.5e-6. A detector crossing on the ideal quadrupole at rtol 1e-6 moves
+3.6e-9 relative from a 1e-12 flight with the relaxed cap and 4.0e-7 without. No schema
+change; `SolverBehaviourVersion` unchanged, since `cap` is unchanged to the bit and `land`
+enters the model hash.
+
 ### 67 - A trajectory step may land on every waveform edge, at the instant the field flips
 
 **ACC-4, schema.** A rectangular drive jumps twice a period, and the integrator landed only on
@@ -2740,7 +2764,7 @@ in a table.
 | `ACC-1` | Numerical flight-time error, full analyzer ≤ 1 ppm 1/25 of the R = 20k peak-width budget | **Met** | 1e-10 relative on the analytic reflectron; 1.3e-13 between the analytic and solved paths. |
 | `ACC-2` | Same, high-resolution validation mode ≤ 0.25 ppm To reproduce published R = 80k results | Not built | No separate high-resolution validation mode exists. Analytic cases already clear 0.25 ppm; nothing selects a tighter tier. |
 | `ACC-3` | Field interpolation contribution ≤ 0.5 × | **Met** | Tricubic enforced; a forbidden interpolant is refused on a trajectory path. Bilinear measured at 9.4e-6 against bicubic 6.4e-8. |
-| `ACC-4` | Energy drift, static field ≤ 1 ppm Cheap conserved-quantity diagnostic | **Met** | 1e-9 to 1e-15 in static fields. Reports NaN in a driven field, where energy drift is not a diagnostic; there the check is an exact solution instead: a rectangular drive on the ideal quadrupole against the transfer-matrix solution of the Meissner equation, 9.2e-11 relative over 100 periods at rtol 1e-11 under `transport.edges: land` and 1.8e-7 under the default `cap` (Amendment 67). |
+| `ACC-4` | Energy drift, static field ≤ 1 ppm Cheap conserved-quantity diagnostic | **Met** | 1e-9 to 1e-15 in static fields. Reports NaN in a driven field, where energy drift is not a diagnostic; there the check is an exact solution instead: a rectangular drive on the ideal quadrupole against the transfer-matrix solution of the Meissner equation, 9.2e-11 relative over 100 periods at rtol 1e-11 under `transport.edges: land` and 1.8e-7 under the default `cap` (Amendment 67); under `land` a rectangular drive no longer caps the step at a twentieth of a period, bit-identical on those rows (Amendment 68). |
 | `ACC-5` | Class S transmission interval ≤ 1% abs, 95% Drives minimum ensemble size per point | **Met** | Losses itemised by the surface name the author wrote; checked against erf for a slit at 0.95 sigma on 20,000 ions. **The name was not an identity until it was made one**: every unnamed electrode was called `electrode` and nothing stopped two in one solve sharing a name, so two plates were tallied as one surface - and in a driven or sequenced solve, whose channels are keyed by name, solved at one potential (a deflector of two unnamed plates bent its ion 1.6e-8 mm where named it bends 0.595). An unnamed electrode is now `electrode-N` after its place in the list and a repeated name within a solve is refused; across field elements a shared name is the same metal and stays allowed (`ElectrodeNameTests`, `ElectrodeNameValidationTests`). A transmission of **zero** is now expressible - see Amendment 15, where it was not. **And where the population is continuous, "arrived" needed a floor** rather than being non-empty: Scharfetter-Gummel's flux across a collecting face behind a barrier *is* the Boltzmann factor of that barrier, so a held packet emits a stream of values hundreds of orders below one ion from its first step, and the TIMS front end reported a mean arrival and a spread in microseconds over 7.74e-245 of them. Arrivals must now reach a millionth of the launched population, or the arrival figures are absent with `sequence.nothing-eluted` saying which and why - a fraction rather than a count, because "less than one ion arrived" is a real answer for a low transmission while 1e-245 of one is not an answer at all. See Amendment 45. Diffusive collection is restricted explicitly to an aligned grid face; an internal detector is refused rather than silently moved (`AnUnrepresentableDiffusiveDetectorIsRefused`; Amendment 47). |
 | `ACC-6` | Class B boundary resolution ≤ 1/500 of scan Enough to resolve a mass filter peak shape | **Met** | `einzel boundary` bisects onto the crossing and reports it as an envelope whose interval **is** the bracket. Measured: a step at a known value bracketed to 1 part in 512 in 11 evaluations, against 501 for a grid; the quadrupole low-mass cut-off at **q = 0.90508 +/- 0.00039** against a tabulated 0.90804. The search now also **walks outward from its converged bracket** looking for the predicate flipping back, which is the one thing bisection structurally cannot see - every step of its own path is consistent with a single crossing by construction. `boundary.multiple-crossings` is a validity violation; the confirmation is reported whether or not anything was found. |
 | `ACC-7` | Rendered geometric tolerance ≤ 0.1% of extent Default decimation bound for vector output; recorded per | **Met** | Ramer-Douglas-Peucker measured tight against its bound: 4,000 points to 577 at a worst deviation of 0.010000 mm against 0.01. |

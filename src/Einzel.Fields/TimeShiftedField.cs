@@ -85,6 +85,9 @@ public sealed class TimeShiftedField : ITimeVaryingField, IConductorBounded
     public double ShortestPeriodSeconds => _inner.ShortestPeriodSeconds;
 
     /// <inheritdoc/>
+    public double ShortestSmoothPeriodSeconds => _inner.ShortestSmoothPeriodSeconds;
+
+    /// <inheritdoc/>
     public double SignedDistanceToConductor(in Vec3 position) => _inner is IConductorBounded bounded
         ? bounded.SignedDistanceToConductor(in position) : double.PositiveInfinity;
 

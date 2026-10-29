@@ -149,6 +149,16 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **Once every step lands on the next edge, a rectangular drive no longer needs
+  the twentieth-of-a-period cap.** Under `transport.edges: land` the cap uses
+  `ITimeVaryingField.ShortestSmoothPeriodSeconds`, which leaves out drives that
+  are `RfWaveform.ConstantBetweenBreakpoints` (rectangular only); `cap` and every
+  other period reader are unchanged. The Meissner rows at rtol 1e-9 and 1e-11
+  are bit-identical (the controller already takes 55 to 165 steps a period); at
+  rtol 1e-6 the 100-period q = 0.5 row takes 16 instead of 22 steps a period and
+  its error rises from 6.7e-6 to 6.8e-5, the tolerance's own level. SPEC
+  Amendment 68; [numerics](numerics.md#landing-on-every-edge-transportedges-land).
+  PR #25 (number assumed).
 - **A step that lands on every rectangular edge, sampling the near side and
   restarting on the far side, removes the 35 rejected steps per edge the cap
   pays and two to three orders of magnitude of error.** `transport.edges: land`

@@ -157,6 +157,9 @@ public sealed class DrivenBoundedField : BoundedField, ITimeVaryingField
     /// <inheritdoc />
     public double ShortestPeriodSeconds => _driven.ShortestPeriodSeconds;
 
+    /// <inheritdoc />
+    public double ShortestSmoothPeriodSeconds => _driven.ShortestSmoothPeriodSeconds;
+
     /// <inheritdoc/>
     public double MonochromaticPeriodSeconds => _driven.MonochromaticPeriodSeconds;
 

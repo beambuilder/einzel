@@ -64,6 +64,29 @@ public interface ITimeVaryingField : IElectrostaticField
     double ShortestPeriodSeconds { get; }
 
     /// <summary>
+    /// The shortest period of any drive that varies between its breakpoints, in seconds;
+    /// positive infinity when every drive is constant between its breakpoints, or there is none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="ShortestPeriodSeconds"/> without the drives whose waveform is
+    /// <see cref="Analytic.RfWaveform.ConstantBetweenBreakpoints"/>. Between two edges such a
+    /// drive holds still, so once the integrator lands on every edge
+    /// (<c>IntegrationSettings.LandOnEdges</c>) no step samples it on the wrong side, and the
+    /// steps-per-cycle cap has nothing left to bound for it: the cap uses this period instead,
+    /// and a purely rectangular model is stepped by the error controller, the maximum step,
+    /// the resolution cap and the next landing.
+    /// </para>
+    /// <para>
+    /// Every other reader - the regime report, a pseudopotential's cycle, a flight measured in
+    /// cycles - keeps <see cref="ShortestPeriodSeconds"/>: a rectangular drive still oscillates.
+    /// The default is that member, which is right for a field that does not know its drives'
+    /// shapes.
+    /// </para>
+    /// </remarks>
+    double ShortestSmoothPeriodSeconds => ShortestPeriodSeconds;
+
+    /// <summary>
     /// Period of the single sinusoidal frequency at this operating point; infinity for
     /// no oscillation, NaN for an unknown or non-monochromatic spectrum. Unlike the
     /// shortest period, this licenses a single-frequency pseudopotential (REG-2).

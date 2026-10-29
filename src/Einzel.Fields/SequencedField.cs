@@ -306,6 +306,20 @@ public sealed class SequencedField : ITimeVaryingField
 
     /// <inheritdoc/>
     /// <remarks>
+    /// The minimum over every state, not the state in force: the integrator reads its cap
+    /// once per flight, so a flight that starts in a rectangular state and switches into a
+    /// sinusoidal one must already carry the sinusoid's cap. It is conservative by the same
+    /// argument as <see cref="ShortestPeriodSeconds"/>.
+    /// </remarks>
+    public double ShortestSmoothPeriodSeconds => _states
+        .OfType<ITimeVaryingField>()
+        .Select(s => s.ShortestSmoothPeriodSeconds)
+        .Where(double.IsFinite)
+        .DefaultIfEmpty(double.PositiveInfinity)
+        .Min();
+
+    /// <inheritdoc/>
+    /// <remarks>
     /// The integrator refuses to step past this, so a switch needs no root-find: unlike a
     /// boundary in space, the time is known in advance.
     /// </remarks>

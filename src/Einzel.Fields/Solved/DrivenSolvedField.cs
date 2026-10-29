@@ -581,37 +581,49 @@ public sealed class DrivenSolvedField : ITimeVaryingField, IConductorBounded
     /// rate, and a controller told only the fundamental would step over every one of
     /// those oscillations while its error estimator agreed the step was accurate.
     /// </remarks>
-    public double ShortestPeriodSeconds
+    public double ShortestPeriodSeconds => Shortest(smooth: false);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// As <see cref="ShortestPeriodSeconds"/>, skipping every drive whose waveform is
+    /// <see cref="RfWaveform.ConstantBetweenBreakpoints"/>; a drive without a declared
+    /// waveform is a sinusoid and stays.
+    /// </remarks>
+    public double ShortestSmoothPeriodSeconds => Shortest(smooth: true);
+
+    private double Shortest(bool smooth)
     {
-        get
+        var shortest = double.PositiveInfinity;
+
+        for (var k = 0; k < _frequencies.Length; k++)
         {
-            var shortest = double.PositiveInfinity;
-
-            for (var k = 0; k < _frequencies.Length; k++)
+            if (smooth && k < _waveforms.Length && _waveforms[k].ConstantBetweenBreakpoints)
             {
-                var highest = 1;
-
-                if (k < _waveforms.Length && _waveforms[k] is RfWaveform.Harmonic harmonic)
-                {
-                    foreach (var term in harmonic.Terms)
-                    {
-                        highest = Math.Max(highest, term.Order);
-                    }
-                }
-
-                shortest = Math.Min(shortest, 1.0 / (_frequencies[k] * highest));
+                continue;
             }
 
-            // Infinite when nothing oscillates. This returned a placeholder of one second
-            // for a geometry with stages and no drive, and every reader took it at its
-            // word: the regime report called it a 1 Hz drive, and the diffusive path's
-            // pseudopotential wrapper - which gates on a finite period, because a ramp
-            // is not an oscillation - saw a finite period and cycle-averaged a DC ramp
-            // over a one-second cycle, sweeping 97 per cent of a trapped density out of a
-            // TIMS tunnel that was holding it. The integrator's step cap and the regime
-            // report both already treat infinity as "no drive", which is what it is.
-            return shortest;
+            var highest = 1;
+
+            if (k < _waveforms.Length && _waveforms[k] is RfWaveform.Harmonic harmonic)
+            {
+                foreach (var term in harmonic.Terms)
+                {
+                    highest = Math.Max(highest, term.Order);
+                }
+            }
+
+            shortest = Math.Min(shortest, 1.0 / (_frequencies[k] * highest));
         }
+
+        // Infinite when nothing oscillates. This returned a placeholder of one second
+        // for a geometry with stages and no drive, and every reader took it at its
+        // word: the regime report called it a 1 Hz drive, and the diffusive path's
+        // pseudopotential wrapper - which gates on a finite period, because a ramp
+        // is not an oscillation - saw a finite period and cycle-averaged a DC ramp
+        // over a one-second cycle, sweeping 97 per cent of a trapped density out of a
+        // TIMS tunnel that was holding it. The integrator's step cap and the regime
+        // report both already treat infinity as "no drive", which is what it is.
+        return shortest;
     }
 
     /// <inheritdoc/>

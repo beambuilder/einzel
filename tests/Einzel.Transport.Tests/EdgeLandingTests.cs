@@ -155,6 +155,74 @@ public sealed class EdgeLandingTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// The steps-per-cycle cap is lifted for a rectangular drive under <c>land</c> only. At
+    /// rtol 1e-6 the controller alone would take fewer than twenty steps a period: <c>cap</c>
+    /// still takes at least twenty, a <c>land</c> flight through a field that does not report
+    /// its smooth period (so the interface default, the full period) also takes at least twenty,
+    /// and <c>land</c> on the quadrupole itself takes fewer.
+    /// </summary>
+    [Fact]
+    public void TheCapIsLiftedForARectangularDriveOnlyWhenLanding()
+    {
+        const int periods = 10;
+        var field = Quadrupole(0.5, new RfWaveform.Rectangular(0.5));
+        var cap = Fly(field, periods, 1e-6, land: false);
+        var capped = FlyThrough(new Recorder(field, twin: false, record: false), field.ShortestPeriodSeconds, periods, 1e-6);
+        var capThrough = FlyThrough(new Recorder(field, twin: false, record: false), field.ShortestPeriodSeconds, periods, 1e-6, land: false);
+        var land = Fly(field, periods, 1e-6, land: true);
+
+        output.WriteLine($"cap {cap.AcceptedSteps}, land capped {capped.AcceptedSteps}, land {land.AcceptedSteps}");
+
+        Assert.True(cap.AcceptedSteps >= 20 * periods, $"cap took {cap.AcceptedSteps} steps");
+        Assert.Equal(capThrough.FinalState, cap.FinalState);
+        Assert.Equal(capThrough.AcceptedSteps, cap.AcceptedSteps);
+        Assert.True(capped.AcceptedSteps >= 20 * periods, $"land with the cap took {capped.AcceptedSteps} steps");
+        Assert.True(land.AcceptedSteps < 20 * periods, $"land took {land.AcceptedSteps} steps");
+    }
+
+    /// <summary>
+    /// R6: a longer step does not move a detector crossing beyond the tolerance. The stop is
+    /// root-found by bisection on full Dormand-Prince steps from the step's start, not on a
+    /// chord. An ion crossing a tilted plane (its transverse motion enters the stop function)
+    /// at rtol 1e-6, where the relaxed cap takes fewer steps, reaches it within 1e-6 of the
+    /// crossing time of a 1e-12 flight with and without the relaxed cap, and the relaxed
+    /// crossing point is no farther from the tight one than the capped crossing point is.
+    /// </summary>
+    [Fact]
+    public void ADetectorCrossingDoesNotMoveWithTheRelaxedCap()
+    {
+        var field = Quadrupole(0.5, new RfWaveform.Rectangular(0.5));
+        var start = new PhaseState(new Vec3(1e-3, 5e-4, 0.0), new Vec3(0.0, 0.0, 4.0e3));
+        TrajectoryStopFunction plane = (in PhaseState s) => 0.02 - s.Position.Z - (0.1 * s.Position.X);
+        IntegrationSettings Settings(double tolerance) =>
+            new() { RelativeTolerance = tolerance, MaximumFlightTime = 1e-4, LandOnEdges = true };
+
+        var tight = TrajectoryIntegrator.Integrate(start, Ion, field, Settings(1e-12), plane);
+        var relaxed = TrajectoryIntegrator.Integrate(start, Ion, field, Settings(1e-6), plane);
+        var capped = TrajectoryIntegrator.Integrate(start, Ion, new Recorder(field, twin: false, record: false), Settings(1e-6), plane);
+        var t = tight.FlightTimeSeconds;
+        double Apart(TrajectoryResult result) => (result.FinalState.Position - tight.FinalState.Position).Length;
+
+        output.WriteLine(
+            $"tight {t:R} s; relaxed {(relaxed.FlightTimeSeconds - t) / t:E2}, {Apart(relaxed):E2} m ({relaxed.AcceptedSteps} steps); "
+            + $"capped {(capped.FlightTimeSeconds - t) / t:E2}, {Apart(capped):E2} m ({capped.AcceptedSteps} steps)");
+
+        Assert.Equal(TrajectoryOutcome.StopConditionMet, relaxed.Outcome);
+        Assert.Equal(TrajectoryOutcome.StopConditionMet, capped.Outcome);
+        Assert.True(relaxed.AcceptedSteps < capped.AcceptedSteps, "the relaxed cap took no fewer steps");
+        Assert.True(Math.Abs(relaxed.FlightTimeSeconds - t) <= 1e-6 * t, $"relaxed crossing {relaxed.FlightTimeSeconds:R} s");
+        Assert.True(Math.Abs(capped.FlightTimeSeconds - t) <= 1e-6 * t, $"capped crossing {capped.FlightTimeSeconds:R} s");
+        Assert.True(Apart(relaxed) <= Apart(capped), $"relaxed {Apart(relaxed):E2} m, capped {Apart(capped):E2} m");
+    }
+
+    private static TrajectoryResult FlyThrough(ITimeVaryingField field, double period, int periods, double tolerance, bool land = true) =>
+        TrajectoryIntegrator.Integrate(
+            Start,
+            Ion,
+            field,
+            new IntegrationSettings { RelativeTolerance = tolerance, MaximumFlightTime = periods * period, LandOnEdges = land });
+
+    /// <summary>
     /// The landing step samples the near side, the next one starts on the far side: around
     /// the first edge <c>t*</c> the field is sampled at <c>BitDecrement(t*)</c> by the landing
     /// step's two end stages and then at <c>t*</c> exactly, and no sample before that one

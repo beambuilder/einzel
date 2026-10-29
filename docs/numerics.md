@@ -768,6 +768,23 @@ At rtol 1e-9 the 100-period q = 0.5 row is 1.3e-5 under `cap` and 1.5e-8 under `
 same chain with a second edge one ulp after every real one takes each twin in place
 (100,001 in-place landings, 2.95 million steps against 2.95 million without the twins).
 
+**The steps-per-cycle cap under `land`.** Every step is capped at a twentieth of a
+period, and under `land` that period is `ITimeVaryingField.ShortestSmoothPeriodSeconds`:
+the shortest period of a drive that varies between its breakpoints. A rectangular drive
+is constant between its edges (`RfWaveform.ConstantBetweenBreakpoints`), and once every
+step ends on its next edge no stage samples it on the wrong side, so it no longer sets
+the cap; a sinusoid, a harmonic series, an expression or a table beside it still does,
+harmonic orders included. Between two edges of a purely rectangular model the step is
+governed by the error controller, `MaximumStep`, the resolution cap
+(`ResolutionCellsPerStep` cells of a solved mesh) and the next landing. Under `cap` the
+period is `ShortestPeriodSeconds`, as it always was. On the Meissner rows above the cap
+never binds at rtol 1e-9 or tighter (the controller takes 55 to 165 steps a period), and
+every row is bit-identical; at rtol 1e-6 the 100-period q = 0.5 row takes 16 steps a
+period instead of 22, and its error, 6.8e-5, is what the tolerance allows rather than the
+6.7e-6 the cap bought. The trajectory recorder samples accepted steps (no dense output),
+so a longer step records fewer points; a detector crossing and an electrode strike are
+root-found by bisection on full steps, not on a chord.
+
 The default stays `cap` until the B.4 validation decides the flip. It has two known
 hazards that `land` removes and the default keeps, so that every existing document
 computes what it did: a landing that falls one ulp short of a switch leaves the next

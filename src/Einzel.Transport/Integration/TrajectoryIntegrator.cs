@@ -200,8 +200,12 @@ public static class TrajectoryIntegrator
         // the field.
         var driven = field as ITimeVaryingField;
 
+        // Under LandOnEdges a drive constant between its edges is left out: every step ends
+        // on its next edge, so no stage can see it on the wrong side, and between two edges
+        // there is nothing for a period to bound. A purely rectangular model is then stepped
+        // by the controller, the maximum step, the resolution cap and the next landing.
         var periodStep = driven is not null
-            ? driven.ShortestPeriodSeconds / StepsPerRfPeriod
+            ? (settings.LandOnEdges ? driven.ShortestSmoothPeriodSeconds : driven.ShortestPeriodSeconds) / StepsPerRfPeriod
             : double.PositiveInfinity;
 
         // Computed once, since neither of these changes mid-flight.
