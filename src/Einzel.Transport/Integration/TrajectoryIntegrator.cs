@@ -382,12 +382,17 @@ public static class TrajectoryIntegrator
             {
                 // The flight end is an instant like a landing, and is met by the same
                 // in-place rule: a remainder below the minimum step, or an end one double
-                // ahead, is taken without a step. The last step is cut to the remainder,
-                // but the compensated sum can leave the time an ulp short of the end
-                // (2e-22 s on a 1 us flight), and the remainder is then no step at all.
-                // Measured: one of 63 one-period flights of a rectangular drive on the
-                // ideal quadrupole ended that way, reported as underflow with the state
-                // at the end time to 2e-22 s. The state is kept; only the time moves.
+                // ahead, is taken without a step. The second case is reached here only
+                // while that double is itself below the minimum step (t < 2^-7 s, about
+                // 8 ms); past that a one-ulp remainder is a legal step and is taken as
+                // one, and this block is entered only when the step was shrunk below the
+                // minimum for another reason. The last step is cut to the remainder, but
+                // the compensated sum can leave the time an ulp short of the end (2e-22 s
+                // on a 1 us flight), and the remainder is then no step at all. Measured:
+                // one of 63 one-period flights of a rectangular drive on the ideal
+                // quadrupole ended that way, reported as underflow with the state at the
+                // end time to 2e-22 s. The state is kept and no sample is offered, so a
+                // recorder's last sample sits an ulp before the end; only the time moves.
                 if (settings.MaximumFlightTime - time.Total < settings.MinimumStep
                     || settings.MaximumFlightTime <= Math.BitIncrement(time.Total))
                 {

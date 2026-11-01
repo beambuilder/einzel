@@ -166,8 +166,9 @@ of the one document key moves: `transport.edges` absent now means `land`, in bot
 hold it (`ModelValidator` compiles an absent key to `LandOnEdges = true`, and
 `IntegrationSettings.LandOnEdges` defaults to true, so a library caller gets the same
 integrator a document does); `"cap"` is the opt-in for the integrator of every version before
-the key existed; `"land"` written explicitly means what it meant. The validator's suggestion names `land` as the default and `cap` as the opt-in, and
-`einzel waveform import` no longer advises adding the key. The flight end is met by the same
+the key existed; `"land"` written explicitly means what it meant. The validator's
+suggestion names `land` as the default and `cap` as the opt-in, and `einzel waveform import`
+no longer advises adding the key. The flight end is met by the same
 in-place rule a landing uses: a remainder to `maximumFlightTime` below the minimum step, or
 an end one double ahead, sets the time to the end and reports `MaximumFlightTimeReached`
 with the state as it is, where before the flight ended `StepSizeUnderflow` an ulp short.
@@ -182,8 +183,10 @@ unchanged). On the 3D quadrupole against SIMION (q line, 101 points, 48 ions eac
 edge in either under the 24-of-48 rule; trapezoid cut-offs 0.705 / 0.705 / 0.705 / 0.714 /
 0.725 / 0.785 against SIMION's 0.705 / 0.705 / 0.7052 / 0.7092 / 0.7248 / 0.7848 at r = 0,
 0.01, 0.02, 0.05, 0.10, 0.20 of the period, within 0.005 everywhere and both following
-0.705 / sinc(pi r / 0.8). The square-wave corpus case under the default takes 2273 accepted
-steps per ion against 2737 under `cap` (the B.2 record), with the same 0.705 cut-off. Of 63
+0.705 / sinc(pi r / 0.8). On the square-wave corpus case (three lines, 325 points, 48 ions
+each) the B.2 record measured 2027 accepted steps per ion under `land` against 2737 under
+`cap` (0.74x) with the same 0.705 cut-off; the series run's q line under the default takes
+2273 steps per ion, equal to the B.2 q-line figure under `land`. Of 63
 one-period flights in the band-edge test, one (duty 0.3, a = 0.1, q = 0.1056, from rest)
 ended `StepSizeUnderflow` 2.1e-22 s short of its period; it now ends at the period, and
 every flight that did not underflow is bit-identical. No schema change (`schemaVersion`
@@ -262,8 +265,9 @@ are taken in place at the cost of one field evaluation each. The stitched sequen
 1.0e-8, 4.6e-8, 1.3e-9 under `cap` and 2.3e-7, 2.0e-8, 1.0e-9 under `land` at 1e-8, 1e-10,
 1e-12; the 1e-8 row measures the step sequence, not the switch (`docs/numerics.md`). Under
 `cap` the Meissner flights are bit-identical to the 17352b1 record. The default stays `cap`
-until B.4. `schemaVersion` 0.16. `SolverBehaviourVersion` unchanged: the default path is
-the 0.15 integrator to the bit, and `land` changes the model hash.
+until B.4 (changed by Amendment 69). `schemaVersion` 0.16. `SolverBehaviourVersion`
+unchanged: the default path is the 0.15 integrator to the bit, and `land` changes the model
+hash.
 
 ### 66 - A sampled period can be fitted to the harmonic series a model takes
 

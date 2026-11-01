@@ -960,7 +960,7 @@ the shortest drive period. See
 [numerics](numerics.md#landing-on-every-edge-transportedges-land). On the ideal
 quadrupole it removes the 35 rejected steps per edge that `cap` pays and takes the
 100-period error from 1.8e-7 to 9.2e-11 at rtol 1e-11; the band edges of the
-rectangular drive match the Meissner closed form to 1e-9 under it
+rectangular drive match the Meissner closed form to 1.4e-9 under it
 ([validation](validation.md)). `"cap"` keeps the integrator of the versions before
 breakpoints were landed on: the same cap of twenty steps per period, the cut to a
 sequence's stage switches, and a rectangular edge inside a step left to the error

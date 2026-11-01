@@ -337,13 +337,14 @@ rows stand.
 At d = 0.55 neither code resolves the closed-form low edge under the 24-of-48 rule:
 in both, 32 of 48 ions (the variants without an initial y velocity) reach the detector
 at every q below 0.25, because the growth rate of the tr M = +2 branch is too small to
-take an on-axis ion to the 4 mm rods within the ~23 cycles of a 95 mm flight; the
+take an on-axis ion to the 4 mm rods within the about 50 cycles of a 95 mm flight; the
 closed-form edge is visible only as the 32 -> 48 step at q = 0.245 ± 0.005 in both
 codes. The d = 0.60 band, where the stronger mean (a_eff = 0.4 q) empties 0.05 to
-0.49, resolves both edges in both codes, with the same finite-length offset from the
-closed form (−0.018 at the low edge, −0.004 at the high, against −0.0075 for the
-square at d = 0.5). The high edges of the 3D instrument sit below the closed form in
-both codes by the same amount; the two codes agree with each other better than
+0.49, resolves both edges in both codes, with a finite-length offset from the closed
+form of the same sign in both (−0.018 at the low edge in both codes; −0.004 in SIMION
+and −0.002 in Einzel at the high; against −0.0075 for the square at d = 0.5). The
+high edges of the 3D instrument sit below the closed form in both codes, within 0.004
+of it; the two codes agree with each other better than
 either agrees with the infinite ideal quadrupole, which is the comparison that
 matters.
 

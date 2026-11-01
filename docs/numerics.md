@@ -771,12 +771,12 @@ same chain with a second edge one ulp after every real one takes each twin in pl
 
 `land` has been the default since the validation against the Meissner closed form
 and SIMION (Amendment 69): the band edges of the rectangular drive match the closed
-form to 1e-9 by monodromy under it, and the 3D quadrupole's cut-offs match SIMION
+form to 1.4e-9 by monodromy under it, and the 3D quadrupole's cut-offs match SIMION
 at duty 0.60 and at every rise time measured ([validation](validation.md)). `cap`
 keeps two hazards the default closes, and is the opt-in for reproducing a result
 computed before the flip: a landing that falls one ulp short of a switch leaves the
 next query answering the same switch an ulp away (a one-ulp step, below the minimum
-step for flights shorter than about 4 ms, so the flight ends `StepSizeUnderflow`),
+step for flights shorter than about 8 ms, so the flight ends `StepSizeUnderflow`),
 and the landing step's two `c = 1` stages are sampled at `t + h`, on either side of
 the switch depending on rounding, so the controller sees the post-switch field in two
 stages and rejects until the contamination is under tolerance. Under the default the

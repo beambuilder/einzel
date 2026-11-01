@@ -139,6 +139,7 @@ public sealed class SwitchCrossingTests(ITestOutputHelper output)
         Assert.NotEqual(TrajectoryOutcome.StepSizeUnderflow, run.Outcome);
         Assert.True(run.AcceptedSteps > 20, $"only {run.AcceptedSteps} steps");
         Assert.Equal(cap.Outcome, run.Outcome);
+        Assert.Equal(cap.StruckSurface, run.StruckSurface);
         Assert.Equal(cap.FlightTimeSeconds, run.FlightTimeSeconds, cap.FlightTimeSeconds * 1e-6);
     }
 
