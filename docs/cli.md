@@ -106,7 +106,8 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel render still <model.json>` | Draw the viewport's shaded 3D picture to a PNG, headlessly - the same composition and camera the window uses |
 | `einzel render animation <spec.json>` | Draw a flight as numbered vector frames on the spec's declared time mapping (RND-7) |
 | `einzel cache status\|clear\|prune [dir]` | What the field cache keeps; delete all of it, or only what no run of this build will load (other solver versions or compute paths, half-written and orphaned files). `--dry-run` names the files and deletes nothing |
-| `einzel waveform fit <csv> --orders N` | The harmonic series of orders 0 to N closest to one sampled period, printed as a model's `harmonic` waveform object with its residual; see [below](#einzel-waveform-fit). `waveform import` of measured traces (B.3) will join it |
+| `einzel waveform fit <csv> --orders N` | The harmonic series of orders 0 to N closest to one sampled period, printed as a model's `harmonic` waveform object with its residual; see [below](#einzel-waveform-fit) |
+| `einzel waveform import <trace.csv> (--frequency <Hz> \| --period <s>)` | A measured oscilloscope trace becomes a `tabulated` period file and the `waveform` object to paste, with what was measured: period, offset, amplitude, duty, edges, noise, harmonics; see [below](#einzel-waveform-import) |
 | `einzel agents-md [dir]` | Regenerate the platform layer of `AGENTS.md` (PRJ-6) |
 | `einzel --version` | Engine version |
 
@@ -182,6 +183,139 @@ smooth drive. The price is the residual - a square wave keeps its Gibbs overshoo
 order, and its largest residual stays near one at the jump - so a shape with real edges
 is better as the table (or an `analytic` expression with breakpoints), and a smooth
 measured shape is better as its series.
+
+### `einzel waveform import`
+
+```
+einzel waveform import scope.csv --frequency 1.1e6 --remove-dc
+```
+
+reads an oscilloscope trace of many drive periods, folds it onto one period, averages
+the periods (each phase bin's value is the least-squares line through its samples,
+evaluated at the bin centre; the plain mean where a bin holds fewer than three samples),
+puts phase 0 at a trigger crossing of the average, scales it and writes it as a
+`tabulated` period file (`scope.period.csv` beside the trace unless `--out` names
+another; an existing file is refused unless `--force`). It prints the `waveform` object to
+paste into the drive, the edges it found declared as `breakpoints`, followed by one line
+per measurement (here a duty-0.3 rectangle of 180 V about 7.5 V with 2 ns edges and 1 %
+noise, 25 periods at 1 GS/s, 24,297 samples; abridged):
+
+```
+{
+  "type": "tabulated",
+  "file": "scope.period.csv",
+  "interpolation": "linear",
+  "breakpoints": [
+    0.001953125,
+    0.005859375,
+    ...
+    0.998046875
+  ]
+}
+period: nominal 9.09091E-07 s, found 9.09089411E-07 s (-1.648 ppm), 1100001.81 Hz; 25 periods folded at 909.08 samples per period
+origin: the rising trigger puts phase 0 at t0 = -2.38693742E-06 s
+level: offset 7.4197, amplitude 180.335, period mean -64.4951 in trace units; with --remove-dc: set U = 7.4197, V = 180.335 in trace units (U the electrode's potential, V its driveAmplitude; table mean -0.398785)
+duty cycle: 0.300017 of the period above the midline
+edge: rising at phase 0.999982 (50 %), 10-90 % in 1.663 ns, 10 % at phase 0.999081, 90 % at phase 1.00091
+edge: falling at phase 0.299999 (50 %), 10-90 % in 1.816 ns, 10 % at phase 0.301007, 90 % at phase 0.29901
+sharpest edge: 1.663 ns 10-90 % against the step cap T/20 = 45.45 ns; breakpoints declared, so add "transport": { "edges": "land" } to the model to land on them
+noise: 1.8 rms in trace units, 1 % of the amplitude
+harmonics (amplitude relative to the fundamental, phase in cycles): 0: -0.3879 at 0; 1: 1 at -0.15; 2: 0.5877 at -0.3; ...
+THD 73.15 % (orders 2 to 15)
+table: 256 samples written to .../scope.period.csv
+"file" above is relative to the current directory, and a model resolves it relative to the model file: move the table beside the model or adjust the path
+```
+
+**The trace.** The two-column `time,value` CSV scopes export, `,` `;` or tab between
+fields, `.` decimals, a preamble skipped and counted (every line before the first row
+whose two columns read as finite numbers), `--columns t,v` (1-based) for exports with more
+columns such as a Tektronix-style five-column layout (tested on a synthetic file), which
+puts the preamble in columns 1 to 3 beside the data, and `--time-unit s|ms|us|ns` when the time is not in seconds. The time must
+increase strictly; a `,` decimal is not read. Put the trace first: a flag takes the next
+argument that does not start with `--` as its value, so `--json scope.csv` would hand the
+file to `--json`.
+
+**The period.** `--frequency <Hz>` or `--period <s>`, exactly one, is required: the
+generator setting. The importer refines it by the tightest fold (the least spread of the
+samples about the mean of their phase bin) within `--period-tolerance` (default 0.02,
+relative to the nominal) and reports the nominal, the period found, the difference in ppm,
+the frequency, the full periods folded and the samples per period. A trace that repeats
+further from the nominal than the tolerance is refused ("check the frequency, or widen
+--period-tolerance"); `--no-refine` keeps the nominal to the bit.
+
+**The origin.** `--trigger rising` (default) puts phase 0 at the first upward crossing of
+the averaged period's midline (halfway between its extremes, with a hysteresis of a tenth
+of the half swing), `falling` at the first downward one, `level=<v>` at the first upward
+crossing of `v` in trace units. The crossing is found on the average, not on a noisy
+sample, and reported as the trace time `t0`. A built-in `rectangular` drive rises at
+phase 0 and falls at `dutyCycle`, so a rectangle imported under `rising` compares with it
+without a phase shift. The model's own drive phase (an electrode's `drivePhase`) is
+separate, and applies to the table as to any shape.
+
+**Normalisation.** The report gives the offset (the midline), the amplitude (half the
+peak-to-peak) and the period mean in trace units, and the electrode settings that give the
+trace back. With `--remove-dc` the table is `(value - offset) / amplitude`, exactly
+[-1, 1] like a built-in `rectangular` (whose duty-0.3 wave has the mean -0.4), and the
+report says `U = offset` (the electrode's `potential`) and `V = amplitude` (its
+`driveAmplitude`); without it the table is the value over its larger absolute extreme,
+`V` is that extreme and `U` is 0. The table's own mean, the shape's DC content, which a
+model carries as it does a built-in's, is printed beside them. Every level, `U` and `V`
+included, is in the trace's units, which the importer does not know: they are the volts a
+model takes only when the trace is in volts at the electrode, so scale them for a scope
+export in mV or a probe factor the export does not apply.
+
+**Linear with breakpoints, or cubic.** An edge is a 10-90 % transition narrower than
+`--edge-width` cycles (default 0.1; a sinusoid's takes 0.295 cycles, a triangle's 0.4).
+When an edge is found the table is `linear` and declares `breakpoints`; otherwise it is
+`cubic` and declares none. `--interpolation linear|cubic` overrides the choice and keeps
+the breakpoints. A cubic table rings at a jump; a linear table of a smooth shape kinks at
+every sample, and the integrator pays for each kink (a 256-point linear cosine table costs
+about four times the cubic's flight time, see
+[the step control](model-format.md#it-does-change-the-step-control)). A trapezoid's
+linear table kinks only at its corners, because the bin values of a straight ramp lie on
+it.
+
+**The breakpoints** are the table's kinks: a ramp's corners, and for a jump that
+straddles a bin boundary four samples (the two plateau samples and the two ends of the
+steep segment between them). How many an edge declares depends on how it falls on the
+grid. Under `"transport": { "edges": "land" }` the integrator lands on each one
+([numerics](numerics.md#landing-on-every-edge-transportedges-land)); the report compares
+the sharpest edge's 10-90 time with the step cap, a twentieth of the period, and gives
+that advice whenever breakpoints are declared.
+
+**The file path.** `file` in the printed object is relative to the current directory; a
+model resolves it relative to the model file, so move the table beside the model or adjust
+the path.
+
+**Known limits.** A nominal at half the true frequency is not detected: the fold at
+twice the period is as tight, so the table holds two periods; check `periodsFolded` and
+the duty against what the scope shows. A kink without a level change, such as a
+triangle's apex, is not an edge and is not declared, so the cubic table rounds it. The
+table file takes no `#` comments, so the trace's provenance is in the report and in
+`--json`, not in the file.
+
+**Refusals**, all exit 1: a missing or unreadable trace, a table in a missing directory,
+fewer than two rows with both named columns, a non-numeric row after the first sample or a
+time that does not increase (`SCHEMA_INVALID`, naming the path or the line); neither or
+both of `--frequency` and `--period`, a period found beyond the tolerance, fewer than 5
+samples per period, no trigger crossing, fewer than two full periods after it, `--samples`
+below 3 or below 2 × `--orders` + 1 (31 at the default 15 orders), above half the trace's
+samples or finer than the trace resolves (an empty bin), an existing table without `--force`
+(`VALUE_OUT_OF_BOUNDS`). A missing trace argument or a flag with a malformed value prints
+the usage line.
+
+`--json` writes one object instead: `trace`, `preambleLines`, `samplesInTrace`,
+`sampleIntervalSeconds`, `periodNominalSeconds`, `periodSeconds`, `frequencyHz`,
+`periodDifferencePpm`, `periodsFolded`, `samplesPerPeriod`, `trigger`, `originSeconds`,
+`offset`, `amplitude`, `mean`, `tableMean`, `normalisationRule`, `modelU`, `modelV`,
+`dutyCycle`, `edges` (each `sense`, `phase50`, `phase10`, `phase90`, `width10To90Cycles`,
+`time10To90Seconds`), `sharpestEdgeSeconds`, `capSeconds`, `landAdvised`, `noiseRms`,
+`noiseRmsRelative`, `harmonics` (every order to `--orders`, default 15, which needs
+`--samples` of at least 2 × orders + 1, so 31 at the default: `order`,
+`amplitude` relative to the fundamental, `phase` in cycles), `thd` (null when the
+fundamental is zero, the amplitudes then absolute), `table`, `samples` (`--samples`,
+default 256) and `waveform`. For a harmonic series of the averaged period, run
+`waveform fit` on the written table.
 
 ### The preview tier
 

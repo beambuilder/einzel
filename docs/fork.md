@@ -149,6 +149,36 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A measured scope trace becomes a model's sampled period in one command,
+  with its edges declared and the settings that give the trace back.**
+  `einzel waveform import <trace.csv> --frequency <Hz>` writes the averaged
+  period as a `tabulated` file (linear with `breakpoints` when it finds an edge,
+  cubic otherwise) and prints the object to paste, then one line per
+  measurement: period found against the nominal, origin, offset and amplitude
+  with the electrode's `U` and `V` in trace units, duty, edges, the sharpest edge against the
+  step cap with the `transport.edges: land` advice, noise, harmonics 0 to 5 and
+  THD; `--json` emits all of it. Every refusal is exit 1 with its code. The
+  printed object beside the written table validates and runs in a schema 0.16
+  model under `land`; a Tektronix-style five-column export in nanoseconds reads
+  with `--columns 4,5 --time-unit ns` to the plain file's period within 1e-6.
+  SPEC Amendment 68; [CLI](cli.md#einzel-waveform-import). PR #26 (number
+  assumed).
+- **A scope trace folds onto one averaged period and writes as a table.**
+  `WaveformTrace` reads two columns of a `,` `;` or tab export after its
+  preamble; `WaveformImportCommand.Execute` refines the nominal period by the
+  tightest fold (bins set by the samples per period, staged scans, four grid
+  offsets), triggers on the averaged period, folds every full period from that
+  origin onto bin centres, scales, finds the 10-90 % edges and declares the
+  linear table's kinks beside them as breakpoints, with thresholds scaled to
+  the grid so the count does not depend on N. On eleven synthetic traces
+  (25 periods at 1.1 MHz, 1 GS/s, noise 0 and 1 %) the period is found within
+  1.3e-6, the origin within 0.1 ns on every edged trace and 0.80 ns on the noisy
+  sinusoid, the duty within 1.1e-3, and each table stays inside its bound;
+  records of 500 periods at 100.37 samples and 5000 at 8.1 refine to 2.5e-8
+  and 2.0e-8. A follow-up commit takes each bin's fitted line at its centre in
+  place of its mean, which removes the sample-lattice jitter: the clean
+  sinusoid table's residual against its sine falls from 1.27e-4 to 5.1e-7 of
+  the amplitude. No CLI or schema change. PR #25 (number assumed).
 - **A step that lands on every rectangular edge, sampling the near side and
   restarting on the far side, removes the 35 rejected steps per edge the cap
   pays and two to three orders of magnitude of error.** `transport.edges: land`

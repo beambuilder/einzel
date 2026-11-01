@@ -92,7 +92,7 @@ followed.
 | **1** · Spine, project, CLI | Model, units, symmetry, DC solver, superposition, tricubic, integrator, schema, errors, result objects, manifests, CLI, VTU | **Complete**, and its acceptance is met: ACC-1 on a reflectron, the memo's mirror pair tracked end to end, GRD-1 enforced with no bypass, an agent building a DC model from prose |
 | **2** · Extensions, sweeps, shell, figures | Both extension runners, examples corpus v1, sensitivity fields, tolerance MC, optimisation, ILGPU, WPF shell, `Einzel.Render`, installer, update mechanism | **Split.** Sweeps, sensitivity fields, both optimisers, the sandboxed extension runner and `Einzel.Render` are done. The in-process runner, ILGPU, the shell, the installer, the update mechanism and **the examples corpus** are not |
 | **3** · RF and pressure | Time-domain RF, statistical diffusion, collision models, gas velocity import, sequencer, space charge, Class B analysis, density export | **Scope complete.** Every named deliverable is built, gas velocity import included. What is left is on the acceptance side: the funnel benchmark needs a §23 decision and an affordable driven diffusive step. **Class B is complete** - the secular spectrum against the Mathieu characteristic exponent, and isolation efficiency against notch width on an arbitrary waveform that recovers the published digital cut-off |
-| **4** · Traps, animation, MCP | Waveform excitation, multi-notch isolation, trap sequences, device library, animation, MCP | Trap sequences and the device library are largely done ahead of schedule. Waveforms are begun: a drive's cycle may be an expression of the phase, a sampled period or a harmonic series (Amendment 65), and `einzel waveform fit` turns a sampled period into the series (Amendment 66). Animation and MCP are not started |
+| **4** · Traps, animation, MCP | Waveform excitation, multi-notch isolation, trap sequences, device library, animation, MCP | Trap sequences and the device library are largely done ahead of schedule. Waveforms are begun: a drive's cycle may be an expression of the phase, a sampled period or a harmonic series (Amendment 65); `einzel waveform fit` turns a sampled period into the series (Amendment 66), and `einzel waveform import` turns a measured trace into a sampled period with its edges declared (Amendment 68). Animation and MCP are not started |
 | **5** · Generalise and release | BEM, MSH interchange, CAD import, public repository | Not started |
 
 **Why it went this way, and whether that was right.** The order has been driven by
@@ -154,6 +154,47 @@ Einzel. **That, rather than a date, is the trigger.**
 ---
 
 ## Amendments to the specification
+
+### 68 - A measured scope trace becomes a model's sampled period, its edges declared as breakpoints
+
+**CLI-1, CLI-3.** A `tabulated` drive takes one period of `phase,value` rows, and what a lab
+has is an oscilloscope export: many periods behind a preamble, a period close to but not
+exactly the generator setting, noise, and edges the integrator should land on.
+`einzel waveform import <trace.csv> (--frequency <Hz> | --period <s>)` reads two columns of
+the trace (`,` `;` or tab, `.` decimals, preamble rows counted and skipped, `--columns t,v`
+and `--time-unit s|ms|us|ns` for other layouts; `WaveformTrace`), refines the nominal period
+by the tightest fold within `--period-tolerance` (default 0.02), puts phase 0 at the first
+`--trigger rising|falling|level=<v>` crossing of the averaged period, averages every full
+period from there onto `--samples` bins (default 256), each bin's value the least-squares
+line through its samples at the bin centre, scales by the midline and half peak-to-peak
+(`--remove-dc`) or by the larger extreme, and writes the table with the header
+`phase,value` (refusing an existing file without `--force`). Edges, 10-90 % transitions
+narrower than `--edge-width` cycles (default 0.1), make the table `linear` and declare its
+kinks beside them as `breakpoints`; without an edge the table is `cubic`; `--interpolation`
+overrides (`WaveformImportCommand`). It prints the `tabulated` object and one line per
+measurement: period found against the nominal, origin, offset, amplitude and the
+electrode's `U` and `V` (all in trace units), duty, each edge, the sharpest edge against the
+step cap with the advice `"transport": { "edges": "land" }`, noise, harmonics 0 to 5 and
+the distortion, and the table written, with the note that a model resolves `file` relative
+to the model file. `--json` emits the whole outcome. A malformed or missing trace is
+`SCHEMA_INVALID` naming the path or the line; a period beyond the tolerance, no trigger
+crossing, fewer than two full periods, an empty bin and every option out of range are
+`VALUE_OUT_OF_BOUNDS`; all exit 1, and a malformed call prints the usage line. A nominal at
+half the true frequency is not detected (the docs say to check `periodsFolded` and the
+duty), and kinks without a level change are not declared. No MCP tool mirrors it.
+
+Measured on this machine, on eleven synthetic traces (four shapes at noise 0 and 1 %, three
+export layouts; 25 periods at 1.1 MHz, 1 GS/s, 180 V about 7.5 V): the period within
+1.3e-6 of the truth, the origin within 0.1 ns on every edged trace and 0.80 ns on the noisy
+sinusoid, the duty within 1.1e-3, the 10-90 times within 0.4 ns, the noise within 1 % of
+1.8 V, and each table, read back by `WaveformTable.Parse` with its breakpoints, inside its
+bound (slope × bin + 3 × noise). Records of 500 periods at 100.37 samples per period and
+5000 at 8.1 refine to 2.5e-8 and 2.0e-8. At N = 256 every edged trace declares 8
+breakpoints, each bracketing a true edge within a bin. The printed object, pasted into a
+schema 0.16 model beside the written table with `transport.edges: land` and its `file`
+renamed to the table's path relative to the model, validates and runs
+(`WaveformImportSurfaceTests`). Importing the `docs/cli.md` example, a duty-0.3 rectangle
+of 24,297 samples, takes 0.53 s from the command line, 0.04 s of it the process start. No schema, validator or solver change.
 
 ### 67 - A trajectory step may land on every waveform edge, at the instant the field flips
 

@@ -299,13 +299,14 @@ named ones included (schema 0.15; a 0.14 document reads unchanged):
 | `sinusoid` | none | The same drive as the name |
 | `rectangular` | `dutyCycle` (default 0.5) | The same drive as the name with `dutyCycle` beside it |
 | `analytic` | `expression`, `breakpoints` | An expression of the phase `p` (cycles, in [0, 1)) and the model's parameters, dimensionless. It may use every function a placement expression may; a parameter named `p` is refused, because the phase would shadow it. It is compiled and probed at validation, and again at the field build: it must be finite at 4096 uniform phases, at each breakpoint and just below it |
-| `tabulated` | `file`, `interpolation`, `breakpoints` | One period of `phase,value` rows, relative to the model file: an optional header line, `.` decimals, phases strictly ascending in [0, 1), at least three rows; the period closes on itself, so phase 1 is the first row again. `interpolation` is `linear` (default) or `cubic`, the periodic spline. The validator reads the file and refuses a bad row at `.../waveform/file`, naming the line; `run`, `fly`, the studies and `verify` record and re-check its SHA-256 in the manifest's `inputHashes`, as they do a gas field |
+| `tabulated` | `file`, `interpolation`, `breakpoints` | One period of `phase,value` rows, relative to the model file: an optional header line, `.` decimals, phases strictly ascending in [0, 1), at least three rows; the period closes on itself, so phase 1 is the first row again. `interpolation` is `linear` (default) or `cubic`, the periodic spline. The validator reads the file and refuses a bad row at `.../waveform/file`, naming the line; `run`, `fly`, the studies and `verify` record and re-check its SHA-256 in the manifest's `inputHashes`, as they do a gas field. `einzel waveform import <trace.csv>` writes one from a measured scope trace ([CLI](cli.md#einzel-waveform-import)) |
 | `harmonic` | `terms` | `{order, amplitude, phase}` per term, at least one; order 0 is a constant, the phase is in cycles (0 when omitted). `einzel waveform fit <csv> --orders N` prints this object fitted to a sampled period ([CLI](cli.md#einzel-waveform-fit)) |
 
 `breakpoints` (analytic and tabulated only) lists the phases where the shape jumps or
 kinks, strictly ascending in [0, 1). The cycle mean splits its quadrature there, so a
-declared jump costs nothing in the mean and an undeclared one up to 2/1024 of it; the
-integrator does not land on them yet. A key that belongs to another shape, a
+declared jump costs nothing in the mean and an undeclared one up to 2/1024 of it; under
+`transport.edges: land` the integrator lands on them
+([numerics](numerics.md#landing-on-every-edge-transportedges-land)). A key that belongs to another shape, a
 `dutyCycle` beside anything but a rectangular wave, and an unknown `type` are refused
 at their own pointer. Values are relative to `driveAmplitude` and are not clamped:
 [-1, 1] is the convention, not a limit, and a harmonic series already exceeds it.
@@ -1331,8 +1332,10 @@ accurate. For the field the step was shown. It was not shown the field.
 A `harmonic` object is that same series, so its highest order sets the cap. An
 `analytic` or `tabulated` shape has no order to read: its period is the drive's, the
 cap is that period over the steps per period, as for a rectangular wave, and a feature
-much narrower than a twentieth of a cycle inside it is not seen by the cap. Landing on
-declared breakpoints is not built yet.
+much narrower than a twentieth of a cycle inside it is not seen by the cap; declared as
+breakpoints under `transport.edges: land`, each one is landed on (Amendment 67).
+`einzel waveform import` declares a measured trace's edges as the breakpoints of the
+table it writes ([CLI](cli.md#einzel-waveform-import)).
 
 **Prefer a cubic table for a smooth measured period.** A linear table has a kink at
 every sample, and the integrator's error control sees each one, so flights slow as the
