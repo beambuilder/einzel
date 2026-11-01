@@ -1,6 +1,7 @@
 using System.Globalization;
 using Einzel.Commands;
 using Einzel.Core.Errors;
+using Einzel.Core.Model;
 using Einzel.Core.Results;
 using Einzel.Project;
 using Einzel.Render;
@@ -1963,15 +1964,29 @@ public static class Program
         }
     }
 
-    /// <summary>Waveform tools: <c>fit</c> today, <c>import</c> of measured traces to come.</summary>
+    /// <summary>
+    /// Waveform tools: <c>fit</c> a sampled period to a harmonic series, <c>import</c> a
+    /// measured trace as a sampled period.
+    /// </summary>
     private static int Waveform(string[] args, CommandLine options)
     {
         const string usage = "usage: einzel waveform fit <table.csv> --orders N [--json]";
         var action = args.Length > 1 && !args[1].StartsWith('-') ? args[1] : null;
         var invariant = CultureInfo.InvariantCulture;
 
-        if (action != "fit"
-            || options.Positional.Count < 2
+        if (action == "import")
+        {
+            return WaveformImport(options);
+        }
+
+        if (action != "fit")
+        {
+            Console.Error.WriteLine(usage);
+            Console.Error.WriteLine(ImportUsage);
+            return (int)ExitCode.ValidationFailure;
+        }
+
+        if (options.Positional.Count < 2
             || !int.TryParse(options.Value("orders"), NumberStyles.None, invariant, out var orders))
         {
             Console.Error.WriteLine(usage);
@@ -1991,6 +2006,159 @@ public static class Program
             $"orders 0 to {outcome.Orders} fitted to {outcome.Samples} samples: residual rms {outcome.ResidualRms:G3}, max {outcome.ResidualMax:G3}"));
 
         return (int)ExitCode.Success;
+    }
+
+    private const string ImportUsage =
+        "usage: einzel waveform import <trace.csv> (--frequency <Hz> | --period <s>) [--trigger rising|falling|level=<v>] "
+        + "[--samples N] [--remove-dc] [--interpolation linear|cubic] [--out <table.csv>] [--force] [--columns t,v] "
+        + "[--time-unit s|ms|us|ns] [--period-tolerance f] [--no-refine] [--edge-width cycles] [--orders N] [--json]";
+
+    /// <summary>
+    /// <c>waveform import</c>: a malformed call is the usage line; what the trace or the
+    /// options cannot give is the command's own refusal.
+    /// </summary>
+    private static int WaveformImport(CommandLine options)
+    {
+        var columns = (options.Value("columns") ?? "1,2").Split(',');
+        var interpolation = options.Value("interpolation");
+
+        if (options.Positional.Count != 2
+            || !OptionalNumber(options, "frequency", out var frequency)
+            || !OptionalNumber(options, "period", out var period)
+            || !OptionalNumber(options, "period-tolerance", out var tolerance)
+            || !OptionalNumber(options, "edge-width", out var edgeWidth)
+            || !OptionalCount(options, "samples", out var samples)
+            || !OptionalCount(options, "orders", out var orders)
+            || columns.Length != 2
+            || !int.TryParse(columns[0], NumberStyles.None, CultureInfo.InvariantCulture, out var timeColumn)
+            || !int.TryParse(columns[1], NumberStyles.None, CultureInfo.InvariantCulture, out var valueColumn)
+            || (options.Has("interpolation") && interpolation is not ("linear" or "cubic"))
+            || (options.Has("trigger") && options.Value("trigger") is null)
+            || (options.Has("time-unit") && options.Value("time-unit") is null)
+            || (options.Has("out") && options.Value("out") is null)
+            || (options.Has("columns") && options.Value("columns") is null))
+        {
+            Console.Error.WriteLine(ImportUsage);
+            return (int)ExitCode.ValidationFailure;
+        }
+
+        var defaults = new WaveformImportOptions { TracePath = options.Positional[1] };
+        var outcome = WaveformImportCommand.Execute(defaults with
+        {
+            FrequencyHz = frequency,
+            PeriodSeconds = period,
+            Trigger = options.Value("trigger") ?? defaults.Trigger,
+            Samples = samples ?? defaults.Samples,
+            RemoveDc = options.Has("remove-dc"),
+            Interpolation = interpolation is null ? null
+                : interpolation == "cubic" ? WaveformInterpolation.Cubic : WaveformInterpolation.Linear,
+            OutPath = options.Value("out"),
+            Force = options.Has("force"),
+            TimeColumn = timeColumn,
+            ValueColumn = valueColumn,
+            TimeUnit = options.Value("time-unit") ?? defaults.TimeUnit,
+            PeriodTolerance = tolerance ?? defaults.PeriodTolerance,
+            Refine = !options.Has("no-refine"),
+            EdgeWidthCycles = edgeWidth ?? defaults.EdgeWidthCycles,
+            Orders = orders ?? defaults.Orders,
+        });
+
+        if (options.Has("json"))
+        {
+            return Emit(outcome);
+        }
+
+        Console.Out.Write(CommandJson.Write(outcome.Waveform));
+
+        foreach (var line in ImportReport(outcome))
+        {
+            Console.Out.WriteLine(line);
+        }
+
+        return (int)ExitCode.Success;
+    }
+
+    /// <summary>The import's report, one plain sentence per item, numbers in the invariant culture.</summary>
+    private static IEnumerable<string> ImportReport(WaveformImportOutcome o)
+    {
+        var invariant = CultureInfo.InvariantCulture;
+        yield return string.Create(
+            invariant,
+            $"period: nominal {o.PeriodNominalSeconds:G6} s, found {o.PeriodSeconds:G9} s ({o.PeriodDifferencePpm:+0.###;-0.###;0} ppm), "
+            + $"{o.FrequencyHz:G9} Hz; {o.PeriodsFolded} periods folded at {o.SamplesPerPeriod:G6} samples per period");
+        yield return string.Create(invariant, $"origin: the {o.Trigger} trigger puts phase 0 at t0 = {o.OriginSeconds:G9} s");
+        var settings = o.NormalisationRule.StartsWith("remove-dc", StringComparison.Ordinal)
+            ? string.Create(invariant, $"with --remove-dc: set U = {o.ModelU:G6}, V = {o.ModelV:G6} in trace units")
+            : string.Create(invariant, $"without --remove-dc: set V = {o.ModelV:G6} in trace units, U = 0");
+        yield return string.Create(
+            invariant,
+            $"level: offset {o.Offset:G6}, amplitude {o.Amplitude:G6}, period mean {o.Mean:G6} in trace units; {settings} (U the electrode's potential, V its driveAmplitude; table mean {o.TableMean:G6})");
+        yield return string.Create(invariant, $"duty cycle: {o.DutyCycle:G6} of the period above the midline");
+
+        foreach (var edge in o.Edges)
+        {
+            yield return string.Create(
+                invariant,
+                $"edge: {edge.Sense} at phase {edge.Phase50:G6} (50 %), 10-90 % in {edge.Time10To90Seconds * 1e9:G4} ns, "
+                + $"10 % at phase {edge.Phase10:G6}, 90 % at phase {edge.Phase90:G6}");
+        }
+
+        yield return o.SharpestEdgeSeconds is { } sharpest
+            ? string.Create(
+                invariant,
+                $"sharpest edge: {sharpest * 1e9:G4} ns 10-90 % against the step cap T/20 = {o.CapSeconds * 1e9:G4} ns; ")
+                + (o.LandAdvised
+                    ? "breakpoints declared, so add \"transport\": { \"edges\": \"land\" } to the model to land on them"
+                    : "no breakpoints declared")
+            : $"no edge found; {o.Waveform.Interpolation} table, no breakpoints";
+        yield return string.Create(
+            invariant, $"noise: {o.NoiseRms:G3} rms in trace units, {o.NoiseRmsRelative * 100.0:G3} % of the amplitude");
+        yield return "harmonics (amplitude relative to the fundamental, phase in cycles): "
+            + string.Join("; ", o.Harmonics.Take(6).Select(h => string.Create(invariant, $"{h.Order}: {h.Amplitude:G4} at {h.Phase:G4}")));
+        yield return o.Thd is { } thd
+            ? string.Create(invariant, $"THD {thd * 100.0:G4} % (orders 2 to {o.Harmonics.Count - 1})")
+            : "THD undefined: no fundamental (the amplitudes above are absolute)";
+        yield return string.Create(invariant, $"table: {o.Samples} samples written to {o.Table}");
+        yield return "\"file\" above is relative to the current directory, and a model resolves it relative to the model file: "
+            + "move the table beside the model or adjust the path";
+    }
+
+    /// <summary>A number option: absent is null; present, it must parse.</summary>
+    private static bool OptionalNumber(CommandLine options, string name, out double? value)
+    {
+        value = null;
+
+        if (!options.Has(name))
+        {
+            return true;
+        }
+
+        if (!double.TryParse(options.Value(name), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
+    }
+
+    /// <summary>A count option: absent is null; present, it must be a plain non-negative integer.</summary>
+    private static bool OptionalCount(CommandLine options, string name, out int? value)
+    {
+        value = null;
+
+        if (!options.Has(name))
+        {
+            return true;
+        }
+
+        if (!int.TryParse(options.Value(name), NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
     }
 
     /// <summary>The extension authoring loop: list, test, register.</summary>
@@ -3029,8 +3197,11 @@ public static class Program
           cache status [dir]            the solved fields .einzel/cache keeps for the next run
           cache clear | prune [dir]     delete them all, or only what no run will load
           waveform fit <csv> --orders N the harmonic series closest to a sampled period,
-                                        as a model's waveform object (waveform import
-                                        of measured traces will sit beside it)
+                                        as a model's waveform object
+          waveform import <trace.csv>   a measured scope trace folded onto one averaged
+                                        period: a tabulated table with its edges declared,
+                                        and the waveform object to paste
+                --frequency <Hz> | --period <s>
           agents-md [dir]               regenerate the platform layer of AGENTS.md
 
         release tooling:
