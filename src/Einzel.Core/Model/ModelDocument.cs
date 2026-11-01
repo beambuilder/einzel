@@ -749,15 +749,15 @@ public sealed record TransportDocument
     public SpaceChargeGridDocument? SpaceChargeGrid { get; init; }
 
     /// <summary>
-    /// How a step meets an instant at which a drive jumps: <c>cap</c> (the default when
-    /// absent) or <c>land</c>.
+    /// How a step meets an instant at which a drive jumps: <c>land</c> (the default when
+    /// absent) or <c>cap</c>.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>cap</c> keeps the integrator of every earlier version to the bit: a step is
-    /// capped at a twentieth of the shortest drive period and is cut to land on a stage
-    /// switch of the sequence, and on nothing else. A rectangular edge inside a step is
-    /// left to the error controller, which meets it by rejecting steps.
+    /// <c>cap</c> keeps the integrator of every version before landing existed, to the
+    /// bit: a step is capped at a twentieth of the shortest drive period and is cut to
+    /// land on a stage switch of the sequence, and on nothing else. A rectangular edge
+    /// inside a step is left to the error controller, which meets it by rejecting steps.
     /// </para>
     /// <para>
     /// <c>land</c> also cuts the step to every declared waveform breakpoint (the edges of

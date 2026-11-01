@@ -220,7 +220,7 @@ public sealed record CompiledModel
 
     /// <summary>
     /// Whether a trajectory lands on every declared waveform edge (<c>transport.edges</c>
-    /// is <c>land</c>) rather than only on stage switches (<c>cap</c>, the default).
+    /// is <c>land</c> or absent, the default) rather than only on stage switches (<c>cap</c>).
     /// </summary>
     public bool LandOnEdges { get; init; }
 

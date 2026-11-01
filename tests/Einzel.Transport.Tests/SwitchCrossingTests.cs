@@ -115,21 +115,31 @@ public sealed class SwitchCrossingTests(ITestOutputHelper output)
             ],
         };
 
+        var field = GeometryBuilder.Build(solve).Field;
         var run = TrajectoryIntegrator.Integrate(
             new PhaseState(Vec3.Zero, Vec3.Zero),
             Peptide,
-            GeometryBuilder.Build(solve).Field,
+            field,
             new IntegrationSettings { RelativeTolerance = 1e-11, MaximumFlightTime = 4e-6 });
+        var cap = TrajectoryIntegrator.Integrate(
+            new PhaseState(Vec3.Zero, Vec3.Zero),
+            Peptide,
+            field,
+            new IntegrationSettings { RelativeTolerance = 1e-11, MaximumFlightTime = 4e-6, LandOnEdges = false });
 
-        output.WriteLine($"{run.Outcome} after {run.AcceptedSteps} steps");
+        output.WriteLine($"{run.Outcome} after {run.AcceptedSteps} steps at {run.FlightTimeSeconds:R} s; cap {cap.Outcome} after {cap.AcceptedSteps} steps at {cap.FlightTimeSeconds:R} s");
 
         // It crosses the switch and is then pushed into the upper plate, which is what a
         // pair at plus and minus a hundred volts does to an ion on the axis between them.
         // What is asserted is the crossing, not the ending: this test exists to eliminate
-        // the facing pair as the cause of the underflow, and StruckElectrode after 112
-        // steps eliminates it as thoroughly as reaching the ceiling would.
+        // the facing pair as the cause of the underflow, and StruckElectrode after 47
+        // steps under the default (112 under cap, whose derivative carried across the
+        // switch costs rejections and regrowth) eliminates it as thoroughly as reaching the
+        // ceiling would. Both rules strike the same plate at the same instant.
         Assert.NotEqual(TrajectoryOutcome.StepSizeUnderflow, run.Outcome);
-        Assert.True(run.AcceptedSteps > 50, $"only {run.AcceptedSteps} steps");
+        Assert.True(run.AcceptedSteps > 20, $"only {run.AcceptedSteps} steps");
+        Assert.Equal(cap.Outcome, run.Outcome);
+        Assert.Equal(cap.FlightTimeSeconds, run.FlightTimeSeconds, cap.FlightTimeSeconds * 1e-6);
     }
 
     private static CompiledElectrode Pair(double volts, string name) => new()

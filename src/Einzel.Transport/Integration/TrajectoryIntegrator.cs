@@ -380,9 +380,28 @@ public static class TrajectoryIntegrator
 
             if (step < settings.MinimumStep)
             {
-                outcome = time.Total >= settings.MaximumFlightTime
-                    ? TrajectoryOutcome.MaximumFlightTimeReached
-                    : TrajectoryOutcome.StepSizeUnderflow;
+                // The flight end is an instant like a landing, and is met by the same
+                // in-place rule: a remainder below the minimum step, or an end one double
+                // ahead, is taken without a step. The last step is cut to the remainder,
+                // but the compensated sum can leave the time an ulp short of the end
+                // (2e-22 s on a 1 us flight), and the remainder is then no step at all.
+                // Measured: one of 63 one-period flights of a rectangular drive on the
+                // ideal quadrupole ended that way, reported as underflow with the state
+                // at the end time to 2e-22 s. The state is kept; only the time moves.
+                if (settings.MaximumFlightTime - time.Total < settings.MinimumStep
+                    || settings.MaximumFlightTime <= Math.BitIncrement(time.Total))
+                {
+                    if (time.Total < settings.MaximumFlightTime)
+                    {
+                        time = default;
+                        time.Add(settings.MaximumFlightTime);
+                    }
+
+                    outcome = TrajectoryOutcome.MaximumFlightTimeReached;
+                    break;
+                }
+
+                outcome = TrajectoryOutcome.StepSizeUnderflow;
                 break;
             }
 

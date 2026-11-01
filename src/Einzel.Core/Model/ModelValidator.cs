@@ -4619,9 +4619,10 @@ public static class ModelValidator
                 Path = "/transport/edges",
                 Constraint = "a waveform edge is met by one of the methods this build has",
                 Observed = new ObservedValue(0.0, transport.Edges),
-                Suggestion = "\"cap\", the default, caps each step at a twentieth of the drive period "
-                    + "and lands on stage switches only, as every earlier version did; \"land\" also "
-                    + "lands on every declared waveform breakpoint, at the instant the field flips",
+                Suggestion = "\"land\", the default, lands on every declared waveform breakpoint, at "
+                    + "the instant the field flips; \"cap\" caps each step at a twentieth of the drive "
+                    + "period and lands on stage switches only, the integrator of every version "
+                    + "before this key existed",
             });
 
             return null;
@@ -4633,7 +4634,7 @@ public static class ModelValidator
         return new TransportValues(
             transport.Mode, transport.RelativeTolerance, ceiling.Value.SiValue, sample,
             gas, mobility, densityGrid, transport.SpaceCharge, chargeGrid, densityStep,
-            transport.Edges is "land");
+            transport.Edges is not "cap");
     }
 
     /// <summary>

@@ -10,7 +10,7 @@ namespace Einzel.Transport.Tests;
 /// <summary>
 /// <see cref="IntegrationSettings.LandOnEdges"/>: a step lands on every waveform edge, samples
 /// the near side at its end and restarts on the far side, an edge closer than the minimum step
-/// is taken in place, and the default flies as it always did.
+/// is taken in place, landing is the default, and <c>cap</c> flies as every version before it did.
 /// </summary>
 /// <remarks>
 /// The reference is the exact transfer-matrix solution of the Meissner equation for an ideal
@@ -72,7 +72,18 @@ public sealed class EdgeLandingTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The default is the integrator it was: a <c>cap</c> flight's final state matches the one
+    /// A library caller that sets nothing lands, as a document that writes nothing does: the
+    /// record's default is true, so the two layers of the default cannot drift apart.
+    /// </summary>
+    [Fact]
+    public void TheSettingsLandByDefault()
+    {
+        Assert.True(new IntegrationSettings().LandOnEdges);
+        Assert.False(new IntegrationSettings { LandOnEdges = false }.LandOnEdges);
+    }
+
+    /// <summary>
+    /// <c>cap</c> is the integrator it was: a <c>cap</c> flight's final state matches the one
     /// recorded at <c>17352b1</c> (before landing existed) for the Meissner row d = 0.5,
     /// q = 0.5, ten periods, rtol 1e-11, to 1e-12 relative, with step counts within a few of
     /// the recorded 1904 accepted and 704 rejected. Not to the bit: the step controller calls
@@ -82,7 +93,7 @@ public sealed class EdgeLandingTests(ITestOutputHelper output)
     /// <see cref="AnEndSampleAtTheStepsEndIsTheDefault"/>.
     /// </summary>
     [Fact]
-    public void TheDefaultReproducesTheRecordedFlightToATolerance()
+    public void CapReproducesTheRecordedFlightToATolerance()
     {
         var result = Fly(Quadrupole(0.5, new RfWaveform.Rectangular(0.5)), 10, 1e-11, land: false);
 

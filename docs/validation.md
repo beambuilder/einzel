@@ -30,6 +30,8 @@ cross-code tier is unavailable — see below.
 | The same by the 4 mm aperture criterion, 200 cycles from 0.1 mm | q = 0.71113 against the exact motion's 0.71113 (the published 0.712 is the boundary rounded) |
 | Rectangular-drive band edges, duty 0.3 and 0.5 at a = 0 and 0.1; 0.4, 0.55, 0.6, 0.61 at a = 0 | tr M = ±2 at all 21 closed-form edges within 1.4e-9, stable side correct on both sides of each |
 | Digital working point from duty cycle | a = 0.2630 against a published 0.2640 |
+| 3D quadrupole, rectangular drive at duty 0.60, q-line band against SIMION 8.0.4 | 0.50 / 0.5977 against 0.5000 / 0.5963 (closed form 0.51828 / 0.60021); 101 of 101 points agree |
+| 3D quadrupole, trapezoid drive, cut-off against rise time, against SIMION | q_c within 0.005 of SIMION at every r from 0 to 0.20 of the period; both follow 0.705 / sinc(pi w) |
 | Thermal packet emittance, sigma_x sqrt(kT/m) / v | 0.77% at 6,000 ions |
 | Turn-around through a solved trap, against the closed form at the solved field | 0.7% |
 | Drift-scan slope under mesh refinement (20 to 40 cells/r0) | 20.7 ns/mm at both, points within 0.1% |
@@ -293,13 +295,81 @@ The CLI is driven through `Program.Main` itself, not through the command objects
 because the things most likely to break an agent loop — exit codes, which stream
 output lands on, whether `--json` parses — live in the surface.
 
+## The 3D quadrupole against SIMION: duty cycle and rise time
+
+The one cross-code comparison. The validation project's segmented RF quadrupole
+(four round rods, r0 = 4 mm, 90 mm long, 1.1 MHz, m/z 100 at 2 eV, 48 ions per
+scan point launched 0.02 to 0.05 mm off axis, a point passing when at least 24 of
+48 reach the detector; the `rf_quad_square` corpus case) was flown in SIMION 8.0.4
+(headless, trajectory quality 0, time step capped at T/200, 2026-11-01) and in this
+build under the default `transport.edges: land` (26.1.0+411667d), on the q line
+(U = 0, q = 0 to 1 in steps of 0.01) with a rectangular drive at two duty cycles
+and with a trapezoid drive (the `analytic` expression, 10-90 % rise time r in
+cycles, d = 0.5) at six rise times. Edges are the 50 % crossings of the pass
+fraction. Per-point agreement counts the q points at which both codes give the same
+pass/fail verdict.
+
+| drive | SIMION | Einzel (`land`) | closed form, a = 0 | per-point agreement |
+| --- | --- | --- | --- | --- |
+| rectangular, d = 0.60, low / high edge | 0.5000 / 0.5963 | 0.50 / 0.5977 | 0.51828 / 0.60021 | 101 of 101 |
+| rectangular, d = 0.55, high edge | 0.6451 | 0.6451 | 0.64727 | 101 of 101 |
+| rectangular, d = 0.55, low edge | none under the 24-of-48 rule | none | 0.24698 | - |
+| trapezoid, r = 0.05, q-line cut-off | 0.7092 | 0.714 | 0.7096 by the sinc law | 100 of 101 |
+| trapezoid, r = 0.05, tune line (square-adapted) | 100.0 % | 100.0 % | - | - |
+| trapezoid, r = 0.05, mass line (square-adapted) | 97.841 - 104.0 u | 97.45 - 103.5 u | - | - |
+
+The rise-time series, q_c(r) on the q line, d = 0.5:
+
+| r (10-90 %, cycles) | 0 | 0.01 | 0.02 | 0.05 | 0.10 | 0.20 |
+| --- | --- | --- | --- | --- | --- | --- |
+| SIMION, cap T/200 | 0.705 | 0.705 | 0.7052 | 0.7092 | 0.7248 | 0.7848 |
+| Einzel, `land` | 0.705 | 0.705 | 0.705 | 0.714 | 0.725 | 0.785 |
+| 0.705 / sinc(pi w), w = r / 0.8 | 0.705 | 0.7052 | 0.7057 | 0.7096 | 0.7235 | 0.7831 |
+
+Both codes agree within 0.005 at every rise time, and both follow the one-line law:
+the trapezoid is the rectangle convolved with a box of width w = r/0.8 cycles (the full
+ramp), its fundamental amplitude falls by sinc(pi w), and the cut-off in the nominal q
+moves up by the inverse. The trend is monotonic in both codes. SIMION's step
+(T/200 = 4.5 ns) is coarse against the r = 0.01 ramp (9 ns): rerun at T/1000, 0 of
+4,848 per-ion verdicts differ (the trajectories do, by up to 1.19 mm), so the T/200
+rows stand.
+
+At d = 0.55 neither code resolves the closed-form low edge under the 24-of-48 rule:
+in both, 32 of 48 ions (the variants without an initial y velocity) reach the detector
+at every q below 0.25, because the growth rate of the tr M = +2 branch is too small to
+take an on-axis ion to the 4 mm rods within the ~23 cycles of a 95 mm flight; the
+closed-form edge is visible only as the 32 -> 48 step at q = 0.245 ± 0.005 in both
+codes. The d = 0.60 band, where the stronger mean (a_eff = 0.4 q) empties 0.05 to
+0.49, resolves both edges in both codes, with the same finite-length offset from the
+closed form (−0.018 at the low edge, −0.004 at the high, against −0.0075 for the
+square at d = 0.5). The high edges of the 3D instrument sit below the closed form in
+both codes by the same amount; the two codes agree with each other better than
+either agrees with the infinite ideal quadrupole, which is the comparison that
+matters.
+
+A measured trace closes the loop: the synthetic r = 0.05 trapezoid with 1 % noise,
+imported by `einzel waveform import` as a 256-sample linear table with its
+breakpoints, flown under the default, gives q_c 0.7149 and differs from the analytic
+trapezoid in 7 of 4,848 per-ion verdicts (all at q = 0.71, no pass/fail flip) and
+from the rectangle in 47; it costs 8.7 times the rectangle's steps per ion, because
+the noise puts a kink at every one of the 256 samples of a linear table
+([numerics](numerics.md)).
+
+Provenance: SIMION 8.0.4 headless on the task's refined arrays (convergence 1e-7),
+`--trajectory-quality 0`, cap T/200, 2026-11-01; Einzel 26.1.0+411667d under
+`transport.edges: land`; agreement counts from the two per-ion result sets on the same
+101 q points. The corpus case for the duty cycle is d = 0.60, because d = 0.55 has no
+low edge under the pass rule in either code.
+
 ## What is not covered
 
 Stated plainly, because a test suite that does not say what it omits reads as
 covering everything.
 
-- **No cross-code comparison.** No SIMION licence. Nothing here is checked against
-  an independently written ion-optics code.
+- **One cross-code comparison, on one instrument.** The segmented RF quadrupole
+  above is checked against SIMION 8.0.4 under sinusoidal, rectangular (two duty
+  cycles) and trapezoid drives. Nothing else here is checked against an
+  independently written ion-optics code.
 - **Literature regression is started, not finished.** Published geometries
   reproduced against reported performance is the tier that catches *conceptual*
   errors rather than numerical ones, and with cross-code unavailable it is the most
@@ -309,15 +379,17 @@ covering everything.
   the Ion Processor now has both figures of merit it needs — turn-around time and
   emittance — but not the trap geometry to measure them on, and the segmented
   quadrupole needs three dimensions.
-- **No SIMION reference at a duty other than 0.5 or with a finite rise time.** A drive may
-  be a sinusoid, a rectangular wave, an expression of the phase, a sampled period or a
-  harmonic series (schema 0.15; a multi-notch isolation waveform is a harmonic series
-  with a gap), `transport.edges: land` lands on its declared breakpoints, checked
-  against the exact Meissner solution, and `einzel waveform import` reads a measured
-  scope trace into a drive (B.3, done). The rectangular drive's band edges are
-  reproduced against the closed form at six duty cycles (above). What is missing is
-  the cross-code comparison on the segmented quadrupole at a duty other than 0.5 and
-  with a finite rise time; those SIMION rows follow in B.4.
+- **No SIMION reference for a measured drive, and none for a mass line at a duty
+  other than 0.5.** A drive may be a sinusoid, a rectangular wave, an expression of
+  the phase, a sampled period or a harmonic series (schema 0.15; a multi-notch
+  isolation waveform is a harmonic series with a gap), the integrator lands on its
+  declared breakpoints by default, checked against the exact Meissner solution, and
+  `einzel waveform import` reads a measured scope trace into a drive. The rectangular
+  drive's band edges are reproduced against the closed form at six duty cycles, and
+  the 3D quadrupole against SIMION at duty 0.55 and 0.60 and at six rise times
+  (above). What is missing is a real driver's capture (the imported trace above is
+  synthetic) and the square-adapted tune and mass lines at a duty other than 0.5,
+  whose apex is elsewhere.
 - **A trajectory run still has no cost estimate.** A diffusive one now does, exactly
   - its step is stability-limited and computable before the run - but trajectory
   integration's cost depends on the path, which depends on the field, which is the

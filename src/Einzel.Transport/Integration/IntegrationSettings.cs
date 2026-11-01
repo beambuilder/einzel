@@ -113,8 +113,8 @@ public sealed record IntegrationSettings
     /// <summary>
     /// Whether a step is cut to land on every edge a driven field declares
     /// (<see cref="Einzel.Fields.ITimeVaryingField.NextEdgeAfter"/>) as well as on every
-    /// stage switch. False by default, which is the integrator of every earlier version
-    /// to the bit.
+    /// stage switch. True by default; false is the integrator of every version before
+    /// landing existed, to the bit.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -128,11 +128,12 @@ public sealed record IntegrationSettings
     /// rejected step.
     /// </para>
     /// <para>
-    /// Set from <c>transport.edges</c>: <c>land</c> is true, <c>cap</c> or an absent key
-    /// false.
+    /// Set from <c>transport.edges</c>: <c>cap</c> is false; <c>land</c> or an absent key
+    /// true, which is also this record's default, so a library caller gets the same
+    /// integrator a document does.
     /// </para>
     /// </remarks>
-    public bool LandOnEdges { get; init; }
+    public bool LandOnEdges { get; init; } = true;
 }
 
 /// <summary>Why an integration stopped.</summary>

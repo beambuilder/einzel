@@ -218,7 +218,7 @@ level: offset 7.4197, amplitude 180.335, period mean -64.4951 in trace units; wi
 duty cycle: 0.300017 of the period above the midline
 edge: rising at phase 0.999982 (50 %), 10-90 % in 1.663 ns, 10 % at phase 0.999081, 90 % at phase 1.00091
 edge: falling at phase 0.299999 (50 %), 10-90 % in 1.816 ns, 10 % at phase 0.301007, 90 % at phase 0.29901
-sharpest edge: 1.663 ns 10-90 % against the step cap T/20 = 45.45 ns; breakpoints declared, so add "transport": { "edges": "land" } to the model to land on them
+sharpest edge: 1.663 ns 10-90 % against the step cap T/20 = 45.45 ns; breakpoints declared, so the integrator lands on them unless the model says "transport": { "edges": "cap" }
 noise: 1.8 rms in trace units, 1 % of the amplitude
 harmonics (amplitude relative to the fundamental, phase in cycles): 0: -0.3879 at 0; 1: 1 at -0.15; 2: 0.5877 at -0.3; ...
 THD 73.15 % (orders 2 to 15)
@@ -278,10 +278,10 @@ it.
 **The breakpoints** are the table's kinks: a ramp's corners, and for a jump that
 straddles a bin boundary four samples (the two plateau samples and the two ends of the
 steep segment between them). How many an edge declares depends on how it falls on the
-grid. Under `"transport": { "edges": "land" }` the integrator lands on each one
+grid. The integrator lands on each one unless the model says `"transport": { "edges": "cap" }`
 ([numerics](numerics.md#landing-on-every-edge-transportedges-land)); the report compares
-the sharpest edge's 10-90 time with the step cap, a twentieth of the period, and gives
-that advice whenever breakpoints are declared.
+the sharpest edge's 10-90 time with the step cap, a twentieth of the period, and says so
+whenever breakpoints are declared.
 
 **The file path.** `file` in the printed object is relative to the current directory; a
 model resolves it relative to the model file, so move the table beside the model or adjust

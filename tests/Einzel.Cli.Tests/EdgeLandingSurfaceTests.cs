@@ -32,11 +32,14 @@ public sealed partial class EdgeLandingSurfaceTests(ITestOutputHelper output) : 
         }
     }
 
-    /// <summary><c>cap</c>, <c>land</c> and an absent key validate; only <c>land</c> lands.</summary>
+    /// <summary>
+    /// <c>cap</c>, <c>land</c> and an absent key validate; only <c>cap</c> does not land. The
+    /// absent key is what a document gets by writing nothing, and it is <c>land</c>.
+    /// </summary>
     /// <param name="edges">The value written, or null for no key.</param>
     /// <param name="lands">Whether the compiled model lands on edges.</param>
     [Theory]
-    [InlineData(null, false)]
+    [InlineData(null, true)]
     [InlineData("cap", false)]
     [InlineData("land", true)]
     public void CapLandAndAbsentValidate(string? edges, bool lands)
@@ -67,9 +70,13 @@ public sealed partial class EdgeLandingSurfaceTests(ITestOutputHelper output) : 
         Assert.Contains("\"land\"", error.Suggestion, StringComparison.Ordinal);
     }
 
-    /// <summary>A 0.15 document validates under this build to the model it was, at version 0.16.</summary>
+    /// <summary>
+    /// A 0.15 document validates under this build to the same model as the 0.16 document
+    /// without the key, and both land: the default is a property of the build, not of the
+    /// version a document names (the version keys field solves, which have not changed).
+    /// </summary>
     [Fact]
-    public void AVersion015DocumentMeansWhatItMeant()
+    public void AVersion015DocumentMeansWhatThisBuildMeans()
     {
         var old = ModelValidator.Validate(ModelJson.Parse(Model(null).Replace("\"0.16\"", "\"0.15\"", StringComparison.Ordinal)), null, _root);
         var current = ModelValidator.Validate(ModelJson.Parse(Model(null)), null, _root);
@@ -77,7 +84,7 @@ public sealed partial class EdgeLandingSurfaceTests(ITestOutputHelper output) : 
         Assert.True(old.IsValid && current.IsValid);
         Assert.Equal("0.16", ModelSchema.CurrentVersion);
         Assert.Contains("0.15", ModelSchema.SupportedVersions);
-        Assert.False(old.Model!.LandOnEdges);
+        Assert.True(old.Model!.LandOnEdges);
         Assert.Equal(
             old.Model.ToString().Replace("SchemaVersion = 0.15", "SchemaVersion = 0.16", StringComparison.Ordinal),
             current.Model!.ToString());

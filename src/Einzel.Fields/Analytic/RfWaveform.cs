@@ -59,9 +59,9 @@ public abstract record RfWaveform
     /// <para>
     /// <see cref="Mean"/> reads them, to put its quadrature panels' edges on the jumps, and a
     /// field reports the instants it crosses them through
-    /// <see cref="ITimeVaryingField.NextEdgeAfter"/>. The integrator lands on them when a
-    /// model asks for it, which a later change adds; until then a jump inside a step is held
-    /// to the steps-per-cycle cap.
+    /// <see cref="ITimeVaryingField.NextEdgeAfter"/>. The integrator lands on them unless
+    /// the model says <c>transport.edges: cap</c>, under which a jump inside a step is held
+    /// to the steps-per-cycle cap and the error controller alone.
     /// </para>
     /// <para>
     /// Right-continuous: at a wrapped phase equal to a breakpoint the shape reads its
