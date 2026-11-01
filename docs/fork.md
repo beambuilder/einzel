@@ -149,6 +149,22 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **The rectangular drive's stability boundaries match the Meissner closed form
+  by monodromy; the documented 0.71113 was an aperture criterion, not the
+  boundary.** Two one-period flights under `transport.edges: land` (rtol 1e-11)
+  give each axis's one-period transfer matrix, and |tr M| = 2 at all 21
+  closed-form band edges of duty 0.3, 0.4, 0.5, 0.55, 0.6 and 0.61 at a = 0 and
+  0.1 within 1.4e-9 (2.0e-11 to 1.4e-9; 1.1e-8 under `cap`), with |tr M| on the
+  right side of 2 at q ± 0.01 of every edge; the square-wave boundary is
+  0.71249366 (Ding 2006's 0.7125 and Schrader 2024's 0.712 are roundings), and
+  the 0.71113 of the 200-cycle aperture bisection is where a stable ion's beat
+  envelope exceeds 4 mm from 0.1 mm, now asserted and stated as such. An edge
+  shifted by 1e-4 of a cycle fails every row; the `<=` or `<` at the edge instant
+  and a wrong landing instant alone are not visible at 1e-6. One of the 63 flights
+  ends `StepSizeUnderflow` one ulp short of T (the flight-end cut on the
+  compensated sum), recorded, not fixed. No product change.
+  [Validation](validation.md), [literature targets](literature-targets.md#3-the-segmented-quadrupole-driven-by-rectangular-waveforms).
+  PR #27 (number assumed).
 - **A measured scope trace becomes a model's sampled period in one command,
   with its edges declared and the settings that give the trace back.**
   `einzel waveform import <trace.csv> --frequency <Hz>` writes the averaged

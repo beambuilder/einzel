@@ -26,7 +26,9 @@ cross-code tier is unavailable — see below.
 | Coaxial log potential around a rod | Second order, 1.5e-5 at h = 0.156 mm |
 | Shape derivative dV/dL against −1000x/L² | 6.5e-6 relative at a 0.11-cell step |
 | Mathieu stability boundary, sinusoidal drive | q = 0.90684 against a tabulated 0.90804 |
-| Meissner boundary, square-wave drive | q = 0.71113 against a published 0.712 |
+| Meissner boundary, square-wave drive, by one-period monodromy | q = 0.71249 against the closed form 0.71249366 (Ding 2006: 0.7125); tr M = −2 there to 1.5e-10 |
+| The same by the 4 mm aperture criterion, 200 cycles from 0.1 mm | q = 0.71113 against the exact motion's 0.71113 (the published 0.712 is the boundary rounded) |
+| Rectangular-drive band edges, duty 0.3 (a = 0.1), 0.4, 0.55, 0.6, 0.61 (a = 0), 0.5 (a = 0.1) | tr M = ±2 at all 21 closed-form edges within 1.4e-9, stable side correct on both sides of each |
 | Digital working point from duty cycle | a = 0.2630 against a published 0.2640 |
 | Thermal packet emittance, sigma_x sqrt(kT/m) / v | 0.77% at 6,000 ions |
 | Turn-around through a solved trap, against the closed form at the solved field | 0.7% |
@@ -70,6 +72,14 @@ cross-code tier is unavailable — see below.
 | Trilinear gas-flow sampling against a linear field | exact to 1e-9 |
 | VTK ImageData written by this engine and read back | every node exactly |
 | Ion ledger on the shipped funnel: cylindrical, absorbing rings, gas flow | **100.0001%** (was 95.99%) |
+
+In the rectangular-drive rows `a` is the DC part, what `FromMathieu` takes; the
+waveform's mean 2d − 1 sits inside the drive, so the reported `MathieuA` is
+a + 2q(2d − 1), which is Ding 2006's a_Z. The boundary is measured as the trace of
+the one-period transfer matrix, from two one-period flights under
+`transport.edges: land`; the earlier 0.71113 was where a stable ion's beat envelope
+exceeds a 4 mm aperture from a 0.1 mm start within 200 cycles, an aperture
+criterion, not the boundary, and is kept beside it with that meaning.
 
 The detuned reflectron matters more than it looks: without it, a bug that simply
 returned a constant flight time would pass the focusing test.
@@ -299,13 +309,15 @@ covering everything.
   the Ion Processor now has both figures of merit it needs — turn-around time and
   emittance — but not the trap geometry to measure them on, and the segmented
   quadrupole needs three dimensions.
-- **No measured-trace import and no published non-sinusoidal reference.** A drive may
+- **No SIMION reference at a duty other than 0.5 or with a finite rise time.** A drive may
   be a sinusoid, a rectangular wave, an expression of the phase, a sampled period or a
   harmonic series (schema 0.15; a multi-notch isolation waveform is a harmonic series
-  with a gap), and `transport.edges: land` lands on its declared
-  breakpoints, checked against the exact Meissner solution. What is missing is reading
-  a measured scope trace into a drive (B.3) and validation against published
-  square-wave and SIMION results (B.4).
+  with a gap), `transport.edges: land` lands on its declared breakpoints, checked
+  against the exact Meissner solution, and `einzel waveform import` reads a measured
+  scope trace into a drive (B.3, done). The rectangular drive's band edges are
+  reproduced against the closed form at six duty cycles (above). What is missing is
+  the cross-code comparison on the segmented quadrupole at a duty other than 0.5 and
+  with a finite rise time; those SIMION rows follow in B.4.
 - **A trajectory run still has no cost estimate.** A diffusive one now does, exactly
   - its step is stability-limited and computable before the run - but trajectory
   integration's cost depends on the path, which depends on the field, which is the
@@ -560,18 +572,19 @@ The interior falls by fourteen-fold; the edge overshoot does not fall at all. **
 series that showed no overshoot would not be a Fourier series**, so both are
 asserted.
 
-**And it recovers the published digital cut-off.** Schrader, Anderson and Russell
-(JASMS 2024) put the square-wave low-mass cut-off at q = 0.712. Driving the same
-geometry two ways:
+**And it recovers the digital cut-off.** The square-wave boundary is q = 0.71249366
+by the Meissner closed form (reproduced by monodromy above); Schrader, Anderson and
+Russell (JASMS 2024) quote it rounded, 0.712, and Ding 2006 as 0.7125. Driving the
+same geometry two ways:
 
 | waveform | last q through | first q lost |
 | --- | --- | --- |
 | rectangular, direct | 0.710 | 0.715 |
 | the 80-term series | **0.710** | **0.715** |
 
-Same bracket, containing the published number. That is the check that says the
-arbitrary-waveform path *drives an ion* rather than merely evaluating to the right
-numbers.
+Same bracket, containing the exact boundary and the published number. That is the
+check that says the arbitrary-waveform path *drives an ion* rather than merely
+evaluating to the right numbers.
 
 **A mistake worth recording**: the first version wrote the series with zero phase on
 every term. A square wave's series is a **sine** series, so that is a square wave

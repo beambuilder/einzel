@@ -628,7 +628,7 @@ exactly where a DC offset would.
 
 | Quantity | Reported | Einzel |
 | --- | --- | --- |
-| Square-wave low-mass cut-off | q = 0.712 | **0.71113** |
+| Square-wave low-mass cut-off | q = 0.712 | **0.71249** by monodromy (0.71113 by the 4 mm aperture criterion, see below) |
 | Sinusoidal cut-off, for scale | q = 0.908 | 0.90684 |
 | Effective a at 61.15/38.85 duty, q = 0.5897 | a = -0.2640 | **0.2630** |
 
@@ -637,6 +637,14 @@ is the most satisfying: a = 2q(2d - 1) is arithmetic that can be checked against
 the paper before writing any simulation at all, and it agrees to a part in
 250 - which says the digital working point is being placed where the authors place
 it.
+
+The cut-off row carries two numbers because two things were measured. The
+bisection on a 200-cycle flight calls an ion lost when it leaves a 4 mm aperture
+from a 0.1 mm start; close to the boundary a *stable* ion's beat envelope grows
+without limit (4.03 mm at q = 0.711, 7.0 mm at 0.712), so that criterion cuts off
+at 0.71113 on the exact motion too. The boundary itself, |tr M| = 2 of the
+one-period transfer matrix, is 0.71249366, and the monodromy measurement below
+reproduces it; the paper's 0.712 is that number to three figures.
 
 ### Geometry and operating point
 
@@ -668,6 +676,91 @@ The authors used **SIMION 8.1**. That is the second target in this file whose
 results live in software the reader cannot run - the Ion Processor was simulated
 in an in-house package - and it is the project thesis restated as a fact rather
 than as an argument.
+
+### Ding 2006 as a worked target: the closed-form boundaries
+
+**Ding and Kumashiro** (2006), ion motion in the rectangular-wave quadrupole field
+and the digital ion trap, Rapid Commun. Mass Spectrom. **20** 3-8. Read here through
+the project's notes on the paper; page numbers are those notes' (p. 1-4).
+
+A rectangular drive makes the equation of motion piecewise constant, so the
+one-period transfer matrix of each transverse axis is a product of two closed-form
+2x2 matrices and the motion is bounded iff |tr M| < 2 (Meissner). Ding writes the
+boundary (p. 2) as
+
+    2 ch(K1 pi d) ch[K2 pi (1 - d)] + (K1^2 + K2^2)/(K1 K2) sh(K1 pi d) sh[K2 pi (1 - d)] = ±2
+
+with K1 = sqrt(q_Z/d - a_Z) on the high part of the period and K2 = sqrt(q_Z/(d - 1) - a_Z)
+on the low part (p. 1). That expression is tr(M2 M1) verbatim, with K1^2 = -(a + 2q)
+and K2^2 = -(a - 2q) on Einzel's x axis (the y axis flips both signs), and the +2 and
+-2 branches are the two kinds of periodic solution that bound a band.
+
+**Mapping.** Ding's parameters put the waveform's mean into the DC term: his U is
+the mean of the whole waveform, so
+
+    a_Z = a + 2q(2d - 1)   (Einzel's reported `MathieuA`),    |q_Z| = 4d(1 - d) q,
+
+where `a` and `q` are what `IdealQuadrupoleRf.FromMathieu(a, q, ...)` takes, `a` the
+applied DC only, and `dutyCycle` is Ding's d. The two normalisations agree only at
+d = 0.5; a q quoted at any other duty must be checked for which one it uses before
+it is compared with Einzel's. This is also why Ding finds that the duty cycle "has
+no very significant effect" on the diagram while Brabeck 2014 says it reshapes it:
+in a_Z, q_Z coordinates the mean sits in a_Z and only the scan line tilts.
+
+**Reproduced.** The fork measures tr M rather than computing it: two flights of
+exactly one period under `transport.edges: land` (rtol 1e-11), from (1 mm, 1 mm) at
+rest and from the origin at (1 km/s, 1 km/s), give the columns of M for both axes,
+and tr M = x(T)/x0 + vx(T)/vx0. At every non-zero edge of the first stability
+intervals of either axis the trace is ±2; the table gives the closed-form edge (the
+project's exact Meissner reference, mpmath 40 digits, rounded to 1e-10; Ding's
+expression agrees with those edges to 9.4e-10, the rounding) and the fork's
+||tr M| − 2| there. The residual is the rounding of the edge times the slope of tr M,
+so the integrator's own error sits below it. On both sides of each edge the sign is
+right: |tr M| < 2 on the stable side and > 2 on the other, 0.01 away.
+
+| duty | a (DC) | axis | closed-form edge q | tr M | fork \|\|tr M\| − 2\| |
+| --- | --- | --- | --- | --- | --- |
+| 0.3 | 0.0 | y | 0.5414226520 | −2 | 6.8e-11 |
+| 0.3 | 0.0 | x | 1.2870297574 | +2 | 8.1e-10 |
+| 0.3 | 0.0 | x | 1.4713925787 | −2 | 5.6e-10 |
+| 0.3 | 0.1 | y | 0.1155681312 | +2 | 2.2e-11 |
+| 0.3 | 0.1 | x | 0.1395349181 | +2 | 9.0e-11 |
+| 0.3 | 0.1 | y | 0.5950815940 | −2 | 8.9e-11 |
+| 0.3 | 0.1 | x | 1.1299405735 | +2 | 1.6e-10 |
+| 0.3 | 0.1 | x | 1.3735202561 | −2 | 1.4e-9 |
+| 0.4 | 0.0 | x | 0.5182753992 | +2 | 7.5e-11 |
+| 0.4 | 0.0 | y | 0.6002122842 | −2 | 2.2e-10 |
+| 0.5 | 0.0 | x | 0.7124936574 | −2 | 1.5e-10 |
+| 0.5 | 0.0 | y | 0.7124936574 | −2 | 1.2e-10 |
+| 0.5 | 0.1 | y | 0.3527601455 | +2 | 2.4e-10 |
+| 0.5 | 0.1 | x | 0.6460191281 | −2 | 2.0e-11 |
+| 0.5 | 0.1 | y | 0.7782280924 | −2 | 4.1e-10 |
+| 0.55 | 0.0 | y | 0.2469800827 | +2 | 9.5e-11 |
+| 0.55 | 0.0 | x | 0.6472747567 | −2 | 2.8e-10 |
+| 0.6 | 0.0 | y | 0.5182753992 | +2 | 1.3e-10 |
+| 0.6 | 0.0 | x | 0.6002122842 | −2 | 1.8e-10 |
+| 0.61 | 0.0 | y | 0.5780544405 | +2 | 2.0e-10 |
+| 0.61 | 0.0 | x | 0.5924753870 | −2 | 3.8e-10 |
+
+The d = 0.5, a = 0 edge is the square-wave cut-off, 2 cos(θ) cosh(θ) = −2 at
+θ = 1.8751040687, q_c = 2θ²/π² = 0.71249366: Ding's "0 ≤ q_Z ≤ 0.7125" (p. 2) is its
+four-figure rounding, and his SIMION trap run (p. 4) gave 0.712, 0.0005 low, the
+same direction as an aperture criterion. Two more literature claims fall out of the
+same closed form, computed in the project's reference and checked here at the
+duties the table covers:
+
+- **Hoffman 2018**: the mass window closes as the high fraction goes to 0.612099.
+  The first common band at a = 0 is (y's +2 root, x's −2 root) for d > 0.5, 0.400
+  wide at d = 0.55, 0.082 at 0.6, 0.0144 at 0.61 (both edges in the table), and the
+  closed form closes it at d* = 0.6120990, 5e-9 from Hoffman's value.
+- **Brabeck 2014**: the 40/60 and 60/40 diagrams are mirror images. Exactly:
+  x(1 − d; −a) = y(d; a), so the d = 0.4 and d = 0.6 rows above share their edge
+  values with the axes exchanged.
+
+Not reproduced: Ding's pseudo-potential secular frequency ω_s = 0.453 q_Z Ω (p. 3)
+and the SIMION trap geometry itself (a 3D trap with r0² = 2Z0², where the second
+direction has half the field strength; the linear quadrupole's two axes have equal
+strength and opposite sign).
 
 ---
 
