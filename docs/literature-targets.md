@@ -679,9 +679,10 @@ than as an argument.
 
 ### Ding 2006 as a worked target: the closed-form boundaries
 
-**Ding and Kumashiro** (2006), ion motion in the rectangular-wave quadrupole field
-and the digital ion trap, Rapid Commun. Mass Spectrom. **20** 3-8. Read here through
-the project's notes on the paper; page numbers are those notes' (p. 1-4).
+**Ding and Kumashiro**, *Ion motion in the rectangular wave quadrupole field and
+digital operation mode of a quadrupole ion trap mass spectrometer*, Rapid Commun.
+Mass Spectrom. **20** (2006) 3-8, doi 10.1002/rcm.2253. Read here through the
+project's notes on the paper; page numbers are those notes' (p. 1-4).
 
 A rectangular drive makes the equation of motion piecewise constant, so the
 one-period transfer matrix of each transverse axis is a product of two closed-form
@@ -692,8 +693,11 @@ boundary (p. 2) as
 
 with K1 = sqrt(q_Z/d - a_Z) on the high part of the period and K2 = sqrt(q_Z/(d - 1) - a_Z)
 on the low part (p. 1). That expression is tr(M2 M1) verbatim, with K1^2 = -(a + 2q)
-and K2^2 = -(a - 2q) on Einzel's x axis (the y axis flips both signs), and the +2 and
--2 branches are the two kinds of periodic solution that bound a band.
+and K2^2 = -(a - 2q) on Einzel's x axis and both signs flipped on y (which of the two
+Ding's Z direction is rests on the sign of his q_Z, not verified from the paper; a
+common sign flip of a_Z and q_Z exchanges Z and r and leaves the union of the two
+diagrams, and every edge below, unchanged), and the +2 and -2 branches are the two
+kinds of periodic solution that bound a band.
 
 **Mapping.** Ding's parameters put the waveform's mean into the DC term: his U is
 the mean of the whole waveform, so
@@ -712,9 +716,10 @@ exactly one period under `transport.edges: land` (rtol 1e-11), from (1 mm, 1 mm)
 rest and from the origin at (1 km/s, 1 km/s), give the columns of M for both axes,
 and tr M = x(T)/x0 + vx(T)/vx0. At every non-zero edge of the first stability
 intervals of either axis the trace is ±2; the table gives the closed-form edge (the
-project's exact Meissner reference, mpmath 40 digits, rounded to 1e-10; Ding's
-expression agrees with those edges to 9.4e-10, the rounding) and the fork's
-||tr M| − 2| there. The residual is the rounding of the edge times the slope of tr M,
+project's exact Meissner reference: mpmath at 40 digits for d = 0.3 and 0.5, float64
+bisection to 1e-13 for the other duties, rounded to 1e-10; Ding's expression was
+checked at the thirteen d = 0.3 and 0.5 edges and agrees to 9.4e-10, the rounding)
+and the fork's ||tr M| − 2| there. The residual is the rounding of the edge times the slope of tr M,
 so the integrator's own error sits below it. On both sides of each edge the sign is
 right: |tr M| < 2 on the stable side and > 2 on the other, 0.01 away.
 

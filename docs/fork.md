@@ -153,8 +153,8 @@ the PR number.
   by monodromy; the documented 0.71113 was an aperture criterion, not the
   boundary.** Two one-period flights under `transport.edges: land` (rtol 1e-11)
   give each axis's one-period transfer matrix, and |tr M| = 2 at all 21
-  closed-form band edges of duty 0.3, 0.4, 0.5, 0.55, 0.6 and 0.61 at a = 0 and
-  0.1 within 1.4e-9 (2.0e-11 to 1.4e-9; 1.1e-8 under `cap`), with |tr M| on the
+  closed-form band edges (duty 0.3 and 0.5 at a = 0 and 0.1; 0.4, 0.55, 0.6 and
+  0.61 at a = 0) within 1.4e-9 (2.0e-11 to 1.4e-9; 1.1e-8 under `cap`), with |tr M| on the
   right side of 2 at q ± 0.01 of every edge; the square-wave boundary is
   0.71249366 (Ding 2006's 0.7125 and Schrader 2024's 0.712 are roundings), and
   the 0.71113 of the 200-cycle aperture bisection is where a stable ion's beat

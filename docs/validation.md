@@ -26,9 +26,9 @@ cross-code tier is unavailable — see below.
 | Coaxial log potential around a rod | Second order, 1.5e-5 at h = 0.156 mm |
 | Shape derivative dV/dL against −1000x/L² | 6.5e-6 relative at a 0.11-cell step |
 | Mathieu stability boundary, sinusoidal drive | q = 0.90684 against a tabulated 0.90804 |
-| Meissner boundary, square-wave drive, by one-period monodromy | q = 0.71249 against the closed form 0.71249366 (Ding 2006: 0.7125); tr M = −2 there to 1.5e-10 |
+| Meissner boundary, square-wave drive, by one-period monodromy | tr M = −2 at the closed-form q = 0.71249366 to 1.5e-10 (an implied boundary shift below 1e-10; Ding 2006: 0.7125) |
 | The same by the 4 mm aperture criterion, 200 cycles from 0.1 mm | q = 0.71113 against the exact motion's 0.71113 (the published 0.712 is the boundary rounded) |
-| Rectangular-drive band edges, duty 0.3 (a = 0.1), 0.4, 0.55, 0.6, 0.61 (a = 0), 0.5 (a = 0.1) | tr M = ±2 at all 21 closed-form edges within 1.4e-9, stable side correct on both sides of each |
+| Rectangular-drive band edges, duty 0.3 and 0.5 at a = 0 and 0.1; 0.4, 0.55, 0.6, 0.61 at a = 0 | tr M = ±2 at all 21 closed-form edges within 1.4e-9, stable side correct on both sides of each |
 | Digital working point from duty cycle | a = 0.2630 against a published 0.2640 |
 | Thermal packet emittance, sigma_x sqrt(kT/m) / v | 0.77% at 6,000 ions |
 | Turn-around through a solved trap, against the closed form at the solved field | 0.7% |

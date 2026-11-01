@@ -388,7 +388,11 @@ public sealed class RectangularWaveformTests(ITestOutputHelper output)
         // and look fine.
         const double Low = 0.4;
         const double High = 1.0;
-        var tolerance = (High - Low) / 500.0;
+
+        // 0.6 / 2000 = 0.0003: two halvings finer than ACC-6 asks, so that the
+        // second assertion below can tell the aperture criterion's 0.71113 from
+        // the boundary 0.71249 (0.00136 apart).
+        var tolerance = (High - Low) / 2000.0;
 
         var waveform = new RfWaveform.Rectangular(0.5);
         var low = Low;
@@ -431,10 +435,12 @@ public sealed class RectangularWaveformTests(ITestOutputHelper output)
         // 40x aperture-to-start ratio fails stable ions above q = 0.7109, and the
         // same bisection on the exact motion returns 0.71113. The boundary proper,
         // |tr M| = 2, is q = 0.71249366 and is measured by RectangularBoundaryTests;
-        // the published 0.712 is its three-figure rounding. The 0.0012 tolerance
-        // is the bisection grid (0.6 / 500).
+        // the published 0.712 is its three-figure rounding. The 0.001 below is three
+        // bisection cells (0.0003 each) and excludes the boundary, 0.00136 away: a
+        // 400 mm aperture, or a 1 um start, moves this cut-off toward 0.7125 and
+        // fails it.
         Assert.True(
-            Math.Abs(boundary - ApertureCutOff) < 0.0025,
+            Math.Abs(boundary - ApertureCutOff) < 0.001,
             $"aperture-criterion cut-off came out at {boundary:F5} against the exact-motion value {ApertureCutOff}");
     }
 
@@ -514,9 +520,10 @@ public sealed class RectangularWaveformTests(ITestOutputHelper output)
 /// <para>
 /// Conventions: <c>a</c> is the DC part (what <c>FromMathieu</c> takes); the
 /// waveform mean 2d - 1 sits inside the drive, so the reported <c>MathieuA</c>
-/// is a + 2q(2d - 1). Ding, Sudakov and Kumashiro (2006) write the same boundary
-/// with a_Z = a + 2q(2d - 1) and |q_Z| = 4d(1 - d) q, and quote 0.7125 for the
-/// square wave, the four-figure rounding of 0.71249366.
+/// is a + 2q(2d - 1). Ding and Kumashiro (Rapid Commun. Mass Spectrom. 20 (2006)
+/// 3-8, doi 10.1002/rcm.2253) write the same boundary with a_Z = a + 2q(2d - 1) and
+/// |q_Z| = 4d(1 - d) q, and quote 0.7125 for the square wave, the four-figure
+/// rounding of 0.71249366.
 /// </para>
 /// </remarks>
 public sealed class RectangularBoundaryTests(ITestOutputHelper output)
@@ -532,7 +539,11 @@ public sealed class RectangularBoundaryTests(ITestOutputHelper output)
     /// </summary>
     private const double Probe = 0.01;
 
-    /// <summary>The integrator's accuracy on tr M over one period at rtol 1e-11.</summary>
+    /// <summary>
+    /// The bound every edge row must meet. The measured residual under land at
+    /// rtol 1e-11 is 2e-11 to 1.4e-9 (1e-8 under cap), most of it the 1e-10
+    /// rounding of the reference edges times the slope of tr M.
+    /// </summary>
     private const double TraceTolerance = 1e-6;
 
     private static Quantity Mass => Quantity.From(100.0, "u");
@@ -545,7 +556,7 @@ public sealed class RectangularBoundaryTests(ITestOutputHelper output)
     /// flights are checked to have ended at the period.
     /// </summary>
     private static (double TraceX, double TraceY, double EndTime, double Period) Monodromy(
-        double a, double q, double duty, bool land = true)
+        double a, double q, double duty)
     {
         var species = IonSpecies.Create(Mass, Charge);
         var field = IdealQuadrupoleRf.FromMathieu(
@@ -557,7 +568,7 @@ public sealed class RectangularBoundaryTests(ITestOutputHelper output)
         {
             RelativeTolerance = 1e-11,
             MaximumFlightTime = period,
-            LandOnEdges = land,
+            LandOnEdges = true,
         };
 
         const double X0 = 1.0e-3;
@@ -609,9 +620,11 @@ public sealed class RectangularBoundaryTests(ITestOutputHelper output)
 
     /// <summary>
     /// Every non-zero edge of the first stability intervals of either axis, from the
-    /// project's exact Meissner reference (mpmath, 40 digits, bisection on |tr M| = 2,
-    /// values rounded to 1e-10). Ding 2006's closed-form boundary expression agrees
-    /// with these edges to 9.4e-10, the rounding. An edge belongs to one axis; the
+    /// project's exact Meissner reference: bisection on |tr M| = 2 of the closed-form
+    /// transfer matrices, mpmath at 40 digits for d = 0.3 and 0.5 and float64 to 1e-13
+    /// for the other duties, all rounded to 1e-10. Ding 2006's boundary expression was
+    /// checked at the thirteen d = 0.3 and 0.5 edges and agrees to 9.4e-10, the
+    /// rounding. An edge belongs to one axis; the
     /// last column says whether that axis is stable below the edge (its interval
     /// ends there) or above it (its interval begins there).
     /// </summary>
