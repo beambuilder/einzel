@@ -420,6 +420,60 @@ public sealed class WaveformImportCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A clean sinusoid at 1 GS/s on the exact period: a bin's samples are not symmetric about
+    /// its centre (their phases drift 0.09 sample per period across the fold), so a bin mean is
+    /// off the shape by its slope times their mean offset, 1.3e-4 of the amplitude here; the bin's
+    /// line in phase at its centre is 5e-7 off. The residual is about the table's own
+    /// least-squares sine. Not refined, so the period found (1e-6 off) does not enter.
+    /// </summary>
+    [Fact]
+    public void AClean256PointSinusoidTableIsItsSineToTwoPartsPerMillion()
+    {
+        var outcome = Import(Write(Sinusoid, 0.0, 38).Path, o => o with { Refine = false });
+
+        Assert.InRange(SineResidual(WaveformTable.Parse(File.ReadAllText(outcome.Table), "table")), 0.0, 2e-6);
+    }
+
+    /// <summary>The rms of a table about its least-squares sine <c>a sin + b cos + c</c>, relative to the sine's amplitude.</summary>
+    private static double SineResidual(WaveformTable table)
+    {
+        var rows = table.Phases.Select(p => new[] { Math.Sin(2.0 * Math.PI * p), Math.Cos(2.0 * Math.PI * p), 1.0 }).ToArray();
+        var m = new double[3, 4];
+
+        for (var k = 0; k < rows.Length; k++)
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                for (var j = 0; j < 3; j++)
+                {
+                    m[i, j] += rows[k][i] * rows[k][j];
+                }
+
+                m[i, 3] += rows[k][i] * table.Values[k];
+            }
+        }
+
+        // Gauss-Jordan on the 3 x 3 normal equations (diagonally dominant on a uniform grid).
+        for (var i = 0; i < 3; i++)
+        {
+            for (var r = 0; r < 3; r++)
+            {
+                var f = r == i ? 0.0 : m[r, i] / m[i, i];
+
+                for (var c = 0; c < 4; c++)
+                {
+                    m[r, c] -= f * m[i, c];
+                }
+            }
+        }
+
+        var (a, b, d) = (m[0, 3] / m[0, 0], m[1, 3] / m[1, 1], m[2, 3] / m[2, 2]);
+        var rms = Math.Sqrt(Enumerable.Range(0, rows.Length)
+            .Average(k => Math.Pow(table.Values[k] - (a * rows[k][0]) - (b * rows[k][1]) - d, 2.0)));
+        return rms / Math.Sqrt((a * a) + (b * b));
+    }
+
+    /// <summary>
     /// A trace of the second harmonic only, at the nominal fundamental: the fundamental is
     /// zero, so the distortion is null and the amplitudes stay absolute, with no NaN.
     /// </summary>

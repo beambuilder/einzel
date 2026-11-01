@@ -282,10 +282,14 @@ internal static class WaveformImportAnalysis
     }
 
     /// <summary>
-    /// The median over the output bins of the rms deviation of a bin's samples about their
-    /// own straight line in phase, so a slope across the bin is not counted as noise.
+    /// Each output bin's least-squares line in phase through its samples (about the bin
+    /// <paramref name="mean"/>): the line's value at the bin centre, the mean itself where the
+    /// bin holds fewer than three samples; and the noise, the median over the bins of the rms
+    /// deviation of a bin's samples about their line, so a slope across the bin is not counted
+    /// as noise. A bin's samples are not symmetric about its centre (their phases drift across
+    /// the fold), so its mean carries a sample-lattice jitter that the line at the centre does not.
     /// </summary>
-    public static double Noise(
+    public static (double[] Centre, double Noise) Lines(
         IReadOnlyList<double> t, IReadOnlyList<double> y, int from, int to, double origin, double period, double[] mean)
     {
         var n = mean.Length;
@@ -300,15 +304,22 @@ internal static class WaveformImportAnalysis
             (s[k, 0], s[k, 1], s[k, 2], s[k, 3], s[k, 4]) = (s[k, 0] + 1, s[k, 1] + x, s[k, 2] + (x * x), s[k, 3] + (x * dy), s[k, 4] + (dy * dy));
         }
 
-        var rms = Enumerable.Range(0, n).Where(k => s[k, 0] > 2).Select(k =>
+        var centre = (double[])mean.Clone();
+        var rms = new List<double>();
+
+        foreach (var k in Enumerable.Range(0, n).Where(k => s[k, 0] > 2))
         {
+            // The deviations about the mean sum to zero, so the slope is s3 / xx and the line at
+            // the centre (x = 0) is the mean less the slope times the samples' mean phase offset.
             var c = s[k, 0];
             var xx = s[k, 2] - (s[k, 1] * s[k, 1] / c);
-            var fit = xx > 0.0 ? s[k, 3] * s[k, 3] / xx : 0.0;
-            return Math.Sqrt(Math.Max(s[k, 4] - fit, 0.0) / (c - 2.0));
-        }).Order().ToArray();
+            var slope = xx > 0.0 ? s[k, 3] / xx : 0.0;
+            centre[k] = mean[k] - (slope * s[k, 1] / c);
+            rms.Add(Math.Sqrt(Math.Max(s[k, 4] - (slope * s[k, 3]), 0.0) / (c - 2.0)));
+        }
 
-        return rms.Length == 0 ? 0.0 : rms[rms.Length / 2];
+        rms.Sort();
+        return (centre, rms.Count == 0 ? 0.0 : rms[rms.Count / 2]);
     }
 
     private static double At(double[] fold, int u) => fold[((u % fold.Length) + fold.Length) % fold.Length];

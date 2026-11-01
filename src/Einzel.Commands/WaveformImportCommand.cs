@@ -251,8 +251,10 @@ public static class WaveformImportCommand
         Require(path, count.All(c => c > 0),
             string.Create(invariant,$"--samples {n} is finer than the trace resolves: {perPeriod:F1} samples per period"),
             "pass --samples between 3 and the samples per period");
-        var mean = Enumerable.Range(0, n).Select(k => sum[k] / count[k]).ToArray();
-        var noise = WaveformImportAnalysis.Noise(t, y, from, to, origin, period, mean);
+        // A bin's value is its line in phase at the bin centre, free of the mean's sample-lattice
+        // jitter. The fine fold below keeps its means: it only places the trigger and the edges.
+        var (mean, noise) = WaveformImportAnalysis.Lines(
+            t, y, from, to, origin, period, Enumerable.Range(0, n).Select(k => sum[k] / count[k]).ToArray());
 
         var offset = (mean.Max() + mean.Min()) / 2.0;
         var amplitude = (mean.Max() - mean.Min()) / 2.0;
