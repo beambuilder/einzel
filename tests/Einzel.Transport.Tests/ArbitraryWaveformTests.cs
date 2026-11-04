@@ -191,9 +191,10 @@ public sealed class ArbitraryWaveformTests(ITestOutputHelper output)
         // The literature-grade check, and the one that says the arbitrary-waveform
         // path drives an ion rather than merely evaluating to the right numbers.
         // Schrader, Anderson and Russell (JASMS 2024) put the square-wave low-mass
-        // cut-off at q = 0.712; this engine reproduces 0.71113 by the direct
-        // rectangular route. Driving the same geometry with the Fourier series of
-        // that square wave has to land in the same place.
+        // cut-off at q = 0.712; the direct rectangular route's 4 mm-aperture
+        // bisection gives 0.71113, and the boundary itself is 0.71249366
+        // (RectangularBoundaryTests). Driving the same geometry with the Fourier
+        // series of that square wave has to land in the same place.
         //
         // Eighty terms rather than five: what matters is not the waveform's
         // appearance but the sharpness of the boundary it produces, and a truncated

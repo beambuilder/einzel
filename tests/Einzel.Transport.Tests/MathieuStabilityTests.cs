@@ -341,6 +341,14 @@ public sealed class RectangularWaveformTests(ITestOutputHelper output)
     /// <summary>The square-wave low-mass cut-off the paper quotes.</summary>
     private const double SquareBoundary = 0.712;
 
+    /// <summary>
+    /// Where the 4 mm aperture criterion of <see cref="IsStable"/> cuts off from a
+    /// 0.1 mm start over 200 cycles, run on the exact piecewise motion (the
+    /// project's exact Meissner reference). Not the stability boundary, which is
+    /// 0.71249366.
+    /// </summary>
+    private const double ApertureCutOff = 0.71113;
+
     private static IonSpecies Peptide => IonSpecies.FromMassToCharge(500.0, 1);
 
     private static bool IsStable(double a, double q, RfWaveform waveform, int cycles)
@@ -380,7 +388,11 @@ public sealed class RectangularWaveformTests(ITestOutputHelper output)
         // and look fine.
         const double Low = 0.4;
         const double High = 1.0;
-        var tolerance = (High - Low) / 500.0;
+
+        // 0.6 / 2000 = 0.0003: two halvings finer than ACC-6 asks, so that the
+        // second assertion below can tell the aperture criterion's 0.71113 from
+        // the boundary 0.71249 (0.00136 apart).
+        var tolerance = (High - Low) / 2000.0;
 
         var waveform = new RfWaveform.Rectangular(0.5);
         var low = Low;
@@ -414,6 +426,22 @@ public sealed class RectangularWaveformTests(ITestOutputHelper output)
         Assert.True(
             Math.Abs(boundary - SquareBoundary) < 0.005,
             $"square-wave cut-off came out at {boundary:F5} against a published {SquareBoundary}");
+
+        // What this bisection measures, stated so the number is not mistaken for
+        // the Meissner boundary. IsStable calls an ion lost when its excursion
+        // exceeds the 4 mm aperture from a 0.1 mm start within 200 cycles. Close to
+        // the boundary a *stable* ion's beat envelope grows without limit (the
+        // exact motion reaches 4.03 mm at q = 0.711 and 7.0 mm at 0.712), so the
+        // 40x aperture-to-start ratio fails stable ions above q = 0.7109, and the
+        // same bisection on the exact motion returns 0.71113. The boundary proper,
+        // |tr M| = 2, is q = 0.71249366 and is measured by RectangularBoundaryTests;
+        // the published 0.712 is its three-figure rounding. The 0.001 below is three
+        // bisection cells (0.0003 each) and excludes the boundary, 0.00136 away: a
+        // 400 mm aperture, or a 1 um start, moves this cut-off toward 0.7125 and
+        // fails it.
+        Assert.True(
+            Math.Abs(boundary - ApertureCutOff) < 0.001,
+            $"aperture-criterion cut-off came out at {boundary:F5} against the exact-motion value {ApertureCutOff}");
     }
 
     [Fact]
@@ -465,5 +493,220 @@ public sealed class RectangularWaveformTests(ITestOutputHelper output)
 
         // Phase arrives from an accumulated flight time and will not be tidy.
         Assert.Equal(wave.At(0.3), wave.At(7.3), 1e-15);
+    }
+}
+
+/// <summary>
+/// The rectangular drive's exact stability boundaries, by numerical monodromy.
+/// </summary>
+/// <remarks>
+/// <para>
+/// With a rectangular drive the equation of motion is Meissner's: on each part of
+/// the period the field is constant, so the one-period transfer matrix M of each
+/// transverse axis is a product of two closed-form 2x2 matrices and the motion is
+/// bounded iff |tr M| &lt; 2. The boundaries are therefore known to any precision,
+/// unlike an aperture test, which measures where a beat envelope exceeds a
+/// chosen radius (see <see cref="RectangularWaveformTests"/>).
+/// </para>
+/// <para>
+/// Here M is measured rather than computed: two flights of exactly one period,
+/// from (x, y) = (1 mm, 1 mm) at rest and from the origin at (1 km/s, 1 km/s),
+/// give the two columns of M for both axes at once (the axes are decoupled), and
+/// tr M = x(T)/x0 + vx(T)/vx0. The integrator lands on both edges of the period
+/// (<c>LandOnEdges</c>), so what is tested is the field, the a-q mapping, the duty
+/// cycle's edge instants and the integrator together, at the 1e-6 level, against
+/// numbers that come from nowhere in this code.
+/// </para>
+/// <para>
+/// Conventions: <c>a</c> is the DC part (what <c>FromMathieu</c> takes); the
+/// waveform mean 2d - 1 sits inside the drive, so the reported <c>MathieuA</c>
+/// is a + 2q(2d - 1). Ding and Kumashiro (Rapid Commun. Mass Spectrom. 20 (2006)
+/// 3-8, doi 10.1002/rcm.2253) write the same boundary with a_Z = a + 2q(2d - 1) and
+/// |q_Z| = 4d(1 - d) q, and quote 0.7125 for the square wave, the four-figure
+/// rounding of 0.71249366.
+/// </para>
+/// </remarks>
+public sealed class RectangularBoundaryTests(ITestOutputHelper output)
+{
+    /// <summary>
+    /// How far on each side of an edge the sign test probes. Each row names the
+    /// axis whose stable interval ends at the edge, and every such per-axis
+    /// interval in the rows is at least 0.14 wide (the narrowest is the x interval
+    /// (0, 0.1395) at d = 0.3, a = 0.1), so a probe 0.01 inside stays inside that
+    /// axis's own interval even where the common band of both axes is narrower
+    /// (0.0144 at d = 0.61). The probe outside lands in the neighbouring unstable
+    /// interval, which is at least 0.1 wide in every row.
+    /// </summary>
+    private const double Probe = 0.01;
+
+    /// <summary>
+    /// The bound every edge row must meet. The measured residual under land at
+    /// rtol 1e-11 is 2e-11 to 1.4e-9 (1e-8 under cap), most of it the 1e-10
+    /// rounding of the reference edges times the slope of tr M.
+    /// </summary>
+    private const double TraceTolerance = 1e-6;
+
+    private static Quantity Mass => Quantity.From(100.0, "u");
+
+    private static Quantity Charge => Quantity.From(1.0, "e");
+
+    /// <summary>
+    /// The traces of the one-period transfer matrices of the x and y axes, with the
+    /// flight time the integrator reports beside the period it was asked for. Both
+    /// flights are checked to have ended at the period.
+    /// </summary>
+    private static (double TraceX, double TraceY, double EndTime, double Period) Monodromy(
+        double a, double q, double duty)
+    {
+        var species = IonSpecies.Create(Mass, Charge);
+        var field = IdealQuadrupoleRf.FromMathieu(
+            a, q, Mass, Charge, Quantity.From(1.0, "MHz"), Quantity.From(4.0, "mm"),
+            new RfWaveform.Rectangular(duty));
+
+        var period = field.ShortestPeriodSeconds;
+        var settings = new IntegrationSettings
+        {
+            RelativeTolerance = 1e-11,
+            MaximumFlightTime = period,
+            LandOnEdges = true,
+        };
+
+        const double X0 = 1.0e-3;
+        const double V0 = 1.0e3;
+
+        // Column one: unit displacement at rest. Column two: at the origin with
+        // unit velocity. x and y are launched together because they do not couple.
+        var fromRest = TrajectoryIntegrator.Integrate(
+            new PhaseState(new Vec3(X0, X0, 0.0), Vec3.Zero), species, field, settings);
+        var fromMotion = TrajectoryIntegrator.Integrate(
+            new PhaseState(Vec3.Zero, new Vec3(V0, V0, 0.0)), species, field, settings);
+
+        AssertEndedAtThePeriod(fromRest, period);
+        AssertEndedAtThePeriod(fromMotion, period);
+
+        var traceX = (fromRest.FinalState.Position.X / X0) + (fromMotion.FinalState.Velocity.X / V0);
+        var traceY = (fromRest.FinalState.Position.Y / X0) + (fromMotion.FinalState.Velocity.Y / V0);
+
+        return (traceX, traceY, fromRest.FlightTimeSeconds, period);
+    }
+
+    /// <summary>
+    /// The flight ended at one period, to the ulp. A trace taken anywhere else
+    /// would not be tr M.
+    /// </summary>
+    /// <remarks>
+    /// The last step is cut to the time remaining, so the flight normally ends at
+    /// T exactly and reports <c>MaximumFlightTimeReached</c>. The cut is added on a
+    /// compensated sum that can land one ulp (2e-22 s) short of T; the remainder is
+    /// then below <c>MinimumStep</c> and the integrator reports <c>StepSizeUnderflow</c>
+    /// there instead. Landing does not catch this because the phase arithmetic
+    /// places the rising edge one double above T, outside the flight. Seen on one of
+    /// the sixty-three one-period flights of this class (d = 0.3, a = 0.1,
+    /// q = 0.1056, from rest); the state there is at T to 2e-22 s, which moves the
+    /// trace by nothing at the 1e-6 level, so that ending is accepted when, and only
+    /// when, it is one ulp short.
+    /// </remarks>
+    private static void AssertEndedAtThePeriod(TrajectoryResult result, double period)
+    {
+        var offBy = Math.Abs(result.FlightTimeSeconds - period);
+        var ulp = Math.BitIncrement(period) - period;
+
+        Assert.True(offBy <= ulp, $"the flight ended at {result.FlightTimeSeconds:R} s, not at the period {period:R} s");
+        Assert.True(
+            result.Outcome == TrajectoryOutcome.MaximumFlightTimeReached
+            || (result.Outcome == TrajectoryOutcome.StepSizeUnderflow && offBy > 0.0),
+            $"the flight ended {result.Outcome} at {result.FlightTimeSeconds:R} s");
+    }
+
+    /// <summary>
+    /// Every non-zero edge of the first stability intervals of either axis, from the
+    /// project's exact Meissner reference: bisection on |tr M| = 2 of the closed-form
+    /// transfer matrices, mpmath at 40 digits for d = 0.3 and 0.5 and float64 to 1e-13
+    /// for the other duties, all rounded to 1e-10. Ding 2006's boundary expression was
+    /// checked at the thirteen d = 0.3 and 0.5 edges and agrees to 9.4e-10, the
+    /// rounding. An edge belongs to one axis; the
+    /// last column says whether that axis is stable below the edge (its interval
+    /// ends there) or above it (its interval begins there).
+    /// </summary>
+    public static TheoryData<double, double, double, char, bool> Edges => new()
+    {
+        // duty, a (DC), edge q, axis, stable below the edge
+        // d = 0.5, a = 0: both axes (0, 0.71249366); 2 cos(th) cosh(th) = -2 at th = 1.8751040687.
+        { 0.5, 0.0, 0.7124936574, 'x', true },
+        { 0.5, 0.0, 0.7124936574, 'y', true },
+        // d = 0.5, a = 0.1: x (0, 0.64601913), y (0.35276015, 0.77822809).
+        { 0.5, 0.1, 0.6460191281, 'x', true },
+        { 0.5, 0.1, 0.3527601455, 'y', false },
+        { 0.5, 0.1, 0.7782280924, 'y', true },
+        // d = 0.3, a = 0: x (1.28702976, 1.47139258), y (0, 0.54142265); no common band.
+        { 0.3, 0.0, 1.2870297574, 'x', false },
+        { 0.3, 0.0, 1.4713925787, 'x', true },
+        { 0.3, 0.0, 0.5414226520, 'y', true },
+        // d = 0.3, a = 0.1: x (0, 0.13953492) and (1.12994057, 1.37352026), y (0.11556813, 0.59508159).
+        { 0.3, 0.1, 0.1395349181, 'x', true },
+        { 0.3, 0.1, 1.1299405735, 'x', false },
+        { 0.3, 0.1, 1.3735202561, 'x', true },
+        { 0.3, 0.1, 0.1155681312, 'y', false },
+        { 0.3, 0.1, 0.5950815940, 'y', true },
+        // a = 0 at other duties: the first common band is (y's +2 root, x's -2 root)
+        // for d > 0.5 and its mirror for d < 0.5. d = 0.4 (0.51827540, 0.60021228),
+        // d = 0.55 (0.24698008, 0.64727476), d = 0.6 (0.51827540, 0.60021228),
+        // d = 0.61 (0.57805444, 0.59247539); the band closes at d = 0.6120990.
+        { 0.4, 0.0, 0.5182753992, 'x', false },
+        { 0.4, 0.0, 0.6002122842, 'y', true },
+        { 0.55, 0.0, 0.2469800827, 'y', false },
+        { 0.55, 0.0, 0.6472747567, 'x', true },
+        { 0.6, 0.0, 0.5182753992, 'y', false },
+        { 0.6, 0.0, 0.6002122842, 'x', true },
+        { 0.61, 0.0, 0.5780544405, 'y', false },
+        { 0.61, 0.0, 0.5924753870, 'x', true },
+    };
+
+    [Theory]
+    [MemberData(nameof(Edges))]
+    public void TheMonodromyTraceIsTwoAtEveryClosedFormEdge(
+        double duty, double a, double edge, char axis, bool stableBelow)
+    {
+        static double Pick(char axis, (double TraceX, double TraceY, double EndTime, double Period) m)
+            => axis == 'x' ? m.TraceX : m.TraceY;
+
+        var at = Monodromy(a, edge, duty);
+        var below = Monodromy(a, edge - Probe, duty);
+        var above = Monodromy(a, edge + Probe, duty);
+
+        var trace = Pick(axis, at);
+        var traceBelow = Pick(axis, below);
+        var traceAbove = Pick(axis, above);
+        var residual = Math.Abs(Math.Abs(trace) - 2.0);
+
+        output.WriteLine($"d = {duty}, a = {a}, {axis} edge q = {edge:F10}");
+        output.WriteLine($"tr M({axis}) = {trace:F10} at the edge, ||tr| - 2| = {residual:E2}");
+        output.WriteLine($"tr M({axis}) = {traceBelow:F6} at q - {Probe}, {traceAbove:F6} at q + {Probe}");
+        output.WriteLine($"flight ended at {at.EndTime:R} s against the period {at.Period:R} s");
+
+        Assert.True(residual < TraceTolerance, $"||tr M| - 2| = {residual:E3} at the closed-form edge q = {edge}");
+
+        var (stable, unstable) = stableBelow ? (traceBelow, traceAbove) : (traceAbove, traceBelow);
+
+        Assert.True(Math.Abs(stable) < 2.0, $"|tr M| = {Math.Abs(stable):F6} on the stable side of q = {edge}");
+        Assert.True(Math.Abs(unstable) > 2.0, $"|tr M| = {Math.Abs(unstable):F6} on the unstable side of q = {edge}");
+    }
+
+    [Fact]
+    public void TheReportedAIncludesTheWaveformMean()
+    {
+        // The convention the duty-cycle rows rest on, stated at the corpus case's
+        // duty: FromMathieu takes the DC a, the waveform mean 2d - 1 enters the
+        // drive, and MathieuA reports both together, a + 2q(2d - 1).
+        const double Q = 0.5;
+        const double Duty = 0.55;
+
+        var field = IdealQuadrupoleRf.FromMathieu(
+            0.0, Q, Mass, Charge, Quantity.From(1.0, "MHz"), Quantity.From(4.0, "mm"),
+            new RfWaveform.Rectangular(Duty));
+
+        Assert.Equal(Q, field.MathieuQ(Mass, Charge), 1e-12);
+        Assert.Equal(2.0 * Q * ((2.0 * Duty) - 1.0), field.MathieuA(Mass, Charge), 1e-12);
+        Assert.Equal(0.1, field.MathieuA(Mass, Charge), 1e-12);
     }
 }
