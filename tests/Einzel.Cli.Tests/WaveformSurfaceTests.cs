@@ -132,8 +132,8 @@ public sealed class WaveformSurfaceTests : IDisposable
     /// version is moved to 0.15 or 0.16 and each short-form waveform is rewritten as the
     /// object form (a rectangular wave's duty cycle moved inside). What may differ is exactly
     /// that: the <c>schemaVersion</c> string and the spelling of the waveform; the validity,
-    /// the error list, every compiled drive and the edge rule (<c>cap</c>, since no shipped
-    /// document names one) may not.
+    /// the error list, every compiled drive and the edge rule (<c>land</c>, the default, since
+    /// no shipped document names one) may not.
     /// </summary>
     /// <param name="version">The version the document is moved to.</param>
     [Theory]
@@ -170,7 +170,7 @@ public sealed class WaveformSurfaceTests : IDisposable
             if (before.IsValid)
             {
                 Assert.Equal(Drives(before.Model!), Drives(after.Model!));
-                Assert.False(after.Model!.LandOnEdges, name);
+                Assert.True(after.Model!.LandOnEdges, name);
             }
         }
 

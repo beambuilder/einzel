@@ -92,7 +92,7 @@ followed.
 | **1** · Spine, project, CLI | Model, units, symmetry, DC solver, superposition, tricubic, integrator, schema, errors, result objects, manifests, CLI, VTU | **Complete**, and its acceptance is met: ACC-1 on a reflectron, the memo's mirror pair tracked end to end, GRD-1 enforced with no bypass, an agent building a DC model from prose |
 | **2** · Extensions, sweeps, shell, figures | Both extension runners, examples corpus v1, sensitivity fields, tolerance MC, optimisation, ILGPU, WPF shell, `Einzel.Render`, installer, update mechanism | **Split.** Sweeps, sensitivity fields, both optimisers, the sandboxed extension runner and `Einzel.Render` are done. The in-process runner, ILGPU, the shell, the installer, the update mechanism and **the examples corpus** are not |
 | **3** · RF and pressure | Time-domain RF, statistical diffusion, collision models, gas velocity import, sequencer, space charge, Class B analysis, density export | **Scope complete.** Every named deliverable is built, gas velocity import included. What is left is on the acceptance side: the funnel benchmark needs a §23 decision and an affordable driven diffusive step. **Class B is complete** - the secular spectrum against the Mathieu characteristic exponent, and isolation efficiency against notch width on an arbitrary waveform that recovers the published digital cut-off |
-| **4** · Traps, animation, MCP | Waveform excitation, multi-notch isolation, trap sequences, device library, animation, MCP | Trap sequences and the device library are largely done ahead of schedule. Waveforms are begun: a drive's cycle may be an expression of the phase, a sampled period or a harmonic series (Amendment 65); `einzel waveform fit` turns a sampled period into the series (Amendment 66), and `einzel waveform import` turns a measured trace into a sampled period with its edges declared (Amendment 68). Animation and MCP are not started |
+| **4** · Traps, animation, MCP | Waveform excitation, multi-notch isolation, trap sequences, device library, animation, MCP | Trap sequences and the device library are largely done ahead of schedule. Waveforms are begun: a drive's cycle may be an expression of the phase, a sampled period or a harmonic series (Amendment 65); `einzel waveform fit` turns a sampled period into the series (Amendment 66), and `einzel waveform import` turns a measured trace into a sampled period with its edges declared (Amendment 68); a document lands on its waveform edges by default (Amendment 69). Animation and MCP are not started |
 | **5** · Generalise and release | BEM, MSH interchange, CAD import, public repository | Not started |
 
 **Why it went this way, and whether that was right.** The order has been driven by
@@ -154,6 +154,49 @@ Einzel. **That, rather than a date, is the trigger.**
 ---
 
 ## Amendments to the specification
+
+### 69 - A document lands on its waveform edges unless it says `edges: cap`
+
+**ACC-4, schema.** Amendment 67 added `transport.edges: land` and kept `cap` as the default
+until the landing integrator had been validated against something it was not built from. It
+has been: the band edges of the rectangular drive on the ideal quadrupole match the Meissner
+closed form by one-period monodromy at 21 edges, and the 3D segmented quadrupole's cut-offs
+match SIMION 8.0.4 at two duty cycles and six rise times (`docs/validation.md`). The default
+of the one document key moves: `transport.edges` absent now means `land`, in both layers that
+hold it (`ModelValidator` compiles an absent key to `LandOnEdges = true`, and
+`IntegrationSettings.LandOnEdges` defaults to true, so a library caller gets the same
+integrator a document does); `"cap"` is the opt-in for the integrator of every version before
+the key existed; `"land"` written explicitly means what it meant. The validator's
+suggestion names `land` as the default and `cap` as the opt-in, and `einzel waveform import`
+no longer advises adding the key. The flight end is met by the same
+in-place rule a landing uses: a remainder to `maximumFlightTime` below the minimum step, or
+an end one double ahead, sets the time to the end and reports `MaximumFlightTimeReached`
+with the state as it is, where before the flight ended `StepSizeUnderflow` an ulp short.
+
+Measured on this machine, on the ideal quadrupole with a rectangular drive (100 u, 1 MHz,
+r0 = 4 mm, rtol 1e-11): ||tr M| - 2| at the 21 closed-form band edges 2.0e-11 to 1.35e-9
+under `land` against 4.0e-10 to 1.07e-8 under `cap`, both inside the test's 1e-6; the
+Meissner 100-period row 9.2e-11 under `land` against 1.8e-7 under `cap` (Amendment 67,
+unchanged). On the 3D quadrupole against SIMION (q line, 101 points, 48 ions each): duty
+0.60 band 0.50 / 0.5977 against SIMION's 0.5000 / 0.5963 (closed form 0.51828 / 0.60021),
+101 of 101 points with the same verdict; duty 0.55 high edge 0.6451 in both codes and no low
+edge in either under the 24-of-48 rule; trapezoid cut-offs 0.705 / 0.705 / 0.705 / 0.714 /
+0.725 / 0.785 against SIMION's 0.705 / 0.705 / 0.7052 / 0.7092 / 0.7248 / 0.7848 at r = 0,
+0.01, 0.02, 0.05, 0.10, 0.20 of the period, within 0.005 everywhere and both following
+0.705 / sinc(pi r / 0.8). On the square-wave corpus case (three lines, 325 points, 48 ions
+each) the B.2 record measured 2027 accepted steps per ion under `land` against 2737 under
+`cap` (0.74x) with the same 0.705 cut-off; the series run's q line under the default takes
+2273 steps per ion, equal to the B.2 q-line figure under `land`. Of 63
+one-period flights in the band-edge test, one (duty 0.3, a = 0.1, q = 0.1056, from rest)
+ended `StepSizeUnderflow` 2.1e-22 s short of its period; it now ends at the period, and
+every flight that did not underflow is bit-identical. No schema change (`schemaVersion`
+stays 0.16: the key, its values and their meanings are the same). `SolverBehaviourVersion`
+unchanged: it keys field solves, which do not change; a document's trajectory answer is
+keyed by the `einzel` version in its manifest and by `ModelHash`. The default of one
+document key changed. No shipped example or template has a rectangular drive or
+breakpoints; the two sequenced examples and two sequenced templates now meet their stage
+switches by the landing rules (the stitched-run gap of Amendment 67, parts per billion),
+and every other shipped document flies bit-identically.
 
 ### 68 - A measured scope trace becomes a model's sampled period, its edges declared as breakpoints
 
@@ -222,8 +265,9 @@ are taken in place at the cost of one field evaluation each. The stitched sequen
 1.0e-8, 4.6e-8, 1.3e-9 under `cap` and 2.3e-7, 2.0e-8, 1.0e-9 under `land` at 1e-8, 1e-10,
 1e-12; the 1e-8 row measures the step sequence, not the switch (`docs/numerics.md`). Under
 `cap` the Meissner flights are bit-identical to the 17352b1 record. The default stays `cap`
-until B.4. `schemaVersion` 0.16. `SolverBehaviourVersion` unchanged: the default path is
-the 0.15 integrator to the bit, and `land` changes the model hash.
+until B.4 (changed by Amendment 69). `schemaVersion` 0.16. `SolverBehaviourVersion`
+unchanged: the default path is the 0.15 integrator to the bit, and `land` changes the model
+hash.
 
 ### 66 - A sampled period can be fitted to the harmonic series a model takes
 
@@ -2781,7 +2825,7 @@ in a table.
 | `ACC-1` | Numerical flight-time error, full analyzer ≤ 1 ppm 1/25 of the R = 20k peak-width budget | **Met** | 1e-10 relative on the analytic reflectron; 1.3e-13 between the analytic and solved paths. |
 | `ACC-2` | Same, high-resolution validation mode ≤ 0.25 ppm To reproduce published R = 80k results | Not built | No separate high-resolution validation mode exists. Analytic cases already clear 0.25 ppm; nothing selects a tighter tier. |
 | `ACC-3` | Field interpolation contribution ≤ 0.5 × | **Met** | Tricubic enforced; a forbidden interpolant is refused on a trajectory path. Bilinear measured at 9.4e-6 against bicubic 6.4e-8. |
-| `ACC-4` | Energy drift, static field ≤ 1 ppm Cheap conserved-quantity diagnostic | **Met** | 1e-9 to 1e-15 in static fields. Reports NaN in a driven field, where energy drift is not a diagnostic; there the check is an exact solution instead: a rectangular drive on the ideal quadrupole against the transfer-matrix solution of the Meissner equation, 9.2e-11 relative over 100 periods at rtol 1e-11 under `transport.edges: land` and 1.8e-7 under the default `cap` (Amendment 67). |
+| `ACC-4` | Energy drift, static field ≤ 1 ppm Cheap conserved-quantity diagnostic | **Met** | 1e-9 to 1e-15 in static fields. Reports NaN in a driven field, where energy drift is not a diagnostic; there the check is an exact solution instead: a rectangular drive on the ideal quadrupole against the transfer-matrix solution of the Meissner equation, 9.2e-11 relative over 100 periods at rtol 1e-11 under `transport.edges: land`, the default since Amendment 69, and 1.8e-7 under `cap` (Amendment 67). |
 | `ACC-5` | Class S transmission interval ≤ 1% abs, 95% Drives minimum ensemble size per point | **Met** | Losses itemised by the surface name the author wrote; checked against erf for a slit at 0.95 sigma on 20,000 ions. **The name was not an identity until it was made one**: every unnamed electrode was called `electrode` and nothing stopped two in one solve sharing a name, so two plates were tallied as one surface - and in a driven or sequenced solve, whose channels are keyed by name, solved at one potential (a deflector of two unnamed plates bent its ion 1.6e-8 mm where named it bends 0.595). An unnamed electrode is now `electrode-N` after its place in the list and a repeated name within a solve is refused; across field elements a shared name is the same metal and stays allowed (`ElectrodeNameTests`, `ElectrodeNameValidationTests`). A transmission of **zero** is now expressible - see Amendment 15, where it was not. **And where the population is continuous, "arrived" needed a floor** rather than being non-empty: Scharfetter-Gummel's flux across a collecting face behind a barrier *is* the Boltzmann factor of that barrier, so a held packet emits a stream of values hundreds of orders below one ion from its first step, and the TIMS front end reported a mean arrival and a spread in microseconds over 7.74e-245 of them. Arrivals must now reach a millionth of the launched population, or the arrival figures are absent with `sequence.nothing-eluted` saying which and why - a fraction rather than a count, because "less than one ion arrived" is a real answer for a low transmission while 1e-245 of one is not an answer at all. See Amendment 45. Diffusive collection is restricted explicitly to an aligned grid face; an internal detector is refused rather than silently moved (`AnUnrepresentableDiffusiveDetectorIsRefused`; Amendment 47). |
 | `ACC-6` | Class B boundary resolution ≤ 1/500 of scan Enough to resolve a mass filter peak shape | **Met** | `einzel boundary` bisects onto the crossing and reports it as an envelope whose interval **is** the bracket. Measured: a step at a known value bracketed to 1 part in 512 in 11 evaluations, against 501 for a grid; the quadrupole low-mass cut-off at **q = 0.90508 +/- 0.00039** against a tabulated 0.90804. The search now also **walks outward from its converged bracket** looking for the predicate flipping back, which is the one thing bisection structurally cannot see - every step of its own path is consistent with a single crossing by construction. `boundary.multiple-crossings` is a validity violation; the confirmation is reported whether or not anything was found. |
 | `ACC-7` | Rendered geometric tolerance ≤ 0.1% of extent Default decimation bound for vector output; recorded per | **Met** | Ramer-Douglas-Peucker measured tight against its bound: 4,000 points to 577 at a worst deviation of 0.010000 mm against 0.01. |

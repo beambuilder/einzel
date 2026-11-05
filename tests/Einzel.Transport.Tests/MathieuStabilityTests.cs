@@ -595,27 +595,22 @@ public sealed class RectangularBoundaryTests(ITestOutputHelper output)
     /// would not be tr M.
     /// </summary>
     /// <remarks>
-    /// The last step is cut to the time remaining, so the flight normally ends at
-    /// T exactly and reports <c>MaximumFlightTimeReached</c>. The cut is added on a
-    /// compensated sum that can land one ulp (2e-22 s) short of T; the remainder is
-    /// then below <c>MinimumStep</c> and the integrator reports <c>StepSizeUnderflow</c>
-    /// there instead. Landing does not catch this because the phase arithmetic
-    /// places the rising edge one double above T, outside the flight. Seen on one of
-    /// the sixty-three one-period flights of this class (d = 0.3, a = 0.1,
-    /// q = 0.1056, from rest); the state there is at T to 2e-22 s, which moves the
-    /// trace by nothing at the 1e-6 level, so that ending is accepted when, and only
-    /// when, it is one ulp short.
+    /// The last step is cut to the time remaining, and the compensated sum can leave
+    /// the time one ulp (2e-22 s) short of T with a remainder below <c>MinimumStep</c>;
+    /// the integrator then takes the end in place, as it takes a landing closer than
+    /// the minimum step (<c>IntegratorBehaviourTests.AFlightEndingAnUlpShortOfItsTimeReachesIt</c>
+    /// pins the one flight of the sixty-three here that does this: d = 0.3, a = 0.1,
+    /// q = 0.1056, from rest). Every flight therefore ends at T exactly and reports
+    /// <c>MaximumFlightTimeReached</c>.
     /// </remarks>
     private static void AssertEndedAtThePeriod(TrajectoryResult result, double period)
     {
-        var offBy = Math.Abs(result.FlightTimeSeconds - period);
-        var ulp = Math.BitIncrement(period) - period;
-
-        Assert.True(offBy <= ulp, $"the flight ended at {result.FlightTimeSeconds:R} s, not at the period {period:R} s");
         Assert.True(
-            result.Outcome == TrajectoryOutcome.MaximumFlightTimeReached
-            || (result.Outcome == TrajectoryOutcome.StepSizeUnderflow && offBy > 0.0),
+            result.Outcome == TrajectoryOutcome.MaximumFlightTimeReached,
             $"the flight ended {result.Outcome} at {result.FlightTimeSeconds:R} s");
+        Assert.True(
+            result.FlightTimeSeconds == period,
+            $"the flight ended at {result.FlightTimeSeconds:R} s, not at the period {period:R} s");
     }
 
     /// <summary>
@@ -695,8 +690,8 @@ public sealed class RectangularBoundaryTests(ITestOutputHelper output)
     [Fact]
     public void TheReportedAIncludesTheWaveformMean()
     {
-        // The convention the duty-cycle rows rest on, stated at the corpus case's
-        // duty: FromMathieu takes the DC a, the waveform mean 2d - 1 enters the
+        // The convention the duty-cycle rows rest on, stated at a duty cycle other
+        // than one half: FromMathieu takes the DC a, the waveform mean 2d - 1 enters the
         // drive, and MathieuA reports both together, a + 2q(2d - 1).
         const double Q = 0.5;
         const double Duty = 0.55;

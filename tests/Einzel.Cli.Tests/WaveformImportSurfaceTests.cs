@@ -103,7 +103,7 @@ public sealed partial class WaveformImportSurfaceTests : IDisposable
             line => Assert.Equal(0.3, Leading(line, "duty cycle: "), 2e-3),
             line => Assert.StartsWith("edge: rising at phase ", line, StringComparison.Ordinal),
             line => Assert.Equal(0.3, Leading(line, "edge: falling at phase "), 2e-3),
-            line => Assert.EndsWith("so add \"transport\": { \"edges\": \"land\" } to the model to land on them", line, StringComparison.Ordinal),
+            line => Assert.EndsWith("so the integrator lands on them unless the model says \"transport\": { \"edges\": \"cap\" }", line, StringComparison.Ordinal),
             line => Assert.Equal(1.8, Leading(line, "noise: "), 0.1),
             line => Assert.StartsWith("harmonics (amplitude relative to the fundamental, phase in cycles): 0: ", line, StringComparison.Ordinal),
             line => Assert.StartsWith("THD ", line, StringComparison.Ordinal),

@@ -304,8 +304,8 @@ named ones included (schema 0.15; a 0.14 document reads unchanged):
 
 `breakpoints` (analytic and tabulated only) lists the phases where the shape jumps or
 kinks, strictly ascending in [0, 1). The cycle mean splits its quadrature there, so a
-declared jump costs nothing in the mean and an undeclared one up to 2/1024 of it; under
-`transport.edges: land` the integrator lands on them
+declared jump costs nothing in the mean and an undeclared one up to 2/1024 of it; the
+integrator lands on them unless the model says `transport.edges: cap`
 ([numerics](numerics.md#landing-on-every-edge-transportedges-land)). A key that belongs to another shape, a
 `dutyCycle` beside anything but a rectangular wave, and an unknown `type` are refused
 at their own pointer. Values are relative to `driveAmplitude` and are not clamped:
@@ -952,20 +952,23 @@ be coarser than the steps, never finer, because there is no dense output to
 interpolate within a step.
 
 `edges` (schema 0.16) says how a trajectory step meets an instant at which a drive
-jumps. `"cap"`, the default when the key is absent, is the integrator of every earlier
-version to the bit: each step is capped at a twentieth of the shortest drive period and
-is cut to land on a sequence's stage switches, and a rectangular edge inside a step is
-left to the error controller. `"land"` also lands on every declared waveform breakpoint
-(a rectangular edge, an expression's or a table's `breakpoints`) at the instant the
-field flips, samples the landing step's end on the near side and restarts on the far
-side; see [numerics](numerics.md#landing-on-every-edge-transportedges-land). On the
-ideal quadrupole it removes the 35 rejected steps per edge the default pays and takes
-the 100-period error from 1.8e-7 to 9.2e-11 at rtol 1e-11. The default stays `cap`
-until the validation against published square-wave results (B.4) decides it, so that
-no existing document changes its answer. A model without breakpoints, rectangular
-drives or stages flies identically under either. The edges are in time; they have
-nothing to do with the edges of a solved domain. Any other value is refused at
-`/transport/edges`.
+jumps. `"land"`, the default when the key is absent, lands on every declared waveform
+breakpoint (a rectangular edge, an expression's or a table's `breakpoints`) and on
+every stage switch at the instant the field flips, samples the landing step's end on
+the near side and restarts on the far side; each step is also capped at a twentieth of
+the shortest drive period. See
+[numerics](numerics.md#landing-on-every-edge-transportedges-land). On the ideal
+quadrupole it removes the 35 rejected steps per edge that `cap` pays and takes the
+100-period error from 1.8e-7 to 9.2e-11 at rtol 1e-11; the band edges of the
+rectangular drive match the Meissner closed form to 1.4e-9 under it
+([validation](validation.md)). `"cap"` keeps the integrator of the versions before
+breakpoints were landed on: the same cap of twenty steps per period, the cut to a
+sequence's stage switches, and a rectangular edge inside a step left to the error
+controller. It is the opt-in for reproducing a result computed before the default
+changed (Amendment 69); a document that wrote `"land"` explicitly means what it meant.
+A model without breakpoints, rectangular drives or stages flies identically under
+either. The edges are in time; they have nothing to do with the edges of a solved
+domain. Any other value is refused at `/transport/edges`.
 
 `statisticalDiffusion` is a declared peer mode that this build does not implement.
 Asking for it is a regime violation with a distinct exit code, not a silent
@@ -1333,7 +1336,7 @@ A `harmonic` object is that same series, so its highest order sets the cap. An
 `analytic` or `tabulated` shape has no order to read: its period is the drive's, the
 cap is that period over the steps per period, as for a rectangular wave, and a feature
 much narrower than a twentieth of a cycle inside it is not seen by the cap; declared as
-breakpoints under `transport.edges: land`, each one is landed on (Amendment 67).
+breakpoints, each one is landed on (Amendment 67; the default since Amendment 69, `transport.edges: cap` opts out).
 `einzel waveform import` declares a measured trace's edges as the breakpoints of the
 table it writes ([CLI](cli.md#einzel-waveform-import)).
 

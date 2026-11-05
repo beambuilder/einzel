@@ -98,7 +98,7 @@ public sealed record WaveformImportHarmonic(int Order, double Amplitude, double 
 /// <param name="Edges">The edges found, in phase order from the fold's minimum.</param>
 /// <param name="SharpestEdgeSeconds">The shortest 10-90 % time, or null without edges.</param>
 /// <param name="CapSeconds">The integrator's step cap, a twentieth of the period.</param>
-/// <param name="LandAdvised">Whether breakpoints were declared, so <c>transport.edges: land</c> applies.</param>
+/// <param name="LandAdvised">Whether breakpoints were declared, so the default <c>transport.edges: land</c> lands on them.</param>
 /// <param name="NoiseRms">The median within-bin rms about a straight line, in trace units.</param>
 /// <param name="NoiseRmsRelative">The noise relative to <paramref name="Amplitude"/>.</param>
 /// <param name="Harmonics">Orders 0 to the asked highest, fitted to the table.</param>

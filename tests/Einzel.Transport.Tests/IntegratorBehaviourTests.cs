@@ -280,4 +280,68 @@ public sealed class IntegratorBehaviourTests(ITestOutputHelper output)
         Assert.True(study.FlightTime.HasNonSuppressibleWarnings);
         Assert.Contains(study.FlightTime.Warnings, w => w.Code == "TRAJECTORY_INCOMPLETE");
     }
+
+    /// <summary>
+    /// A flight whose last step leaves the compensated time one ulp short of its end reaches
+    /// the end, not <c>StepSizeUnderflow</c>. The case is the one of 63 one-period flights of
+    /// <c>RectangularBoundaryTests</c> that ended short at 2.1e-22 s (one ulp of 1 us) under
+    /// the end-of-flight cut before this rule: an ideal quadrupole with a 0.3 duty rectangular
+    /// drive at a = 0.1, q = 0.1156 - 0.01 (one probe below the y edge), from rest, one period
+    /// under <c>land</c>. Landing cannot catch it, because the next rising edge the phase
+    /// arithmetic reports is one double above T. The end time is reported exactly.
+    /// </summary>
+    [Fact]
+    public void AFlightEndingAnUlpShortOfItsTimeReachesIt()
+    {
+        var mass = Quantity.From(100.0, "u");
+        var charge = Quantity.From(1.0, "e");
+        var field = Fields.Analytic.IdealQuadrupoleRf.FromMathieu(
+            0.1, 0.1155681312 - 0.01, mass, charge, Quantity.From(1.0, "MHz"), Quantity.From(4.0, "mm"),
+            new Fields.Analytic.RfWaveform.Rectangular(0.3));
+        var period = field.ShortestPeriodSeconds;
+
+        var result = TrajectoryIntegrator.Integrate(
+            new PhaseState(new Vec3(1e-3, 1e-3, 0.0), Vec3.Zero),
+            IonSpecies.Create(mass, charge),
+            field,
+            new IntegrationSettings { RelativeTolerance = 1e-11, MaximumFlightTime = period, LandOnEdges = true });
+
+        output.WriteLine($"ended {result.Outcome} at {result.FlightTimeSeconds:R} s against {period:R} s, {result.AcceptedSteps} steps");
+        Assert.Equal(TrajectoryOutcome.MaximumFlightTimeReached, result.Outcome);
+        Assert.Equal(period, result.FlightTimeSeconds);
+    }
+
+    /// <summary>
+    /// The same rule, without depending on where a controller's step sequence happens to
+    /// land: in a uniform field every step is exact, so with the initial and maximum step
+    /// both 2^-30 s the time after sixteen steps is 2^-26 s to the bit, and a flight time
+    /// 1e-19 s beyond that leaves a remainder below the minimum step of 1e-18 s. The flight
+    /// ends at its time, as a landing closer than the minimum step is taken in place; the
+    /// state is the state at the sixteenth step.
+    /// </summary>
+    [Fact]
+    public void ARemainderBelowTheMinimumStepIsTheFlightEnd()
+    {
+        const double H = 9.313225746154785e-10; // 2^-30
+        const double End = (16.0 * H) + 1e-19;
+        var start = new PhaseState(Vec3.Zero, new Vec3(1e3, 0.0, 0.0));
+
+        var result = TrajectoryIntegrator.Integrate(
+            start,
+            Peptide,
+            UniformField.Create(new Vec3(0.0, 1e3, 0.0)),
+            new IntegrationSettings
+            {
+                InitialStep = H,
+                MaximumStep = H,
+                MinimumStep = 1e-18,
+                MaximumFlightTime = End,
+                TurningPointStepFactor = 0.0,
+            });
+
+        Assert.Equal(16, result.AcceptedSteps);
+        Assert.Equal(TrajectoryOutcome.MaximumFlightTimeReached, result.Outcome);
+        Assert.Equal(End, result.FlightTimeSeconds);
+        Assert.Equal(16.0 * H * 1e3, result.FinalState.Position.X, 1e-12);
+    }
 }

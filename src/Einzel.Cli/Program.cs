@@ -2108,7 +2108,7 @@ public static class Program
                 invariant,
                 $"sharpest edge: {sharpest * 1e9:G4} ns 10-90 % against the step cap T/20 = {o.CapSeconds * 1e9:G4} ns; ")
                 + (o.LandAdvised
-                    ? "breakpoints declared, so add \"transport\": { \"edges\": \"land\" } to the model to land on them"
+                    ? "breakpoints declared, so the integrator lands on them unless the model says \"transport\": { \"edges\": \"cap\" }"
                     : "no breakpoints declared")
             : $"no edge found; {o.Waveform.Interpolation} table, no breakpoints";
         yield return string.Create(

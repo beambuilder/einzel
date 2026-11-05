@@ -149,6 +149,27 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A document lands on its waveform edges unless it says `edges: cap`.** The
+  default of `transport.edges` is `land`, in the validator (an absent key compiles
+  to `LandOnEdges = true`) and in `IntegrationSettings` (default true), now that
+  the landing integrator is validated against the Meissner closed form (21 band
+  edges to 1.4e-9) and against SIMION 8.0.4 on the 3D quadrupole (duty 0.60 band
+  0.50 / 0.5977 against 0.5000 / 0.5963, 101 of 101 points agreeing; trapezoid
+  cut-offs within 0.005 at six rise times, both codes on 0.705 / sinc(pi r / 0.8)).
+  `cap` is the opt-in for the pre-landing integrator; on the corpus square the B.2
+  record measured 2027 steps per ion under `land` against 2737 under `cap` (three
+  lines, 0.74x), and the series q line under the default takes 2273, the B.2 q-line
+  figure. The flight end is met by the in-place rule: a remainder below the minimum
+  step, or one double ahead, ends the flight at its time instead of
+  `StepSizeUnderflow` (the one of 63 one-period flights that ended an ulp short now
+  ends at T; every flight that did not underflow is bit-identical). What moves:
+  documents with a rectangular drive, declared breakpoints or a sequence and no
+  `edges` key; the shipped examples and templates have no rectangular drive or
+  breakpoints, and the four sequenced ones meet their switches by the landing rules.
+  No schema or solver-version change.
+  [Model format](model-format.md), [numerics](numerics.md#landing-on-every-edge-transportedges-land),
+  [validation](validation.md#the-3d-quadrupole-against-simion-duty-cycle-and-rise-time),
+  SPEC Amendment 69. PR #28 (number assumed).
 - **The rectangular drive's stability boundaries match the Meissner closed form
   by monodromy; the documented 0.71113 was an aperture criterion, not the
   boundary.** Two one-period flights under `transport.edges: land` (rtol 1e-11)
@@ -198,11 +219,11 @@ the PR number.
 - **A step that lands on every rectangular edge, sampling the near side and
   restarting on the far side, removes the 35 rejected steps per edge the cap
   pays and two to three orders of magnitude of error.** `transport.edges: land`
-  (schema 0.16; default `cap`, unchanged to the bit) cuts each step to the
-  earlier of the next switch and `NextEdgeAfter`, samples the landing step's two
-  `c = 1` stages one ulp before the instant, sets the time to it exactly and
-  re-evaluates the derivative there, and takes an instant closer than the minimum
-  step or one ulp ahead in place. On the ideal quadrupole against the exact
+  (schema 0.16; default `cap` until Amendment 69, unchanged to the bit) cuts each
+  step to the earlier of the next switch and `NextEdgeAfter`, samples the landing
+  step's two `c = 1` stages one ulp before the instant, sets the time to it exactly
+  and re-evaluates the derivative there, and takes an instant closer than the
+  minimum step or one ulp ahead in place. On the ideal quadrupole against the exact
   Meissner solution at rtol 1e-11, q = 0.5: 1.6e-8 to 9.2e-12 at 10 periods and
   1.8e-7 to 9.2e-11 at 100, rejected steps 7372 to 0 and accepted 19168 to
   13703; 10^5 edges, and 10^5 pairs of edges an ulp apart, fly without underflow.

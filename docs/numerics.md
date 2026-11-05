@@ -713,19 +713,20 @@ averages two different fields into a single answer - plausible, and wrong.
 Unlike a boundary in space this needs **no root-find at all**, because the time is
 known in advance. The integrator asks the field when it next switches and refuses
 to take a step past it, so it lands on the boundary and the next step starts in the
-new state. By default (`transport.edges` absent or `cap`) the derivative the next
-step starts from is not recomputed: it is the last stage of the landing step (FSAL),
-sampled at `t + h`, which is the switch or within an ulp of it. `NextSwitchAfter`
-returns infinity for a continuously driven field, however fast: a sinusoid has no
-discontinuity. A rectangular edge is not a switch, and under the default it is
-handled by the steps-per-cycle cap and by the error controller rejecting the steps
-that straddle it - about 35 rejections per edge, measured below.
+new state. Under `transport.edges: cap` the derivative the next step starts from is
+not recomputed: it is the last stage of the landing step (FSAL), sampled at `t + h`,
+which is the switch or within an ulp of it; by default (`land`, below) a switch is
+landed on by the same rules as a waveform edge. `NextSwitchAfter` returns infinity
+for a continuously driven field, however fast: a sinusoid has no discontinuity. A
+rectangular edge is not a switch, and under `cap` it is handled by the
+steps-per-cycle cap and by the error controller rejecting the steps that straddle
+it - about 35 rejections per edge, measured below.
 
 ### Landing on every edge: `transport.edges: land`
 
-With `"edges": "land"` the integrator also lands on every declared waveform
-breakpoint: the edges of a rectangular drive, the breakpoints an expression or a
-table declares. Four rules make the landing exact:
+By default (`transport.edges` absent or `"land"`; Amendment 69) the integrator also
+lands on every declared waveform breakpoint: the edges of a rectangular drive, the
+breakpoints an expression or a table declares. Four rules make the landing exact:
 
 - **The instant is the field's own flip.** `ITimeVaryingField.NextEdgeAfter` returns
   the smallest double at which the field's evaluation is past the breakpoint, computed
@@ -768,11 +769,30 @@ At rtol 1e-9 the 100-period q = 0.5 row is 1.3e-5 under `cap` and 1.5e-8 under `
 same chain with a second edge one ulp after every real one takes each twin in place
 (100,001 in-place landings, 2.95 million steps against 2.95 million without the twins).
 
-The default stays `cap` until the B.4 validation decides the flip. It has two known
-hazards that `land` removes and the default keeps, so that every existing document
-computes what it did: a landing that falls one ulp short of a switch leaves the next
-query answering the same switch an ulp away (a one-ulp step), and the landing step's
-last stage is sampled at `t + h`, on either side of the switch depending on rounding.
+`land` has been the default since the validation against the Meissner closed form
+and SIMION (Amendment 69): the band edges of the rectangular drive match the closed
+form to 1.4e-9 by monodromy under it, and the 3D quadrupole's cut-offs match SIMION
+at duty 0.60 and at every rise time measured ([validation](validation.md)). `cap`
+keeps two hazards the default closes, and is the opt-in for reproducing a result
+computed before the flip: a landing that falls one ulp short of a switch leaves the
+next query answering the same switch an ulp away (a one-ulp step, below the minimum
+step for flights shorter than about 8 ms, so the flight ends `StepSizeUnderflow`),
+and the landing step's two `c = 1` stages are sampled at `t + h`, on either side of
+the switch depending on rounding, so the controller sees the post-switch field in two
+stages and rejects until the contamination is under tolerance. Under the default the
+switch is set exactly, the stages sample the near side, and neither occurs.
+
+**The flight end is an instant too**, and is met by the in-place rule. The last step
+is cut to the time remaining, and the compensated sum can leave the time one ulp
+short of the end; the remainder is then below the minimum step and the flight
+ended `StepSizeUnderflow` with its state at the end to that ulp. Measured on one of
+63 one-period flights of the band-edge test (duty 0.3, a = 0.1, q = 0.1056, from
+rest, 2.1e-22 s short of 1 us; landing could not catch it because the phase
+arithmetic puts the next edge one double above T). A remainder below the minimum
+step, or an end one double ahead, now sets the time to the end and reports
+`MaximumFlightTimeReached` with the state as it is. Only flights that would have
+underflowed within the minimum step (1e-18 s by default) or one ulp of their end are
+affected; every other flight is bit-identical.
 
 A drive written as an expression of the phase or as a table over one period is held
 to the same rule. An expression is compiled once into a function over doubles and
@@ -781,15 +801,15 @@ text per step (measured after JIT warm-up), and agrees with the interpreter to t
 bit, so an expression of a square wave is the rectangular drive exactly. A table
 is a binary search and one cubic per call, linear or the periodic spline. Either
 may declare **breakpoints**,
-the phases where it jumps or kinks, and today only the cycle mean reads them: it is
+the phases where it jumps or kinks. The cycle mean reads them: it is
 an eight-point Gauss-Legendre rule over 1024 panels with the panel edges on the
 breakpoints, exact to rounding between them (a square wave's mean is zero to the
 bit, a 0.3 duty cycle's within 3.3e-16 of -0.4), while a jump left undeclared lands
 inside a panel and costs up to 2/1024 of the mean (7.5e-5 measured at duty 0.3). A
-table's mean is its interpolant's exact integral. Under the default the integrator
-does not land on breakpoints, and a jump inside a step is bounded by the same 20
-steps per cycle a rectangular edge is; under `transport.edges: land` it lands on
-every declared one (below). An undeclared jump is landed on by neither.
+table's mean is its interpolant's exact integral. By default the integrator lands
+on every declared one (below); under `transport.edges: cap` it does not, and a jump
+inside a step is bounded by the same 20 steps per cycle a rectangular edge is. An
+undeclared jump is landed on by neither.
 
 ### Measured
 

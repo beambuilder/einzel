@@ -91,7 +91,7 @@ public interface ITimeVaryingField : IElectrostaticField
     /// Infinity for a field driven by a continuous waveform, however fast: a
     /// sinusoid has no discontinuity. The jumps and kinks a waveform declares within
     /// its cycle are not switches: they are reported by <see cref="NextEdgeAfter"/>,
-    /// and the integrator lands on them when a model asks for it, which a later change adds.
+    /// and the integrator lands on them unless the model says <c>transport.edges: cap</c>.
     /// </para>
     /// </remarks>
     double NextSwitchAfter(double timeSeconds) => double.PositiveInfinity;
