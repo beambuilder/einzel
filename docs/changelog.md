@@ -2946,3 +2946,69 @@ Two findings from Stage 1 that bear on the spec:
   (clear of the edge, against a mirror, a sheet, which edges are mirrors); handing the
   viewport bare points again fails the volume test and nothing else.
   `docs/shell.md`, `docs/rendering.md`, `docs/lessons.md`.
+
+- **A parallel study was billed one evaluation's memory, and mean-field space charge was billed
+  none.** Two gaps in `einzel estimate`'s memory figure that #55's measurement left, both
+  measured rather than argued.
+
+  **A study holds one evaluation for every evaluation in flight.** A scan runs its points and a
+  tolerance sweep its draws - then its attribution - up to `maxParallelism` at once, one per
+  processor when the study does not say, and each compiles and solves its own model. `ForStudy`
+  multiplied the time by the evaluation count and left the memory at one evaluation's, so a
+  sixteen-way scan was billed a sixteenth. It now reports `inFlight` and
+  `memoryMiBPerEvaluation` beside the product, capped by the work (a five-point scan holds five)
+  and, for a sweep, the wider of its two phases; an optimization and a boundary search hold one.
+  **The count is asked of the drivers, not restated**: `ParameterScan.InFlight` and
+  `ToleranceStudy.InFlight` sit beside the loops they describe and read the one
+  `Parallelism.Degree` those loops run at. `StudyInFlightTests` also runs both drivers on the
+  study's own document with an evaluator that counts the calls inside it at once - 2, 3 and one per
+  processor for three scans, 2 and 3 for two sweeps, the estimate's numbers. Its first version ran
+  at a `maxParallelism` of 4, where a driver ignoring the setting runs one per processor and looks
+  identical on a four-core runner; that mutation was caught only on a sixteen-thread machine. And
+  at one per processor the last evaluation waited half a second for the pool to inject a thread
+  and read 15 of 16, so the test raises the pool's minimum for the run: it measures the driver,
+  not the pool.
+
+  **And an evaluation is billed at the dearest end of the study's range**, as its flight already
+  was sampled there. Found in review, and it bites on ordinary studies: the shipped mirror pair's
+  solve runs to half the separation, so a 700 to 800 mm scan crosses a power of two in the mesh
+  and its far end holds 4.6 MiB against 2.3 at the declared 767. The memory statement and the
+  element timeline are now one function `Execute` and the range ends both call. The comment beside the parallel loop said a 34 M-node volume was
+  1.6 GiB an evaluation: **34 M nodes at the old 48 bytes a node**, a figure restated from a
+  constant that stayed when the constant was found five times low. It points at the estimate now.
+
+  **A self-field is 62 bytes a density node, charged once.** Mean-field keeps its potential, the
+  density it was solved for and a mask - 25 bytes a node - and refreshes a plane Poisson solve as
+  the density moves. Measured live over a five-microsecond flight it adds **61.3 to 61.4, flat
+  from 66 k to 1.05 M nodes**; two species add 69.3 to 69.4, the same solve plus the summed
+  charge's array; a cylindrical bore whose earthed wall lies inside the density grid reads 59.3,
+  so the figure holds where the self-field's mask fixes every absorbing node. The diffusive
+  constant's own remarks said "a mean-field solve adds its own grids", and nothing was charged.
+
+  **The first measurement read 25, and nothing about 25 looked wrong.** One step is the right
+  measurement for a plain diffusive run, whose every array exists by its first step - and the
+  harness's one-step shortcut read the self-field at exactly the arrays it keeps, flat across a
+  sixteenfold range. But the first Poisson solve is done before the stepping loop, and every later
+  one solves on top of the step's arrays; one step never reached one. `SelfFieldMemoryTests` now
+  asserts a refresh inside the loop as well as the value.
+
+  **Debug holds one array more**: 68.7 to 70.1 against Release's 61.4, a local kept to the end of
+  its method. CI tests Release, so the band is main's 0.90 to 1.02 there and Debug is allowed the
+  eight bytes. **And the first reading in a process is an outlier** - about 300 KiB above the
+  next four, one-time allocation on the first self-field solve - which is why this test keeps the
+  middle of five where `SolveMemoryTests` keeps the middle of three: it reads a difference of two
+  peaks, and the middle of three would rest on one further outlier. One failure in about thirty
+  runs, inside a mutation run, was not reproduced idle or with every core loaded; every reading is
+  now printed.
+
+  **`tools/memory-harness` measures both quantities, one fresh process each**, because sampling the
+  live set forces the collections that keep the working set down. On main it agrees with the
+  estimate's live figures to within six percent, and puts a number on the remark beside them:
+  **an unconstrained solve's working set is 2.1 to 2.2x its live set on a plane and 2.3 to 4.5x on
+  the shipped volumes**, growing with size; a diffusive step 1.03 to 1.12x.
+
+  **Eleven mutations, each caught by the test written for it**, including one in the engine - the
+  self-field keeping one array more - caught by the live measurement alone. Found on the way and
+  recorded rather than fixed: a trajectory model whose sequence enters a `diffusion` phase is billed
+  nothing for its density, because the estimate asks the model's own mode. SPEC.md GRD-8 and item
+  10; `docs/cli.md`, `docs/lessons.md`, `tools/memory-harness/README.md`.

@@ -1317,6 +1317,7 @@ some restriction buffers, and nothing measured it.
 | plane | 143.25 | 143.3 to 143.9 on four templates at 17 k to 1.05 M nodes |
 | each basis channel before the last | + 8 | 156.1 linear ion trap, two channels, against 158.4 |
 | diffusive run, per density node and per species | 263 | 248 and 259, drift tube at 66 k and 263 k nodes; each added species 248 |
+| mean-field self-field, once whatever the species count | 62, and 70 for a mixture | 61.3 to 61.4 on the drift tube at 66 k to 1.05 M nodes; 69.3 to 69.4 with two species |
 
 **The coarse levels are charged at their real size.** A grid coarsens by halving each axis's
 interval count, which keeps one node more than half, so a first coarse level is more than an
@@ -1421,6 +1422,54 @@ the largest of what every earlier element retains plus what the next one holds w
 The shipped Astral solves two mirror cross-sections before its volume, which adds their
 potentials to the volume's peak.
 
+**A study holds one evaluation for every evaluation in flight.** A scan runs its points and a
+tolerance sweep its draws - then its attribution, two evaluations per channel inside one
+iteration - in parallel, up to `maxParallelism` or one per processor, and every evaluation in
+flight compiles its own model and solves its own field. They start together, so their solves
+overlap: the study's peak is one evaluation's times how many are in flight, capped by the work
+(a five-point scan on sixteen cores holds five) and, for a sweep, the wider of its two phases.
+An optimization and a boundary search evaluate one point at a time. `estimate` on a study
+multiplied the time by the evaluation count and **left the memory at one evaluation's**, so a
+scan running sixteen points at once was billed for one; it now reports `inFlight` and
+`memoryMiBPerEvaluation` beside the product, says so on the basis line, and compares the
+product with this machine. The comment beside the parallel loop said a 34 M-node volume was
+1.6 GiB an evaluation and sixteen were 26 GiB - 34 M nodes at the old 48 bytes a node, a figure
+restated from a constant and left behind when the constant was found five times low. It now
+points at the estimate instead of quoting a number.
+
+*How many are in flight is asked of the drivers, not restated.* `ParameterScan.InFlight` and
+`ToleranceStudy.InFlight` sit beside the parallel loops they describe and read the same
+`Parallelism.Degree` those loops run at, so the estimate and the run cannot disagree about what
+runs together. `StudyInFlightTests` still runs both drivers on the study's own document with an
+evaluator that counts how many calls are inside it at once, and the counts match: 2, 3 and one
+per processor for three scans, 2 and 3 for two sweeps. It runs at a `maxParallelism` of 2,
+because at 4 a driver ignoring the setting runs one per processor and is indistinguishable on a
+four-core CI runner - the first version used 4 and caught that only on a sixteen-thread machine.
+
+*And each evaluation is billed at the dearest point of the study's range.* A study that varies
+the mesh varies what an evaluation holds, and the flight was already sampled at the ends of the
+range while the memory was taken at the declared values. The memory statements are arithmetic on
+the declaration, so every end is costed whatever the study's length, and the largest is taken
+rather than the mean because it has to fit at every point. **Even an innocent scan crosses a mesh
+boundary**: the shipped mirror pair's solve runs to half the separation, and a scan from 700 to
+800 mm takes it past a power of two at 780 - the 800 mm end holds 4.6 MiB against 2.3 at
+the declared 767. Each end is taken alone, not in combination, as the flight is.
+
+**A self-field is charged once, and a run of one step does not see most of it.** Mean-field
+space charge keeps its potential, the density it was last solved for and a Dirichlet mask of a
+flag and a value - 25 bytes a node for the whole run - and solves a plane Poisson problem each
+time the density moves enough. The first solve is done before the stepping loop, when the step's
+own arrays do not exist yet, and a one-step measurement reads only the 25. Every later refresh
+solves on top of the step, and over a flight long enough to refresh the self-field adds
+**61.3 to 61.4 bytes a node, flat from 66 k to 1.05 M nodes**. A mixture solves one field for its
+summed charge, so it is charged once, plus that sum's own array: 69.3 to 69.4 with two species.
+It was not billed at all - the diffusive figure's own remarks said "a mean-field solve adds its
+own grids". `SelfFieldMemoryTests` measures it through a real run at 0.90 to 1.02 of the
+statement in an optimized build - 61.4 on a Cartesian tube, and 59.3 on a cylindrical bore whose
+earthed wall lies inside the density grid, so the self-field's mask fixes every absorbing node -
+asserting that the self-field was solved inside the loop at least once; **a Debug build holds one array more** (68.7 to 70.1), because it keeps a local alive
+to the end of its method where the optimizer ends it at its last use, and is allowed that much.
+
 **What a run shows is higher, and depends on the machine.** The collector frees a large array
 lazily when memory is plentiful: the Astral at 4 mm reached 390 bytes a node of heap against a
 live 242. It gives that back when it has to - under a hard heap limit the same build completed
@@ -1428,6 +1477,16 @@ at 279 MiB and ran out at 275, against a live peak of 259 - so the live set plus
 is the floor, and the basis line says the working set runs higher. When the peak is more than
 half of what this process may use, the basis says what share it is, and that it will not fit
 if it is over.
+
+*How much higher, measured from outside the suite.* `tools/memory-harness` runs the same solve
+twice in fresh processes, once for each quantity, because sampling the live set forces the
+collections that keep the working set down. On main at `de73ec8`, unconstrained, the working set
+is **2.1 to 2.2x the live set on a plane** (143.3 live, 296 to 320 working at 1 to 17 M nodes),
+**2.3 to 4.5x on the shipped volumes**, the ratio growing with size on the rediscretized ones (the
+C-trap 2.8x at 0.14 M nodes and 4.5x at 1.08 M), and **1.03 to 1.12x for a diffusive step**, which
+is nearly all live data. The same runs agree with the estimate's live figures to within six
+percent. That is what a task manager shows on a machine with memory to spare, not what the run needs;
+pooling the V-cycle's buffers would close most of the gap.
 
 **The 64,000,000-node limit, reconsidered once the true cost was known.** `main`'s
 `ScalarField3D` refuses a grid past 64 M nodes as "about half a gigabyte per field and three

@@ -120,9 +120,9 @@ public sealed record StudyDocument
     /// <remarks>
     /// <para>
     /// <b>Memory is the constraint, not cores.</b> Every evaluation in flight holds its own
-    /// solved field, so peak memory is this times one solve: on a 34 M-node volume geometry
-    /// that is 1.6 GiB each, and one per processor on a sixteen-core machine is 26 GiB. The
-    /// plane geometries most studies scan are a few hundred megabytes and need no limit.
+    /// solved field, so peak memory is this times one evaluation's peak, and
+    /// <c>einzel estimate</c> on the study reports that product before anything runs. A large
+    /// volume geometry can need a limit here; the plane geometries most studies scan do not.
     /// </para>
     /// <para>
     /// It changes what a study <i>costs</i> and never what it <i>says</i>: draws are made in

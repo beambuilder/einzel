@@ -5492,3 +5492,52 @@ it** - here an overload taking the `Contours.Run`, which reads the run's own fla
 agreement does not depend on either side remembering the other's convention. And **write the
 bound a closed form actually guarantees**: an inscribed solid has a ceiling, and a symmetric
 tolerance would have absorbed the only sign that anything was wrong.
+
+## A shortened run can end before the peak it was shortened to measure
+
+The memory harness measured a diffusive run over one step, and for a plain run that is right:
+everything a step holds is allocated before or during the first step and every later one reuses
+it. Measured that way, mean-field space charge added **25 bytes a node** - flat across a sixteenfold
+range of grid sizes, exactly the arrays the self-field keeps, a clean and fully explained number.
+Over a run of a few microseconds it adds **61**. The first Poisson solve is done before the
+stepping loop, while the step's own arrays do not yet exist; every later refresh solves on top of
+them, and that overlap is the peak. One step never reached a refresh, so it measured the setup
+and reported it as the run.
+
+Nothing about 25 looked wrong, which is the point: it was stable, reproducible and accounted for
+to the byte. What exposed it was reading where the allocation happens relative to the loop, not
+the number. The test that pins the figure now asserts the self-field was solved inside the loop
+at least once, because a run too short to refresh would pass against a statement of 25.
+
+And the same measurement read **68.5** in the test host where the harness read 61.4, which looked
+like a small-grid constant until the harness reproduced it in Debug: a Debug build keeps a local
+alive to the end of its method, so it holds one array more. CI tests in Release, which is what a
+released build runs, so the tight band is for an optimized build and Debug is allowed the eight
+bytes it was measured to hold.
+
+The rules. **A quantity that peaks where two allocations overlap must be measured over an instant
+where both exist**, and shortening a run for speed can remove that instant entirely while leaving
+a number that looks complete. **Where a measurement can degenerate quietly, assert the condition
+that makes it mean something** - here, a solve inside the loop - rather than only the value. And
+**a memory statement says which build it is for**: Debug and Release differ by whatever the JIT
+keeps alive, which is not a rounding error.
+
+## A test of a setting is blind wherever the setting equals its default
+
+The test that a study driver honors `maxParallelism` ran it at 4, counted the evaluations in flight,
+and passed - and a mutation making the driver ignore the setting was caught, on a sixteen-thread
+workstation. On a four-core CI runner the same mutation passes: ignoring the setting means one per
+processor, which there is four, which is what the setting asked for. The test was checking that a
+value came out, and the value it checked was the default's on the machine that matters most.
+
+Moving it to 2 fixed that and exposed the next layer: at one per processor the count read 15 of 16,
+because the test thread is itself a pool thread and the pool starts only its minimum at once,
+injecting the rest about every half second. A fixed two-second wait had been hiding that; a shorter
+one measured the thread pool instead of the driver. The test now raises the pool's minimum for the
+run, inside a collection that runs alone.
+
+The rules. **Test a setting at a value its default cannot produce on any machine the test runs on**,
+or say which machines it is blind on. **Run the mutation where the test will run**, not only where
+it was written: a mutation caught on a sixteen-thread box is evidence about that box. And **when a
+measurement includes a runtime's scheduling, decide whether that is the thing being measured** -
+here it was not, so it is held fixed.

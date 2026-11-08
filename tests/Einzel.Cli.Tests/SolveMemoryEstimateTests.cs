@@ -189,41 +189,7 @@ public sealed class SolveMemoryEstimateTests(ITestOutputHelper output) : IDispos
 
         var path = Path.Combine(_root, $"tube-{Guid.NewGuid():N}.json");
 
-        File.WriteAllText(path, $$"""
-            {
-              "schemaVersion": "0.13",
-              "name": "drift-tube",
-              {{ion}}{{species}}
-              "source": {
-                "position": { "value": [4, 0, 0], "unit": "mm" },
-                "direction": { "value": [1, 0, 0] },
-                "accelerationPotential": { "value": 0, "unit": "V" },
-                "cloud": { "ions": 1,
-                           "transverseSpread": { "value": 0.4, "unit": "mm" },
-                           "longitudinalSpread": { "value": 0.4, "unit": "mm" } }
-              },
-              "detector": {
-                "planePoint": { "value": [32, 0, 0], "unit": "mm" },
-                "normal": { "value": [-1, 0, 0] }
-              },
-              "transport": {
-                "mode": "diffusion",
-                "maximumFlightTime": { "value": 60, "unit": "us" },
-                {{mobility}}
-                "densityGrid": {
-                  "minX": { "value": 0, "unit": "mm" }, "maxX": { "value": 32, "unit": "mm" },
-                  "minY": { "value": -4, "unit": "mm" }, "maxY": { "value": 4, "unit": "mm" },
-                  "intervalsX": 64, "intervalsY": 32
-                },
-                "gas": { "model": "hardSphere", "pressure": { "value": 2, "unit": "mbar" },
-                         "mass": { "value": 28.0134, "unit": "Da" },
-                         "crossSection": { "value": 250, "unit": "angstrom^2" } }
-              },
-              "fields": [
-                { "type": "uniform", "field": { "value": [500, 0, 0], "unit": "V/m" } }
-              ]
-            }
-            """);
+        File.WriteAllText(path, DriftTubes.Cartesian(ion, mobility, species));
 
         return path;
     }

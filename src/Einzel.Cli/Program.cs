@@ -912,6 +912,11 @@ public static class Program
 
             Console.Out.WriteLine(string.Create(
                 invariant, $"{study.Kind,-13} {study.Evaluations} evaluations{bound}"));
+
+            // Beside the count, because the time multiplies by that and the memory by this.
+            Console.Out.WriteLine(string.Create(
+                invariant,
+                $"in flight     {study.InFlight} at once, {EstimateCommand.MemorySize(study.MemoryMiBPerEvaluation)} each"));
         }
 
         Console.Out.WriteLine(string.Create(

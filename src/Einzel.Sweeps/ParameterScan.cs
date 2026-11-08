@@ -279,6 +279,17 @@ public sealed record ScanResult(
 /// </remarks>
 public static class ParameterScan
 {
+    /// <summary>How many of a scan's points <see cref="Run"/> evaluates at once.</summary>
+    /// <param name="points">The points the scan declares.</param>
+    /// <param name="maxParallelism">What the study declares, or null for one per processor.</param>
+    /// <returns>At least one.</returns>
+    /// <remarks>
+    /// What <c>einzel estimate</c> multiplies one evaluation's memory by, asked of the driver
+    /// rather than restated, so the two cannot disagree about what runs together.
+    /// </remarks>
+    public static int InFlight(int points, int? maxParallelism) =>
+        Parallelism.InFlight(points, maxParallelism);
+
     /// <summary>Runs a scan.</summary>
     /// <param name="document">The model to vary.</param>
     /// <param name="axis">The parameter, the range, and the points.</param>
@@ -372,13 +383,17 @@ public static class ParameterScan
         // computes the same number wherever it runs.
         //
         // MEMORY IS THE CONSTRAINT, NOT CORES. Each point in flight holds its own solved
-        // field, so peak memory is the degree of parallelism times one solve - on a
-        // 34 M-node volume geometry that is 1.6 GiB each, and sixteen at once is 26 GiB.
-        // The caller lowers `maxParallelism` when the solve is large; the default is one
-        // per processor, which is right for the plane geometries most studies scan.
+        // field, so peak memory is the degree of parallelism times one evaluation's peak, and
+        // `einzel estimate <study>` reports that product (StudyEstimate.InFlight). The caller
+        // lowers `maxParallelism` when the solve is large; the default is one per processor,
+        // which is right for the plane geometries most studies scan.
+        //
+        // NO FIGURE HERE, ON PURPOSE. This said 1.6 GiB for a 34 M-node volume, which was
+        // 34 M nodes at the estimate's old 48 bytes a node - a number restated from a
+        // constant, which stayed when the constant was found five times low.
         var rows = new ScanPoint[axis.Points];
 
-        var parallelism = Math.Max(1, maxParallelism ?? Environment.ProcessorCount);
+        var parallelism = Parallelism.Degree(maxParallelism);
 
         Parallel.For(
             0,

@@ -84,6 +84,23 @@ public sealed record ToleranceStudyResult(
 /// </remarks>
 public static class ToleranceStudy
 {
+    /// <summary>How many of a sweep's evaluations <see cref="Run"/> has in flight at once, at most.</summary>
+    /// <param name="draws">The draws the sweep declares.</param>
+    /// <param name="channels">The channels it perturbs.</param>
+    /// <param name="oneAtATime">Whether it attributes one channel at a time after the draws.</param>
+    /// <param name="maxParallelism">What the study declares, or null for one per processor.</param>
+    /// <returns>At least one.</returns>
+    /// <remarks>
+    /// The draws run in parallel, then the attribution - one iteration per channel, its two
+    /// evaluations one after the other - so the sweep holds the wider of the two phases. The
+    /// nominal evaluation before either runs alone. What <c>einzel estimate</c> multiplies one
+    /// evaluation's memory by, asked of the driver rather than restated.
+    /// </remarks>
+    public static int InFlight(int draws, int channels, bool oneAtATime, int? maxParallelism) =>
+        Math.Max(
+            Parallelism.InFlight(draws, maxParallelism),
+            oneAtATime ? Parallelism.InFlight(channels, maxParallelism) : 1);
+
     /// <summary>Runs a study.</summary>
     /// <param name="document">The model to perturb.</param>
     /// <param name="channels">The parameters to vary, and by how much.</param>
@@ -183,7 +200,7 @@ public static class ToleranceStudy
         {
             // Memory is the constraint, not cores: every draw in flight holds its own
             // solved field. See ParameterScan.Run for the arithmetic.
-            MaxDegreeOfParallelism = Math.Max(1, maxParallelism ?? Environment.ProcessorCount),
+            MaxDegreeOfParallelism = Parallelism.Degree(maxParallelism),
         };
 
         var drawn = new SweepDraw[draws];

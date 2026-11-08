@@ -105,6 +105,18 @@ become a feature release without being renamed twice.
   diffusive mixture once per species, adds what earlier elements keep, says what its figure
   counted, and says so when the peak is more than half of what the process may use on this
   machine - whether or not anything in the model is solved.
+- **`einzel estimate` billed a parallel study for one evaluation's memory.** A scan or tolerance
+  sweep runs up to `maxParallelism` evaluations at once - one per processor when the study does
+  not say - and each solves its own field, so a scan running sixteen points at once needs sixteen
+  times what was quoted. The estimate now multiplies by how many are in flight, reports that
+  count (`inFlight`) and the per-evaluation figure beside the total, and says when the total will
+  not fit this machine. An optimization or a boundary search runs one point at a time and is
+  unchanged. Each evaluation is billed at the dearest end of the study's range rather than at the
+  model's declared values, since a study that varies the mesh varies what an evaluation holds.
+- **Mean-field space charge was billed no memory.** A diffusive run with
+  `"spaceCharge": "meanField"` holds about 62 bytes a density node more than one without - its
+  potential, the density it was solved for, a mask, and the Poisson solve it refreshes during the
+  run - once however many species there are. The estimate now charges it.
 - **A driven solve held finished channels' geometry** while solving the next: 353.7 bytes a
   node for two volume channels where 248.7 is what they need, and the driven plane build kept
   its first channel's mask, 73 bytes a node, through every later channel.
