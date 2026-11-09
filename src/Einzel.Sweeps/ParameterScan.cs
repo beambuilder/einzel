@@ -279,6 +279,17 @@ public sealed record ScanResult(
 /// </remarks>
 public static class ParameterScan
 {
+    /// <summary>How many of a scan's points <see cref="Run"/> evaluates at once.</summary>
+    /// <param name="points">The points the scan declares.</param>
+    /// <param name="maxParallelism">What the study declares, or null for one per processor.</param>
+    /// <returns>At least one.</returns>
+    /// <remarks>
+    /// What <c>einzel estimate</c> multiplies one evaluation's memory by, asked of the driver
+    /// rather than restated, so the two cannot disagree about what runs together.
+    /// </remarks>
+    public static int InFlight(int points, int? maxParallelism) =>
+        Parallelism.InFlight(points, maxParallelism);
+
     /// <summary>Runs a scan.</summary>
     /// <param name="document">The model to vary.</param>
     /// <param name="axis">The parameter, the range, and the points.</param>
@@ -375,16 +386,22 @@ public static class ParameterScan
         // seed and a collision sampler from the gas seed plus the ion's index, so a point
         // computes the same number wherever it runs.
         //
-        // MEMORY IS THE CONSTRAINT, NOT CORES, WHEN THE POINTS SOLVE. A point that solves
-        // holds the solver's working set while it does: a DC scan of the 0.2 mm quadrupole
-        // (8.5 M nodes) peaked at 4.5 GB one point at a time and 9.4 GB two at a time. A
-        // point that re-weights the nominal channels holds only its flights when the
-        // evaluator shares those channels. The caller lowers `maxParallelism` when the solve
-        // is large; the default is one per processor, which is right for the plane
-        // geometries most studies scan.
+        // MEMORY IS THE CONSTRAINT, NOT CORES. Each point in flight that solves holds its own
+        // solved field, so peak memory is the degree of parallelism times one evaluation's peak,
+        // less what a point that re-weights the nominal channels does not hold, and
+        // `einzel estimate <study>` reports that peak (StudyEstimate.InFlight, SPEC Amendment
+        // 70): a DC scan of the 0.2 mm quadrupole (8.5 M nodes) peaked at 4.5 GB one point at a
+        // time and 9.4 GB two at a time. A point that re-weights the nominal channels holds only
+        // its flights when the evaluator shares those channels. The caller lowers
+        // `maxParallelism` when the solve is large; the default is one per processor, which is
+        // right for the plane geometries most studies scan.
+        //
+        // NO FIGURE HERE, ON PURPOSE. This said 1.6 GiB for a 34 M-node volume, which was
+        // 34 M nodes at the estimate's old 48 bytes a node - a number restated from a
+        // constant, which stayed when the constant was found five times low.
         var rows = new ScanPoint[axis.Points];
 
-        var parallelism = Math.Max(1, maxParallelism ?? Environment.ProcessorCount);
+        var parallelism = Parallelism.Degree(maxParallelism);
 
         Parallel.For(
             0,

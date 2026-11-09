@@ -56,8 +56,11 @@ public sealed record StudyFieldSurvey
     /// <summary>How many evaluations the study makes, its nominal included where it evaluates one.</summary>
     public required int Evaluations { get; init; }
 
-    /// <summary>How many evaluations may run at once: one for a boundary search or an optimisation.</summary>
-    public required int MaxParallelism { get; init; }
+    /// <summary>
+    /// How many evaluations run at once: the drivers' own rule (<see cref="Sweeps.Parallelism"/>),
+    /// capped by the work; one for a boundary search or an optimisation.
+    /// </summary>
+    public required int InFlight { get; init; }
 
     /// <summary>How many evaluations solve a channel; the nominal counts when it does.</summary>
     public required int SolvingEvaluations { get; init; }
@@ -75,9 +78,15 @@ public sealed record StudyFieldSurvey
     public required double BudgetMiB { get; init; }
 
     /// <summary>
-    /// The study's peak, in mebibytes: the evaluations solving at once times one solve's peak,
-    /// plus what the memo keeps (its budget when points add channels, the nominal channels
-    /// otherwise).
+    /// What the memo keeps, in mebibytes: its budget when points add channels, the nominal
+    /// channels otherwise.
+    /// </summary>
+    public required double HeldMiB { get; init; }
+
+    /// <summary>
+    /// The study's field peak, in mebibytes: the evaluations solving at once (at most
+    /// <see cref="InFlight"/>) times one solve's peak, plus <see cref="HeldMiB"/>. Points that
+    /// re-weight the nominal channels solve nothing and add nothing here, whatever runs at once.
     /// </summary>
     public required double PeakMiB { get; init; }
 
@@ -148,14 +157,14 @@ public static class StudyFields
             project, EngineBuild.SolverBehaviourVersion, EngineBuild.ComputePath, hash) is not null;
 
         var channels = keys.SelectMany(key => key.ChannelHashes).Distinct(StringComparer.Ordinal).ToList();
-        var (evaluations, parallel) = Extent(study);
-        var parallelism = parallel ? Math.Max(1, study.MaxParallelism ?? Environment.ProcessorCount) : 1;
+        var evaluations = Extent(study);
+        var inFlight = InFlight(study);
         var nominalCached = nominalChannels.Count(Cached);
         var pointsCached = added.All(Cached);
 
         var pointsSolve = pointChannels > 0 && !pointsCached;
         var solving = (pointsSolve ? evaluations - 1 : 0) + (nominalCached < nominalChannels.Count ? 1 : 0);
-        var atOnce = pointsSolve ? Math.Min(parallelism, Math.Max(1, evaluations - 1)) : Math.Min(solving, 1);
+        var atOnce = Math.Min(inFlight, solving);
 
         var (solvePeak, channelBytes) = Memory(nominal);
 
@@ -165,6 +174,7 @@ public static class StudyFields
             channelBytes *= (double)nominalChannels.Count / Math.Max(1, SolveHash.Of(nominal).Sum(key => key.ChannelHashes.Count));
         }
         var budget = (double)Budget(study, (long)channelBytes);
+        var held = pointChannels > 0 ? budget : channelBytes;
 
         return new StudyFieldSurvey
         {
@@ -176,12 +186,13 @@ public static class StudyFields
             PointChannels = pointChannels,
             PointsCached = pointsCached,
             Evaluations = evaluations,
-            MaxParallelism = parallelism,
+            InFlight = inFlight,
             SolvingEvaluations = solving,
             SolvePeakMiB = solvePeak / Mebibyte,
             ChannelMiB = channelBytes / Mebibyte,
             BudgetMiB = budget / Mebibyte,
-            PeakMiB = ((atOnce * solvePeak) + (pointChannels > 0 ? budget : channelBytes)) / Mebibyte,
+            HeldMiB = held / Mebibyte,
+            PeakMiB = ((atOnce * solvePeak) + held) / Mebibyte,
             BasisNote = basis is { SamplesEveryPoint: false }
                 ? "search points are not sampled; a point that does not fit the plan solves its own patterns"
                 : null,
@@ -201,39 +212,69 @@ public static class StudyFields
     }
 
     /// <summary>
-    /// How many evaluations a study makes, its nominal included where the driver evaluates one,
-    /// and whether they may run at once.
+    /// How many of a study's evaluations run at once: the drivers' own rule, capped by the work.
     /// </summary>
     /// <param name="study">The study.</param>
-    /// <returns>The count, which is a ceiling for a search, and whether the driver runs points in parallel.</returns>
+    /// <returns>
+    /// <see cref="Sweeps.ParameterScan.InFlight"/> for a scan, <see cref="Sweeps.ToleranceStudy.InFlight"/> for a
+    /// sweep (the wider of its two phases), one for an optimisation or a boundary search.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="study"/> is null.</exception>
+    /// <remarks>
+    /// Asked of the drivers rather than restated, so the estimate, the survey and the run cannot
+    /// disagree about what runs together.
+    /// </remarks>
+    public static int InFlight(StudyDocument study)
+    {
+        ArgumentNullException.ThrowIfNull(study);
+
+        if (study.Scan is { } scan)
+        {
+            return Sweeps.ParameterScan.InFlight(scan.Points, study.MaxParallelism);
+        }
+
+        if (study.Boundary is not null || study.Variables is { Count: > 0 })
+        {
+            return 1;
+        }
+
+        return Sweeps.ToleranceStudy.InFlight(
+            study.Draws, study.Channels?.Count ?? 0, study.OneAtATime, study.MaxParallelism);
+    }
+
+    /// <summary>
+    /// How many evaluations a study makes, its nominal included where the driver evaluates one.
+    /// </summary>
+    /// <param name="study">The study.</param>
+    /// <returns>The count, which is a ceiling for a search. How many run at once is <see cref="InFlight"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="study"/> is null.</exception>
     /// <remarks>
     /// A scan and a sweep evaluate the nominal model alone before their points, and count it
     /// here; an optimisation's first evaluation is its starting point, inside its budget; a
     /// boundary search evaluates its bracket and never the nominal.
     /// </remarks>
-    public static (int Evaluations, bool Parallel) Extent(StudyDocument study)
+    public static int Extent(StudyDocument study)
     {
         ArgumentNullException.ThrowIfNull(study);
 
         if (study.Scan is { } scan)
         {
-            return (Math.Max(scan.Points, 1) + 1, true);
+            return Math.Max(scan.Points, 1) + 1;
         }
 
         if (study.Boundary is { } boundary)
         {
-            return (Math.Max(boundary.MaximumEvaluations, 1), false);
+            return Math.Max(boundary.MaximumEvaluations, 1);
         }
 
         if (study.Variables is { Count: > 0 })
         {
-            return (Math.Max(study.MaximumEvaluations, 1), false);
+            return Math.Max(study.MaximumEvaluations, 1);
         }
 
         var attribution = study.OneAtATime ? 2 * (study.Channels?.Count ?? 0) : 0;
 
-        return (Math.Max(study.Draws + attribution, 1) + 1, true);
+        return Math.Max(study.Draws + attribution, 1) + 1;
     }
 
     /// <summary>The overrides of the points a survey samples.</summary>

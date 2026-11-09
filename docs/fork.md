@@ -149,6 +149,29 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **A study's memory is billed per evaluation in flight, and a point that
+  re-weights the nominal channels is not multiplied by it.** Upstream sync
+  `de73ec8` to `60af6ec` (upstream PRs #64 and #65). #64 multiplies a study's
+  memory by the evaluations in flight, asked of the drivers (`Parallelism.Degree`,
+  `ParameterScan.InFlight`, `ToleranceStudy.InFlight`), bills each evaluation
+  at the dearest end of its range and charges a mean-field self-field 62 bytes a
+  node; the fork's channel-key costing (PR #15, Amendment 62) bills one solve
+  per evaluation that solves and nothing for one that re-weights. The two are
+  one rule in `EstimateCommand.ForStudy`:
+  `min(inFlight, solvingEvaluations) x solve + memo + max(0, evaluation - solve) x inFlight`,
+  every per-evaluation figure at the dearest end (Amendment 70). On the shipped
+  mirror pair a five-point `capToCap` scan at `maxParallelism` 4 is billed
+  19.00 MiB (4 x 4.62 at the 800 mm end, over the memo's 0.52);
+  a five-point `ionEnergy` scan at the same setting 2.44 MiB, one
+  solve and the channels, where upstream's product alone gave 9.24.
+  `StudyEstimate.MaxParallelism` is `InFlight`; `solvingEvaluations`,
+  `solvedChannels`, `loadedChannels` and `fieldSeconds` stay. #65 is the fork's
+  PR #58 (the sandbox child keeps `SYSTEMROOT` on Windows) squash-merged
+  upstream, so the ten Python-sandbox failures on the development machine
+  (Python 3.9) are gone: 2463 tests, 0 failures, against 2444
+  with 10 failures at `751a3bd`. `dc_quad` and `lens_einzel` of the reference
+  corpus re-run on the merged build: both PASS (12/12 and 20/20 checks), every recorded number bit-identical, only timings and timestamps differ. No schema or solver-version
+  change. [CLI](cli.md#what-estimate-measures-and-what-it-does-not), SPEC Amendment 70. PR #29 (number assumed).
 - **A document lands on its waveform edges unless it says `edges: cap`.** The
   default of `transport.edges` is `land`, in the validator (an absent key compiles
   to `LandOnEdges = true`) and in `IntegrationSettings` (default true), now that
