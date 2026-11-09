@@ -340,20 +340,79 @@ public sealed class SubprocessRunnerTests(ITestOutputHelper output) : IDisposabl
                 def run(payload):
                     return {
                         "sawSecret": "EINZEL_SECRET_UNDER_TEST" in os.environ,
-                        "variables": len(os.environ),
+                        "variables": sorted(os.environ),
                     }
                 """);
 
             var result = Run(folder, new JsonObject());
 
-            output.WriteLine($"the child saw {result.Output!["variables"]} environment variables");
+            var names = result.Output!["variables"]!.AsArray()
+                .Select(n => n!.GetValue<string>())
+                .ToArray();
+
+            output.WriteLine(
+                $"the child saw {names.Length} environment variables: {string.Join(", ", names)}");
 
             Assert.False(result.Output["sawSecret"]!.GetValue<bool>());
+
+            // And on Windows the allow-list is the whole of what it saw. SYSTEMROOT is
+            // what CPython up to 3.10 needs to start there - a bare Clear() killed every
+            // extension on a desktop with Python 3.9 while CI's 3.12 did not care - and a
+            // second name arriving here would be the scrub growing without this test
+            // noticing. Not asserted elsewhere: nothing here has measured whether CPython
+            // sets LC_CTYPE in its own environment under the C locale an empty
+            // environment gives it (PEP 538), so the list is printed and the planted
+            // secret is what is asserted.
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Equal(["SYSTEMROOT"], names);
+            }
         }
         finally
         {
             Environment.SetEnvironmentVariable("EINZEL_SECRET_UNDER_TEST", null);
         }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheScrubKeepsSystemRootOnWindowsAndNothingAnywhereElse(bool windows)
+    {
+        // No interpreter needed: this is the list the runner builds, not the child that
+        // reads it. Both branches on both CI runners, so the Windows allow-list is
+        // checked on the Linux runner too - a sandbox rule checked only where it happens
+        // to run is one nobody is checking.
+        //
+        // The parent has what a developer's shell has: the one variable the child needs,
+        // spelled as Windows spells it; the three candidates that were tried and found
+        // unnecessary (3.9.13 does not start on any of them alone); and the things the
+        // scrub exists to drop.
+        var parent = new Dictionary<string, string?>
+        {
+            ["SystemRoot"] = @"C:\WINDOWS",
+            ["WINDIR"] = @"C:\WINDOWS",
+            ["TEMP"] = @"C:\Users\someone\AppData\Local\Temp",
+            ["TMP"] = @"C:\Users\someone\AppData\Local\Temp",
+            ["PATHEXT"] = ".COM;.EXE;.BAT;.CMD",
+            ["PATH"] = @"C:\Python39;C:\WINDOWS\system32",
+            ["PYTHONPATH"] = @"C:\somebody\site-packages",
+            ["HTTPS_PROXY"] = "http://user:hunter2@proxy.example:8080",
+            ["AWS_SECRET_ACCESS_KEY"] = "hunter2",
+        };
+
+        var child = SubprocessRunner.ChildEnvironment(parent, windows);
+
+        if (!windows)
+        {
+            Assert.Empty(child);
+            return;
+        }
+
+        var only = Assert.Single(child);
+
+        Assert.Equal("SYSTEMROOT", only.Key, ignoreCase: true);
+        Assert.Equal(@"C:\WINDOWS", only.Value);
     }
 
     [Fact]

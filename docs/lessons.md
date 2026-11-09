@@ -5541,3 +5541,23 @@ or say which machines it is blind on. **Run the mutation where the test will run
 it was written: a mutation caught on a sixteen-thread box is evidence about that box. And **when a
 measurement includes a runtime's scheduling, decide whether that is the thing being measured** -
 here it was not, so it is held fixed.
+
+## An empty environment is not a sandbox, and a test that needs the machine's Python tests the machine's Python
+
+The extension sandbox started its child with no environment at all, because a child that
+inherits the parent's environment inherits its credentials, its proxy settings and its
+`PYTHONPATH`. On a Windows desktop whose Python is 3.10 or older that killed every
+extension before its first line: CPython seeds hash randomisation from the operating
+system's random source, and up to 3.10 it reaches it through CryptoAPI, which does not
+work without `SYSTEMROOT`. The fix is one variable, and the measurement that chose it is
+in `docs/extensions.md`.
+
+Two rules. **The operating system has dependencies of its own, and a sandbox that removes
+everything has removed them too.** What to keep is measured one variable at a time rather
+than reasoned about: `WINDIR`, `TEMP` and `PATHEXT` all look as necessary as `SYSTEMROOT`,
+and none of them is. And **a suite that depends on what the machine has installed measures
+what the machine has installed.** CI was green on every run because the runner's Python is
+3.12, which reaches the random source another way, so the one configuration the suite ran
+under was the one the defect did not reach. EXT-6's vendored interpreter is the structural
+answer; until it exists, the thing to know is which Python the tests saw, and `einzel
+doctor` says.
