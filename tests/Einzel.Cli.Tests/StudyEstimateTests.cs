@@ -293,4 +293,159 @@ public sealed class StudyEstimateTests(ITestOutputHelper output) : IDisposable
         Assert.Equal("scan", grid.Kind);
         Assert.False(grid.EvaluationsAreACeiling);
     }
+
+    /// <summary>
+    /// A scan whose points re-weight the nominal channels solves once whatever runs at once: its
+    /// field memory is one solve and the channels the memo holds, not that times the evaluations
+    /// in flight.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The ion energy reaches no electrode, so every point of this scan flies through the nominal
+    /// field; the fork's survey says so (<c>SolvingEvaluations</c> 1) and the memory rule has to
+    /// follow it. Multiplying the field part by <c>inFlight</c>, as upstream's product does for a
+    /// study whose every point solves, fails here: 4 x one solve against one.
+    /// </para>
+    /// <para>
+    /// Mutation: multiply the field part by <c>inFlight</c> (drop the <c>Math.Min</c> against
+    /// <c>SolvingEvaluations</c> in favour of <c>inFlight</c> alone) and this fails.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AScanWhosePointsReWeightTheNominalChannelsIsNotMultipliedByItsParallelism()
+    {
+        var path = Study(
+            "{ \"schemaVersion\": \"0.1\", \"name\": \"energy\", \"model\": \"MODEL\", "
+            + "\"figureOfMerit\": \"resolvingPower\", \"ions\": 9, \"maxParallelism\": 4, \"scan\": { "
+            + "\"parameter\": \"ionEnergy\", \"from\": 3800.0, \"to\": 4200.0, \"unit\": \"V\", "
+            + "\"points\": 5 } }");
+
+        var costed = EstimateCommand.ForStudy(path, calibrate: false);
+        var study = costed.Study!;
+        var (document, modelPath, _) = StudyCommand.Load(path);
+        var survey = StudyFields.Survey(
+            document, Einzel.Io.ModelJson.Parse(File.ReadAllText(modelPath)), Path.GetDirectoryName(modelPath), null)!;
+        var one = EstimateCommand.Execute(modelPath, calibrate: false).MemoryMiB;
+
+        output.WriteLine($"{study.InFlight} in flight, {study.SolvingEvaluations} solving; one solve {one:F2} MiB, "
+            + $"channels {survey.ChannelMiB:F2} MiB, billed {costed.MemoryMiB:F2} MiB");
+
+        Assert.Equal(4, study.InFlight);
+        Assert.Equal(1, study.SolvingEvaluations);
+        Assert.Equal(0, survey.PointChannels);
+        Assert.Equal(one, study.MemoryMiBPerEvaluation);
+        Assert.Equal(one + survey.ChannelMiB, costed.MemoryMiB, 9);
+        Assert.Contains("1 of them solves at once and the rest re-weight the nominal channels", costed.Basis, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A scan whose points solve holds one solve per evaluation in flight, at the dearest end of
+    /// its range, over what the memo keeps.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The separation moves the mirrors, so every point solves its own field and four of them do
+    /// so at once; the far end of 700 to 800 mm crosses a power of two in the mesh, so the solve
+    /// is billed there (<c>MemoryMiBPerEvaluation</c>), and the memo's budget - four nominal
+    /// channels' worth by default - is on top. That is upstream's product plus the memo term.
+    /// </para>
+    /// <para>
+    /// Mutation: drop the <c>Math.Min(inFlight, SolvingEvaluations)</c> factor (bill one solve)
+    /// and this fails at one solve plus the budget against four.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AScanWhosePointsSolveHoldsOneSolvePerEvaluationInFlight()
+    {
+        var path = Study(
+            "{ \"schemaVersion\": \"0.1\", \"name\": \"separation\", \"model\": \"MODEL\", "
+            + "\"figureOfMerit\": \"resolvingPower\", \"ions\": 9, \"maxParallelism\": 4, \"scan\": { "
+            + "\"parameter\": \"capToCap\", \"from\": 700.0, \"to\": 800.0, \"unit\": \"mm\", "
+            + "\"points\": 5 } }");
+
+        var costed = EstimateCommand.ForStudy(path, calibrate: false);
+        var study = costed.Study!;
+        var (document, modelPath, _) = StudyCommand.Load(path);
+        var survey = StudyFields.Survey(
+            document, Einzel.Io.ModelJson.Parse(File.ReadAllText(modelPath)), Path.GetDirectoryName(modelPath), null)!;
+        var one = EstimateCommand.Execute(modelPath, calibrate: false).MemoryMiB;
+
+        output.WriteLine($"{study.InFlight} in flight, {study.SolvingEvaluations} solving; nominal {one:F2} MiB, "
+            + $"dearest {study.MemoryMiBPerEvaluation:F2} MiB, budget {survey.BudgetMiB:F2} MiB, billed {costed.MemoryMiB:F2} MiB");
+
+        Assert.Equal(4, study.InFlight);
+        Assert.Equal(6, study.SolvingEvaluations);
+        Assert.True(study.MemoryMiBPerEvaluation >= one);
+        Assert.Equal((4.0 * study.MemoryMiBPerEvaluation) + survey.BudgetMiB, costed.MemoryMiB, 9);
+        Assert.Contains("runs 4 evaluations at once (maxParallelism 4), and each compiles and solves its own model", costed.Basis, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// What an evaluation holds besides its field - here a stepped density - is held by every
+    /// evaluation in flight, while its field is held once when the points re-weight.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A pressure scan of the diffusive bore: the gas pressure reaches no electrode, so the five
+    /// points share the nominal channels and one solve is billed, but each of the four in flight
+    /// steps its own density, which on a 256 x 64 grid (263 bytes a node) holds more than the
+    /// 0.25 mm solve does. The three terms
+    /// are therefore all live and all different: the channels the memo holds, one solve, and four
+    /// times the density's excess over the solve.
+    /// </para>
+    /// <para>
+    /// Mutations: multiply the third term by the solving count (1) instead of <c>inFlight</c> (4)
+    /// and this fails at one density's worth against four; drop the term and it fails at the field
+    /// alone.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WhatAnEvaluationHoldsBesidesItsFieldIsHeldByEveryEvaluationInFlight()
+    {
+        var model = DriftTubes.Bore(intervalsX: 256, intervalsY: 64)
+            .Replace("\"name\": \"bore\",", "\"name\": \"bore\", \"parameters\": { \"pressure\": { \"value\": 2, \"unit\": \"mbar\", \"minimum\": 0.5, \"maximum\": 5 } },", StringComparison.Ordinal)
+            .Replace("\"pressure\": { \"value\": 2, \"unit\": \"mbar\" }", "\"pressure\": { \"expression\": \"pressure\", \"unit\": \"mbar\" }", StringComparison.Ordinal);
+
+        var path = StudyOver(
+            model,
+            "{ \"schemaVersion\": \"0.1\", \"name\": \"pressure\", \"model\": \"MODEL\", "
+            + "\"figureOfMerit\": \"flightTime\", \"maxParallelism\": 4, \"scan\": { "
+            + "\"parameter\": \"pressure\", \"from\": 1.5, \"to\": 2.5, \"unit\": \"mbar\", "
+            + "\"points\": 5 } }");
+
+        var costed = EstimateCommand.ForStudy(path, calibrate: false);
+        var study = costed.Study!;
+        var (document, modelPath, _) = StudyCommand.Load(path);
+        var survey = StudyFields.Survey(
+            document, Einzel.Io.ModelJson.Parse(File.ReadAllText(modelPath)), Path.GetDirectoryName(modelPath), null)!;
+        var evaluation = EstimateCommand.Execute(modelPath, calibrate: false).MemoryMiB;
+        var solve = survey.SolvePeakMiB;
+
+        output.WriteLine($"{study.InFlight} in flight, {study.SolvingEvaluations} solving; evaluation {evaluation:F2} MiB, "
+            + $"solve {solve:F2} MiB, held {survey.HeldMiB:F2} MiB, billed {costed.MemoryMiB:F2} MiB");
+
+        Assert.Equal(4, study.InFlight);
+        Assert.Equal(1, study.SolvingEvaluations);
+        Assert.Equal(0, survey.PointChannels);
+        Assert.True(evaluation > solve, "the density does not exceed the solve, so the third term is not exercised");
+        Assert.Equal(evaluation, study.MemoryMiBPerEvaluation);
+        Assert.Equal(survey.HeldMiB + solve + ((evaluation - solve) * 4.0), costed.MemoryMiB, 9);
+        Assert.Contains("1 of them solves at once", costed.Basis, StringComparison.Ordinal);
+    }
+
+    /// <summary>Writes a model of its own and a study over it, in the same project layout the template studies use.</summary>
+    private string StudyOver(string modelJson, string body)
+    {
+        var models = Path.Combine(_root, "models");
+        Directory.CreateDirectory(models);
+
+        var name = $"model-{Guid.NewGuid():N}.json";
+        File.WriteAllText(Path.Combine(models, name), modelJson);
+
+        var path = Path.Combine(_root, "studies", Guid.NewGuid().ToString("N") + ".json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, body.Replace("MODEL", "../models/" + name, StringComparison.Ordinal));
+
+        return path;
+    }
 }

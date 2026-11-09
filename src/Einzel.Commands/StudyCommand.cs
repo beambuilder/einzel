@@ -1057,8 +1057,8 @@ public static class StudyCommand
         if (survey is not null && available > 0 && survey.PeakMiB * 1024.0 * 1024.0 > available)
         {
             announce?.Invoke(
-                "  warning: " + EstimateCommand.CapacityNote(survey.PeakMiB, available, "this study's")
-                + (survey.PointChannels > 0 && survey.MaxParallelism > 1
+                "  warning: " + EstimateCommand.CapacityNote(survey.PeakMiB, available, "this study's peak")
+                + (survey.PointChannels > 0 && survey.InFlight > 1
                     ? " Its points solve channels of their own, so a lower maxParallelism lowers it."
                     : string.Empty));
         }

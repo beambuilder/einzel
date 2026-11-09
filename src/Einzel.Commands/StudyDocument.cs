@@ -123,14 +123,15 @@ public sealed record StudyDocument
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Memory is the constraint, not cores, for a study whose points solve.</b> One
-    /// evaluation that solves holds the solver's working set and its channels: on the 0.2 mm
-    /// quadrupole (8.5 M nodes, two channels) 1.3 GiB live and 4.5 GB of working set, and a
-    /// DC scan of it at two at once peaked at 9.4 GB. A study whose points reuse the nominal
+    /// <b>Memory is the constraint, not cores.</b> Every evaluation in flight that solves holds
+    /// its own solved field, so peak memory is this times one evaluation's peak, and
+    /// <c>einzel estimate</c> on the study reports that product before anything runs: on the
+    /// 0.2 mm quadrupole (8.5 M nodes, two channels) 1.3 GiB live and 4.5 GB of working set, and
+    /// a DC scan of it at two at once peaked at 9.4 GB. A study whose points reuse the nominal
     /// channels - an amplitude, a frequency, an ion - solves once and shares those channels
-    /// between its evaluations, so its memory does not grow with this. <c>estimate</c> and the
-    /// study itself say what the peak will be, and a study that will not fit says so before it
-    /// starts.
+    /// between its evaluations, so its field memory does not grow with this, and a study that
+    /// will not fit says so before it starts. A large volume geometry can need a limit here; the
+    /// plane geometries most studies scan do not.
     /// </para>
     /// <para>
     /// It changes what a study <i>costs</i> and never what it <i>says</i>: draws are made in

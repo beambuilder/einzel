@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>memory-harness</AssemblyName>
+    <RootNamespace>MemoryHarness</RootNamespace>
+    <!--
+      The runtime's default collector, stated rather than left implicit: the peak working set
+      this measures IS a property of the collector, so a run under a different configuration
+      is a different measurement. See README.md.
+    -->
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Einzel.Commands\Einzel.Commands.csproj" />
+    <ProjectReference Include="..\..\src\Einzel.Fields\Einzel.Fields.csproj" />
+    <ProjectReference Include="..\..\src\Einzel.Io\Einzel.Io.csproj" />
+  </ItemGroup>
+
+</Project>

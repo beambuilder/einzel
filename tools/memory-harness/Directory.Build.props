@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    A measuring tool, not engine code, and deliberately not in Einzel.slnx. It has its own
+    Directory.Build.props so that it does NOT inherit the repository's one: MSBuild takes the
+    nearest file and does not chain, so the strict analyzers and warnings-as-errors that hold
+    the engine to ACC-1 do not apply to a console program that prints a JSON line. The engine
+    projects it references still build under the repository's rules, because they live in src/.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

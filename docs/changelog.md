@@ -2594,6 +2594,48 @@ And **extraction efficiency is now an actual comparison**: the paper's ~84% at m
 
   **The same line had a second victim.** One electrode tapping one generator twice - at one phase, or at two phases of a sinusoid, which resolve into the same in-phase and quadrature supplies - wrote one entry twice, and 100 V and 50 V flew *exactly* as 50 V alone. Contributions now add, which is bit-identical wherever an electrode reaches a supply once. Eighteen tests in three files (`ElectrodeNameTests`, `ElectrodeNameValidationTests`, `DriveChannelIdentityTests`); fifteen fail on the unfixed code, the other three are controls, and each of six mutations of the fix fails its own tests. `docs/lessons.md`, "A default every instance shares cannot be a key".
 
+- **An empty environment is not a sandbox, and on Windows it was not one Python could start
+  in.** The sandbox gave its child no environment at all (`Environment.Clear()`), so no
+  credential, proxy setting or `PYTHONPATH` could reach it - and on an ordinary Windows desktop
+  every extension died before its first line: "Fatal Python error: _Py_HashRandomization_Init:
+  failed to get random numbers to initialize Python". CPython seeds its hash randomisation from
+  the operating system's random source at start-up, and up to 3.10 it reaches that source through
+  CryptoAPI (`CryptAcquireContext`), which does not work in a process with no `SYSTEMROOT`. On a
+  machine where `py.exe` resolves to 3.9.13 that is **ten tests red on `main`**: all six of
+  `SubprocessRunnerTests` and four in `Einzel.Cli.Tests` (`ExtensionSurfaceTests` x3,
+  `AStudyDrivenByAnExtensionRecordsWhichPythonRanIt`), and `einzel ext register` followed by
+  `einzel ext test` fails on every project.
+
+  **Measured before changing anything**, with the sandbox's own `-I -B`: 3.9.13 dies with an
+  empty environment and starts with `SYSTEMROOT` alone; with `WINDIR` alone, `TEMP` and `TMP`
+  alone, or `PATHEXT` alone it still dies, so none of the three is kept; 3.11.5 starts with
+  nothing at all, because 3.11 moved `os.urandom` to `BCryptGenRandom`
+  (`Python/bootstrap_hash.c` on the 3.10 and 3.11 branches). **That is also why CI was green**:
+  the `windows-2025` runner's default Python is 3.12.10, and all six extension tests passed there
+  on every run. A test that needs the machine's Python is a test of the machine's Python, and the
+  suite had been checking the one version that does not care.
+
+  The child now keeps `SYSTEMROOT` on Windows - the path of the Windows directory, not a
+  credential, a proxy setting or an import path - and nothing anywhere else; Linux and macOS are
+  unchanged. `SubprocessRunner.ChildEnvironment` builds the list and is tested directly, both
+  branches on both runners, against a parent carrying the variable as Windows spells it
+  (`SystemRoot`), the three rejected candidates, `PATH`, `PYTHONPATH`, a proxy with a password
+  and a cloud secret; on Windows `TheChildInheritsNoEnvironment` now asserts the whole list the
+  child saw rather than only the absence of one planted secret (elsewhere CPython may add
+  `LC_CTYPE` at start-up, so the secret is what is asserted there). Mutation-checked: dropping `SYSTEMROOT` from the
+  list fails the unit test and the same ten end-to-end tests; adding `WINDIR` fails the unit test
+  and the end-to-end list. `docs/extensions.md` carries the per-platform list; SPEC.md EXT-3's
+  evidence no longer says "zero inherited environment". After: 1,644 tests, 0 failures, on a
+  Windows desktop with Python 3.9.
+
+  **Re-checked on 2026-11-08 on a second Windows machine, where it does not reproduce.** That
+  machine's only Python is 3.12.10, which starts with an empty environment through `python.exe`
+  and `py.exe` both, and `main` passes all ten tests there, as it does on CI. That confirms the
+  measurement above rather than contradicting it: the defect needs a discovered interpreter of
+  3.10 or older, and neither that machine nor either CI runner has one - so only a desktop like
+  the one it was found on will show it, which is why the fix stays. A defect that needs a
+  particular install is not disproved by a machine that lacks it.
+
 Adding a travelling-wave guide or a multipole should need only one more file — axisymmetry, repeats and RF all exist now. If it needs a change below `Einzel.Library`, LIB-1 says the abstraction is wrong — believe it.
 
 Two findings from Stage 1 that bear on the spec:
@@ -2946,3 +2988,69 @@ Two findings from Stage 1 that bear on the spec:
   (clear of the edge, against a mirror, a sheet, which edges are mirrors); handing the
   viewport bare points again fails the volume test and nothing else.
   `docs/shell.md`, `docs/rendering.md`, `docs/lessons.md`.
+
+- **A parallel study was billed one evaluation's memory, and mean-field space charge was billed
+  none.** Two gaps in `einzel estimate`'s memory figure that #55's measurement left, both
+  measured rather than argued.
+
+  **A study holds one evaluation for every evaluation in flight.** A scan runs its points and a
+  tolerance sweep its draws - then its attribution - up to `maxParallelism` at once, one per
+  processor when the study does not say, and each compiles and solves its own model. `ForStudy`
+  multiplied the time by the evaluation count and left the memory at one evaluation's, so a
+  sixteen-way scan was billed a sixteenth. It now reports `inFlight` and
+  `memoryMiBPerEvaluation` beside the product, capped by the work (a five-point scan holds five)
+  and, for a sweep, the wider of its two phases; an optimization and a boundary search hold one.
+  **The count is asked of the drivers, not restated**: `ParameterScan.InFlight` and
+  `ToleranceStudy.InFlight` sit beside the loops they describe and read the one
+  `Parallelism.Degree` those loops run at. `StudyInFlightTests` also runs both drivers on the
+  study's own document with an evaluator that counts the calls inside it at once - 2, 3 and one per
+  processor for three scans, 2 and 3 for two sweeps, the estimate's numbers. Its first version ran
+  at a `maxParallelism` of 4, where a driver ignoring the setting runs one per processor and looks
+  identical on a four-core runner; that mutation was caught only on a sixteen-thread machine. And
+  at one per processor the last evaluation waited half a second for the pool to inject a thread
+  and read 15 of 16, so the test raises the pool's minimum for the run: it measures the driver,
+  not the pool.
+
+  **And an evaluation is billed at the dearest end of the study's range**, as its flight already
+  was sampled there. Found in review, and it bites on ordinary studies: the shipped mirror pair's
+  solve runs to half the separation, so a 700 to 800 mm scan crosses a power of two in the mesh
+  and its far end holds 4.6 MiB against 2.3 at the declared 767. The memory statement and the
+  element timeline are now one function `Execute` and the range ends both call. The comment beside the parallel loop said a 34 M-node volume was
+  1.6 GiB an evaluation: **34 M nodes at the old 48 bytes a node**, a figure restated from a
+  constant that stayed when the constant was found five times low. It points at the estimate now.
+
+  **A self-field is 62 bytes a density node, charged once.** Mean-field keeps its potential, the
+  density it was solved for and a mask - 25 bytes a node - and refreshes a plane Poisson solve as
+  the density moves. Measured live over a five-microsecond flight it adds **61.3 to 61.4, flat
+  from 66 k to 1.05 M nodes**; two species add 69.3 to 69.4, the same solve plus the summed
+  charge's array; a cylindrical bore whose earthed wall lies inside the density grid reads 59.3,
+  so the figure holds where the self-field's mask fixes every absorbing node. The diffusive
+  constant's own remarks said "a mean-field solve adds its own grids", and nothing was charged.
+
+  **The first measurement read 25, and nothing about 25 looked wrong.** One step is the right
+  measurement for a plain diffusive run, whose every array exists by its first step - and the
+  harness's one-step shortcut read the self-field at exactly the arrays it keeps, flat across a
+  sixteenfold range. But the first Poisson solve is done before the stepping loop, and every later
+  one solves on top of the step's arrays; one step never reached one. `SelfFieldMemoryTests` now
+  asserts a refresh inside the loop as well as the value.
+
+  **Debug holds one array more**: 68.7 to 70.1 against Release's 61.4, a local kept to the end of
+  its method. CI tests Release, so the band is main's 0.90 to 1.02 there and Debug is allowed the
+  eight bytes. **And the first reading in a process is an outlier** - about 300 KiB above the
+  next four, one-time allocation on the first self-field solve - which is why this test keeps the
+  middle of five where `SolveMemoryTests` keeps the middle of three: it reads a difference of two
+  peaks, and the middle of three would rest on one further outlier. One failure in about thirty
+  runs, inside a mutation run, was not reproduced idle or with every core loaded; every reading is
+  now printed.
+
+  **`tools/memory-harness` measures both quantities, one fresh process each**, because sampling the
+  live set forces the collections that keep the working set down. On main it agrees with the
+  estimate's live figures to within six percent, and puts a number on the remark beside them:
+  **an unconstrained solve's working set is 2.1 to 2.2x its live set on a plane and 2.3 to 4.5x on
+  the shipped volumes**, growing with size; a diffusive step 1.03 to 1.12x.
+
+  **Eleven mutations, each caught by the test written for it**, including one in the engine - the
+  self-field keeping one array more - caught by the live measurement alone. Found on the way and
+  recorded rather than fixed: a trajectory model whose sequence enters a `diffusion` phase is billed
+  nothing for its density, because the estimate asks the model's own mode. SPEC.md GRD-8 and item
+  10; `docs/cli.md`, `docs/lessons.md`, `tools/memory-harness/README.md`.

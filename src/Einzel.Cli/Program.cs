@@ -469,7 +469,7 @@ public static class Program
             CultureInfo.InvariantCulture,
             $"  field: {survey.CachedChannels} of {survey.Channels} channel(s) in the cache at the nominal model and the study's ends; "
             + $"{points}; {survey.SolvingEvaluations} of {survey.Evaluations} evaluation(s) solve; "
-            + $"peak {EstimateCommand.MemorySize(survey.PeakMiB)} at up to {survey.MaxParallelism} at once"
+            + $"field peak {EstimateCommand.MemorySize(survey.PeakMiB)} with {Math.Min(survey.InFlight, survey.SolvingEvaluations)} solving at once of {survey.InFlight} in flight"
             + $"{(survey.BasisNote is { } note ? "; " + note : string.Empty)}"));
     }
 
@@ -960,12 +960,19 @@ public static class Program
             Console.Out.WriteLine(string.Create(
                 invariant,
                 $"field         {study.FieldSeconds:F2} s  ({study.SolvedChannels} channel solve(s), {study.LoadedChannels} load(s); "
-                + $"{study.SolvingEvaluations} of {study.Evaluations} evaluations solve, up to {study.MaxParallelism} at once)"));
+                + $"{study.SolvingEvaluations} of {study.Evaluations} evaluations solve)"));
 
             var bound = study.EvaluationsAreACeiling ? " at most" : string.Empty;
 
             Console.Out.WriteLine(string.Create(
                 invariant, $"{study.Kind,-13} {study.Evaluations} evaluations{bound}"));
+
+            // Beside the count, because the time multiplies by that and the memory by this - the
+            // field only by those of them that solve, so the line says how many do.
+            Console.Out.WriteLine(string.Create(
+                invariant,
+                $"in flight     {study.InFlight} at once, {Math.Min(study.InFlight, study.SolvingEvaluations)} of them solving, "
+                + $"{EstimateCommand.MemorySize(study.MemoryMiBPerEvaluation)} each"));
         }
 
         Console.Out.WriteLine(string.Create(
