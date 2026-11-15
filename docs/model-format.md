@@ -1,4 +1,4 @@
-# Model format, schema 0.9
+# Model format, schema 0.14
 
 A model is declarative, schema-validated, diffable JSON. A model file plus its
 referenced artifacts fully determines a run.
@@ -1106,6 +1106,32 @@ half-open region is a legitimate thing to want, but "the axes I left out" is not
 reads a partly-filled box. A **solved** element may not declare one, refused rather than
 ignored, because a solve is already bounded by its own domain and a document that says a
 thing twice can say it two ways. A region with no extent is refused too.
+
+### A fringe, so the edge is a ramp rather than a wall (schema 0.12)
+
+A region may also declare `fringe`, a length: the depth inside every face over which the
+element rises linearly from nothing to full strength. Absent means a hard edge, which is
+what every earlier document had. The spelling, from the `tims-front-end` template's
+tunnel RF:
+
+```json
+"region": {
+  "minX": { "expression": "...", "unit": "mm" }, "maxX": { "expression": "...", "unit": "mm" },
+  "minY": { "expression": "-funnelOuterRadius", "unit": "mm" }, "maxY": { "expression": "funnelOuterRadius", "unit": "mm" },
+  "minZ": { "expression": "-funnelOuterRadius", "unit": "mm" }, "maxZ": { "expression": "funnelOuterRadius", "unit": "mm" },
+  "fringe": { "expression": "rfFringe", "unit": "mm" }
+}
+```
+
+With a fringe the potential is continuous across the face (zero at it, the element's own a
+fringe inside) and the field is the gradient of the fringed potential, so a confining RF is
+an entrance rather than a wall: an ion arriving at any radius is squeezed toward the axis as
+the well grows under it, instead of meeting the whole well at once. It stands in for a real
+electrode's field decaying over about a bore radius and is a **modelling choice, not
+something solved**; the run says so in place of the region-step warning. The validator
+requires a length no less than zero and no more than half the region's smallest extent
+(`VALUE_OUT_OF_BOUNDS` at `.../region/fringe`), since a larger one never reaches full
+strength anywhere. It is read as an expression like any placement.
 
 ### The boundary is a step, and the step costs less than it looks like it should
 

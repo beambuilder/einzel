@@ -48,8 +48,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The only reference, and the boundary UI-1 is about. -->
+    <!-- The engine reference, and the boundary UI-1 is about. -->
     <ProjectReference Include="..\Einzel.Commands\Einzel.Commands.csproj" />
+    <!--
+      The second and last: the launch-time update check and the installer's hooks (UI-1 gives
+      the shell "the update check"; section 6 names Einzel.Update for it). It holds no physics
+      and no format knowledge, and the shell is the only thing allowed to reference it - UPD-2
+      keeps the CLI and the MCP server off the network by keeping them away from this.
+    -->
+    <ProjectReference Include="..\Einzel.Update\Einzel.Update.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -57,6 +64,13 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Silk.NET.OpenGL" />
+    <!--
+      Velopack, for one call: VelopackApp.Build().Run() first in Main. `vpk pack` refuses a main
+      executable whose own assembly does not make it. Everything else Velopack does - the feed,
+      the download, the hooks - is reached through Einzel.Update. Only these two assemblies may
+      reference Velopack (ShellBoundaryTests).
+    -->
+    <PackageReference Include="Velopack" />
   </ItemGroup>
 
 </Project>

@@ -138,11 +138,20 @@ public sealed class ShellBoundaryTests(ITestOutputHelper output)
     /// the CLI, the MCP server and the shell are peers driving the same command objects.
     /// </para>
     /// </remarks>
+    /// <remarks>
+    /// <para>
+    /// <b>The Avalonia shell may declare one more reference, deliberately: <c>Einzel.Update</c>.</b>
+    /// UI-1 gives the shell "the update check" and section 6 names that assembly for it; it holds
+    /// no physics, no validation and no format knowledge, so reaching it does not give the window
+    /// an idea of what a model means. The allow-list below is exact, so a third reference fails
+    /// here rather than slipping in beside the second.
+    /// </para>
+    /// </remarks>
     [Theory]
-    [InlineData("Einzel.Wpf", "einzel-shell-wpf", true)]
-    [InlineData("Einzel.Shell", "einzel-shell", false)]
+    [InlineData("Einzel.Wpf", "einzel-shell-wpf", true, "Einzel.Commands")]
+    [InlineData("Einzel.Shell", "einzel-shell", false, "Einzel.Commands,Einzel.Update")]
     public void TheShellReachesThePlatformThroughTheCommandLayer(
-        string project, string assembly, bool windowsOnly)
+        string project, string assembly, bool windowsOnly, string allowed)
     {
         // Found by path rather than by name: this test project deliberately does not
         // reference either shell - that is the invariant above - so there is no assembly
@@ -195,6 +204,9 @@ public sealed class ShellBoundaryTests(ITestOutputHelper output)
 
         Assert.Contains("Einzel.Commands", declared);
 
+        // Exactly the allowed references and nothing else, so a new one is a decision made here.
+        Assert.Equal(allowed.Split(',').Order(StringComparer.Ordinal), declared);
+
         // Not the solvers, not the integrator, not the renderer. Those are reached
         // through the command layer or not at all.
         foreach (var forbidden in new[]
@@ -206,6 +218,124 @@ public sealed class ShellBoundaryTests(ITestOutputHelper output)
             Assert.DoesNotContain(forbidden, declared);
             Assert.DoesNotContain(forbidden, used);
         }
+    }
+
+    /// <summary>
+    /// Only the shell reaches the updater, so nothing else can touch the network (UPD-1, UPD-2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>UPD-2 says the CLI never contacts the network, and AGT-8 rests on it</b>: an agent
+    /// issuing hundreds of <c>einzel</c> commands must see one version throughout. The strongest
+    /// form of that is structural - the CLI and the MCP server cannot call an updater they
+    /// cannot reach. So <c>Einzel.Update</c> is referenced by the Avalonia shell alone, and
+    /// Velopack by <c>Einzel.Update</c> and the shell alone (the shell for the single
+    /// <c>VelopackApp.Build().Run()</c> that <c>vpk pack</c> requires in the main executable).
+    /// </para>
+    /// <para>
+    /// Checked twice, as UI-1 is: what every project <b>declares</b>, read from its csproj, which
+    /// catches a reference nothing has used yet; and what every assembly beside these tests
+    /// <b>emits</b>, which catches a transitive path no csproj shows. <c>Einzel.Update</c> must
+    /// itself reference no other Einzel project, so it stays a leaf with no engine or UI behind it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void OnlyTheShellReachesTheUpdater()
+    {
+        var src = SourceDirectory();
+
+        Assert.True(src is not null, "src/ was not found above the test assembly, so UPD-2 went unchecked");
+
+        var projects = Directory.EnumerateFiles(src!, "*.csproj", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            .ToArray();
+
+        // A scan that found none of these would pass vacuously.
+        foreach (var required in new[] { "Einzel.Cli", "Einzel.Mcp", "Einzel.Shell", "Einzel.Update" })
+        {
+            Assert.Contains(projects, p => Path.GetFileNameWithoutExtension(p) == required);
+        }
+
+        foreach (var file in projects)
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            var text = File.ReadAllText(file);
+
+            var reachesUpdate = System.Text.RegularExpressions.Regex.IsMatch(
+                text, @"ProjectReference\s+Include=""[^""]*Einzel\.Update\.csproj""");
+            var reachesVelopack = System.Text.RegularExpressions.Regex.IsMatch(
+                text, @"PackageReference\s+Include=""Velopack""");
+
+            Assert.False(
+                reachesUpdate && name != "Einzel.Shell",
+                $"{name} references Einzel.Update; only the shell may check for updates (UPD-1, UPD-2)");
+            Assert.False(
+                reachesVelopack && name is not ("Einzel.Shell" or "Einzel.Update"),
+                $"{name} references Velopack; only Einzel.Update and the shell may (UPD-2)");
+
+            if (name == "Einzel.Update")
+            {
+                Assert.DoesNotMatch(@"ProjectReference\s+Include=", text);
+            }
+        }
+
+        var scanned = 0;
+
+        foreach (var path in Directory.EnumerateFiles(AppContext.BaseDirectory, "*.dll"))
+        {
+            var name = Path.GetFileNameWithoutExtension(path);
+
+            if (!(name.StartsWith("Einzel", StringComparison.Ordinal) || name.StartsWith("einzel", StringComparison.Ordinal))
+                || name.EndsWith(".Tests", StringComparison.Ordinal)
+                || name is "Einzel.Update" or "einzel-shell")
+            {
+                continue;
+            }
+
+            AssemblyName[] references;
+
+            try
+            {
+                references = Assembly.LoadFrom(path).GetReferencedAssemblies();
+            }
+            catch (BadImageFormatException)
+            {
+                continue;
+            }
+
+            scanned++;
+
+            var offending = references
+                .Select(r => r.Name)
+                .Where(n => n is "Einzel.Update" or "Velopack")
+                .ToArray();
+
+            Assert.True(
+                offending.Length == 0,
+                $"{name} references {string.Join(", ", offending)}; only the shell may reach the updater (UPD-2)");
+        }
+
+        // The CLI itself is beside these tests; a scan that loaded nothing checked nothing.
+        Assert.True(scanned > 5, $"only {scanned} assemblies were scanned for an updater reference");
+    }
+
+    /// <summary>The repository's <c>src</c> directory, found above the test assembly.</summary>
+    private static string? SourceDirectory()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            directory is not null;
+            directory = directory.Parent)
+        {
+            var candidate = Path.Combine(directory.FullName, "src");
+
+            if (Directory.Exists(Path.Combine(candidate, "Einzel.Cli")))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>What the shell's project declares a reference to.</summary>

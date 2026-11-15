@@ -15,19 +15,23 @@ states the intent and these pages state the reality; both are noted.
 | Page | What it covers |
 | --- | --- |
 | [Living specification](../SPEC.md) | Every r06 requirement with its status and evidence, what changed and why, and what to do next |
+| [Tutorial: a first lens](tutorial-first-lens.md) | A first model, start to finish |
+| [Coming from SIMION](coming-from-simion.md) | What maps to what, for someone who knows SIMION |
+| [Warning codes](warning-codes.md) | What each warning and error code means and what to do about it |
 | [Architecture](architecture.md) | Assemblies, layering, the four invariants, and why each exists |
-| [Model format](model-format.md) | Schema 0.9 in full: parameters, expressions, fields, electrodes (rectangle, disc, polygon, edge profile), source clouds, drives, sequences |
-| [Device templates](device-templates.md) | Writing a new device as data, and the nineteen shipped templates, each with what solving it bought |
+| [Model format](model-format.md) | Schema 0.14 in full: parameters and their provenance, expressions, fields, electrodes (rectangle, disc, polygon, prism, revolve, edge profile), source clouds, ion species, drives, sequences, bounded analytic elements |
+| [Device templates](device-templates.md) | Writing a new device as data, and the shipped templates, each with what solving it bought |
 | [Numerics](numerics.md) | Integrator, field solver, interpolation, and the accuracy budget |
 | [Sweeps and optimisation](optimisation.md) | Tolerance studies, sensitivity fields, Nelder-Mead and CMA-ES |
 | [Rendering](rendering.md) | Vector sections in SVG and PDF, conductor surfaces for the viewport, decimation bounds, and how a figure carries its own caveats |
 | [Pressure](pressure.md) | Collision models, regime validity, and what gas does to a funnel |
 | [Extensions](extensions.md) | The Python extension surface, what the sandbox contains, and what it does not |
 | [Agent acceptance](agent-acceptance.md) | The prose-task suite, what it measures, and what gates a release |
+| [Extending](extending.md) | The three kinds of change a device has needed below `Einzel.Library`, where each goes, and the traps each has sprung |
 | [Lessons](lessons.md) | Bugs that presented as physics and were arithmetic |
 | [CLI](cli.md) | Command reference, exit codes, and the agent loop |
 | [Live session](live-session.md) | The shared attributed journal, and the MCP server over it |
-| [The shell](shell.md) | WPF on Windows: the seven views that exist, and the commands they needed |
+| [The shell](shell.md) | The Avalonia shell (`src/Einzel.Shell`, cross-platform) and the earlier WPF one being retired: the views that exist, and the commands they needed |
 | [Literature targets](literature-targets.md) | Published instruments to reproduce, and what each needs |
 | [Validation](validation.md) | The test tiers, what each proves, and what is not covered |
 | [Spec findings](spec-findings.md) | Places where building it revealed something about the specification |
@@ -56,55 +60,25 @@ why the guardrails are engine behaviour rather than advice, and why
 [Numerics](numerics.md) and [Validation](validation.md) are as detailed as they
 are.
 
-## Current state
+## Where things stand
 
-Stages 0 through 5 of the delivery plan are complete: units and the result
-envelope, the trajectory integrator, the model format and CLI, the field solver,
-Class T analysis with device templates, and `Einzel.Sweeps` — tolerance Monte
-Carlo, sensitivity ranking, and both optimisers.
+[`SPEC.md`](../SPEC.md) is the status page: every requirement with its status and the
+measurement behind it, the delivery phases against what happened, the amendments, and a
+ranked list of what to do next. It is kept current in the same change that alters what it
+says. [`changelog.md`](changelog.md) is the chronological record of how each piece got there
+and is not a status page.
 
-Since then: source **ion clouds** and the Class S figures they make possible, a
-**space-charge screen** that estimates what is not modelled and warns
-non-suppressibly, a **time-domain RF** path that recovers the Mathieu and Meissner
-stability boundaries against published values, and **emittance** — which completes
-the Class T figures §12 asks for and doubles as a Liouville check on the
-integrator.
+Nothing here is released software: version 26.1.0 is in the tree and its GitHub release is a
+draft, so the way to get Einzel today is to build it from source (see the
+[README](../README.md)). Effort estimates, performance targets, and the numerical error
+budget in the specification are engineering judgement rather than measured values, except
+where these pages quote a measurement.
 
-Then, in order:
+## Where to start
 
-- **`Einzel.Render`** — vector sections in SVG and PDF, drawn headlessly in CI with
-  no display attached, with conductors traced from their own signed distance so the
-  renderer carries no device knowledge.
-- **Pressure** — two event-driven collision models checked against the Langevin rate
-  coefficient, equipartition and Mason-Schamp mobility, the `ITransportMode` seam
-  REG-1 asks for, and REG-2 regime validity computed on every run rather than
-  assumed.
-- **Extensions** — a manifest, a sandboxed subprocess runner at a 49 ms round trip,
-  output validated against the declared schema, and a Python objective the optimiser
-  can drive.
-- **Statistical diffusion** — the second transport mode REG-1 makes a peer of
-  trajectory integration, validated against an exactly stationary Boltzmann
-  equilibrium, and agreeing with the event-driven mode to 0.43 standard errors in
-  the overlap band REG-3 names. Since extended with a cycle-averaged effective
-  potential, so the 1e-2 to 10 mbar band where funnels and travelling-wave guides
-  actually run has a description at all.
-- **Space charge** — the direct pairwise sum SC-1 names as the reference an
-  approximate method is validated against, which first corrected the screening
-  estimate it replaced by a factor of 527.
-- **The density as an output** — exported as `.vti` and drawn as decade contours, so
-  RND-8's prohibition on trajectories through a diffusive region has something on
-  the other side of it. Interior electrodes now absorb for the whole run rather than
-  only emptying the seed, and a declared gas velocity reaches the diffusive solver
-  instead of being dropped at it.
-- **`einzel scan`** — one parameter across a range, one row per point. The third
-  study driver, and the operation every curve in these pages had previously been a
-  hand-written loop in a test file.
-
-Not yet built: the in-process extension runner, the compute dispatch layer, the MCP
-server, the update mechanism, and the shell. Of the render verbs, `section` exists;
-`still` and `animation` do not. The examples corpus EX-1 asks thirty models for has
-one.
-
-Nothing here is released software. Effort estimates, performance targets, and the
-numerical error budget in the specification are engineering judgement rather than
-measured values, except where these pages quote a measurement.
+| You are | Read |
+| --- | --- |
+| **A user** trying it | [README](../README.md) for the build and a five-minute run, then [Tutorial: a first lens](tutorial-first-lens.md), then [CLI](cli.md). Coming from SIMION: [Coming from SIMION](coming-from-simion.md). When a warning appears: [Warning codes](warning-codes.md) |
+| **A model author** | [Model format](model-format.md), [Device templates](device-templates.md), [Pressure](pressure.md) for gas, [Sweeps and optimisation](optimisation.md), [Rendering](rendering.md), [Validation](validation.md) for what is and is not checked |
+| **An agent** (or someone building one) | [CLI](cli.md) and the generated `AGENTS.md` in a project, [Live session](live-session.md) for the MCP server, [Extensions](extensions.md), [Agent acceptance](agent-acceptance.md), [Warning codes](warning-codes.md) |
+| **A contributor** | [`SPEC.md`](../SPEC.md), [Architecture](architecture.md), [Extending](extending.md) before adding a capability, [Numerics](numerics.md), [Lessons](lessons.md), [The shell](shell.md) |

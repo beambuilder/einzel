@@ -34,17 +34,18 @@ than hand-written, applied to the one document here that is not generated.
 
 Two-digit year, a feature number, a patch number: `26.1.0` is the first feature release of
 2026, `26.1.1` a fix on it, `26.2.0` the next feature release. **The version is bumped when
-a release is cut, not during development**, so the working tree carries the version last
+a release is cut (in the release PR), not during development**, so the working tree carries the version last
 released and the commit hash distinguishes builds within it.
 
 The single source is `<VersionPrefix>` in `Directory.Build.props`; `EngineBuild.Version`
 reads it back through the assembly's informational version, so the CLI, the run manifests
-and `einzel doctor` cannot disagree with the build. The git tag is `v26.1.0` and the release
-workflow **refuses a tag that is not `vYY.feature.patch`**, because a malformed one produces
+and `einzel doctor` cannot disagree with the build. The git tag is `v26.1.0`, **must equal
+`<VersionPrefix>`**, and the release workflow verifies that rather than injecting the version
+from the tag; it also **refuses a tag that is not `vYY.feature.patch`**, because a malformed one produces
 assets nobody can order and the place that is noticed is a download.
 
 `release-notes/README.md` carries the scheme, where the version lives, and the steps for
-cutting a release. Append to `RELEASE_NOTES_next.md` as things land; it is renamed at
+cutting a release. Append to `release-notes/RELEASE_NOTES_next.md` as things land; it is renamed at
 release time so a planned patch can become a feature release without being renamed twice.
 
 **A year is not a semantic major, deliberately.** The thing this project must not silently

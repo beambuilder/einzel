@@ -1,6 +1,6 @@
 # Command line
 
-The primary surface. A peer of the future MCP server and shell, not a layer under
+The primary surface. A peer of the MCP server and the shell, not a layer under
 them — all three drive the same command objects, so a capability reachable from
 one is reachable from all.
 
@@ -67,7 +67,7 @@ to describe itself, which is what these three are for.
 
 | Command | Does |
 | --- | --- |
-| `einzel schema` | The model format as JSON Schema, **generated from the document types** |
+| `einzel schema [--study]` | The model format as JSON Schema, **generated from the document types**; `--study` gives the study-file format instead |
 | `einzel templates [name]` | List device templates, or print one |
 | `einzel examples [name]` | List the reference corpus, or print one |
 | `einzel doctor [dir]` | Check the installation, and a project if given |
@@ -89,6 +89,8 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel new <model.json> --from-template <name>` | Start from a shipped device |
 | `einzel new <model.json> --from-example <name>` | Start from a reference model, **and get its test** |
 | `einzel validate <model.json>` | Units, bounds, dimensions, regime validity. Instant |
+| `einzel outline <model.json> [--set <name>=<value>]` | The declared parameters with their units, bounds, descriptions and what each resolves to in SI; `--set` changes one, in its own declared unit |
+| `einzel project [dir]` | What the project holds (models, studies, figures, tests, extensions) and the state of each model (see below) |
 | `einzel estimate <model.json\|study.json>` | What a run or a whole study will cost, before starting it (GRD-8) |
 | `einzel solve <model.json>` | Solve the fields only, and report how they went |
 | `einzel run <model.json>` | Run; writes a manifest and a result. Reports the ensemble too when the model declares a source cloud, and says where it has got to every 30 s (`--progress`) |
@@ -100,11 +102,14 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel test [dir]` | Run the project's tests |
 | `einzel verify [dir]` | Are the stored results still the answer? (GRD-10) |
 | `einzel report [dir]` | An account of what has been run, as one self-contained page (Amendment 43) |
+| `einzel compare <model.json> [--ions N]` | Run both transport modes on the same model and report where they disagree (REG-3) |
 | `einzel export <model.json>` | Write the solved field as VTK ImageData for ParaView |
 | `einzel render section <model.json \| spec.json>` | Draw a plane through the instrument as line work |
 | `einzel render still <model.json>` | Draw the viewport's shaded 3D picture to a PNG, headlessly - the same composition and camera the window uses |
 | `einzel render animation <spec.json>` | Draw a flight as numbered vector frames on the spec's declared time mapping (RND-7) |
+| `einzel ext list \| test \| register` | The extension authoring loop: list what is installed with each licence and what the sandbox does not enforce, run an extension's tests, or scaffold a new one that runs immediately |
 | `einzel agents-md [dir]` | Regenerate the platform layer of `AGENTS.md` (PRJ-6) |
+| `einzel agents tasks \| setup \| score` | Release tooling for the agent acceptance suite: list the tasks, prepare a project for an agent to attempt one, score what it left behind |
 | `einzel --version` | Engine version |
 
 | Option | Effect |

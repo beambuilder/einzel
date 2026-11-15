@@ -2758,6 +2758,152 @@ both compound. Then the device work, which is where the physics is. Distribution
 trigger stated rather than a date, because it is worth nothing until somebody other than this
 project's author needs to run it and more than any physics the moment one does.
 
+### The 2026-11-14 review, and what it reorders
+
+A whole-project review was run on 2026-11-14 against one question: what stands between this
+and a viable replacement for SIMION. Eight reviewers read the field solvers, transport, the
+Avalonia shell, the templates and model format, the docs, and the CLI and release workflow;
+one built and ran the suite (1,792 tests green, Release, Windows) and one gathered a sourced
+SIMION 8.2 baseline. **It changes the order of this list, and the reason is the goal rather
+than the findings**: the numbered list below is ordered for a project with one user, and puts
+distribution last with the trigger "somebody other than its author needing to run this".
+Replacing SIMION is that trigger. So the items here go **ahead of** the numbered list, and item
+12 is promoted into R1 rather than waiting.
+
+Status words: **confirmed** means the code fact was re-checked after the reviewer reported it;
+**reported** means one reviewer read the code path and nobody re-checked; **suspected** means
+inferred and unmeasured. None of these is a register status - nothing in the register moves on
+a review's say-so.
+
+**R0. Defects that can give a wrong number quietly.** Each is small; two may mean re-running
+published numbers.
+
+- **Per-ion collision streams are not independent** (seeding confirmed, correlation reported as
+  measured). Each ion's sampler is `new Random(Gas.Seed + index)` (`FiguresOfMerit.cs:907`,
+  `:1024`, `ModeComparison.cs:288`, `SequencedRun.cs:737`), and .NET's seeded generator is
+  linear in the seed: the k-th draw of seed s+1 minus that of seed s was one constant over 2,000
+  seeds. Every ensemble statistic in gas - equipartition, mobility, the bootstrap intervals -
+  assumes independent ions. Hash the seed or use a counter-based generator per ion, add a
+  cross-stream independence test, then re-measure the gas ensemble figures.
+- **`PacketIntegrator` has none of the single-ion path's time guards** (confirmed): no
+  RF-period step cap, no landing on sequencer switches, and a resolution cap computed once from
+  launch speed, so a packet launched at rest has none. No test flies a packet in a driven or
+  staged field. It also accepts a step at the minimum size with the error norm above one and
+  says nothing (reported), where the single-ion path reports `StepSizeUnderflow`.
+- **No run-time maximum-principle check** (confirmed). `einzel solve` prints the peak potential
+  and nothing compares it with what was applied, so the "486 V of 100, reported as converged"
+  class is caught by tests and the coarsening guard and never by a run. One pass over the
+  array, a warning on a source-free solve whose peak exceeds the applied range.
+- **An expression or derived parameter can be NaN or infinite and validate** (reported).
+  Literals are checked for finiteness; the expression branch and `ParameterSurface`'s derived
+  branch are not, and the validator's `<= 0` guards pass NaN. The 3-D cell-size fix closed one
+  instance of this; the general fix is one check in `TryQuantity` and one for derived values.
+- **The 2-D solve has no mesh limit and counts nodes in `int`** (reported; already recorded as
+  open when the 3-D refusal landed).
+- **A static-field run in gas reports an ACC-4 energy-drift violation** (reported), because
+  collisions change the energy and only a driven field returns the not-measured value.
+- **An ion at rest at zero potential has no resolution step cap** (reported; the consequence,
+  stepping through an electrode one cell thick, is suspected and untested).
+- **Mean-field space charge has no dielectric-relaxation step limit** (suspected). At the TIMS
+  capacity study's 10^8 row the relaxation time is of order 14 ns against a 56 ns step; halve
+  the step or refresh every step before leaning on that row or its unexplained 19 percent.
+- **PIC sizes its grid from the 3-D RMS radius whatever the packet's shape, and drops
+  `ChargeOutside` and the solve's `Converged`** (reported) - evidence about a computation's own
+  quality discarded at a seam, again.
+- **The interpolants never consult the cut links** (mechanism reported, magnitude suspected),
+  so within about two cells of a conductor the field is first order whatever the solve
+  achieved. No test measures field error against distance from a cut surface, and slots and
+  apertures are where ions pass that close.
+- **The CLI accepts any unknown `--flag`** (confirmed): `--vtuu` runs with defaults and exits
+  0. The model format refuses an unknown key for exactly this reason (Amendment 14).
+- **The viewport and stills sample a driven field at t = 0 with no warning** (confirmed,
+  `ViewportCommand.cs:1693`) - `render.field-at-instant` exists for sections only.
+- **The shell's journal breaks Amendment 25 as implemented** (confirmed): an edit is recorded
+  as `einzel validate <model>` and undo as `einzel undo`, which is not a verb. The spelling
+  that reproduces an edit, `einzel outline <model> --set name=value`, exists.
+- **Manifests and results are written non-atomically** (reported) where the progress
+  checkpoint is written and moved; **2-D coarse masks are rebuilt every V-cycle** (confirmed,
+  `GeometryBuilder.cs:964`, `:1042`) where the 3-D path memoises; **no test runs every template
+  end to end at its defaults** (reported), which is the gap `pnnl-ion-funnel` fell through.
+
+**R0, continued: what a newcomer and an index found.** Writing the first-lens tutorial meant
+following it, and compiling `docs/warning-codes.md` meant reading every construction site. Both
+are the "write the consumer" move that found the report's defects, and both found things no
+test had: all reported, none re-checked unless marked.
+
+- **The printed interval on a solved model covers the integrator alone.** The lens run reports
+  +/- 1.5e-8 us; doubling the mesh moves the flight time 1.07e-3 us, about 100,000 times that,
+  and nothing on the run says the mesh is not in the interval. GRD-1's envelope is carrying one
+  of two error sources and reading as both. This is the largest of the list.
+- **The shipped `einzel-lens` warns on its first solve** (`mesh.node-on-shared-face`, 148 nodes
+  - one of the seventeen recorded under item 11), so the namesake template's first run is a
+  caveat. The tutorial edits one bound to clear it; the template should not need that.
+- **No figure of merit says where a ray crosses the axis**, so a lens's focal length cannot be
+  scanned or optimised; the tutorial uses a second model whose detector plane is the axis.
+- **`outline --set`** rewrites the whole document, so `verify` reports results stale after a
+  value is set and set back; writes an out-of-bounds value while exiting 1; and its `--dry-run`
+  skips the bounds check.
+- **Help**: `einzel test --help` runs the tests; `einzel render --help` shows the section usage
+  only; the top-level help omits `render still`.
+- `einzel new` onto an existing file reports `SCHEMA_INVALID`; `estimate` said 8 s for a scan
+  that took 0.86 s; scan rows carry no interval; the report page prints an interval as
+  "6.771252 to 6.771252 (100 %)" and counts a study as a run; no example scan study ships.
+- **Warning text that describes an older build**: `regime.overlap-band` and
+  `regime.trajectory-above-validity` say the diffusive mode is not built, and
+  `regime.knudsen-continuum` says the gas is treated as stationary.
+- **Exit code 5 (`EnginePinMismatch`) is never returned**, and `COST_GATE_REFUSED` is raised
+  only for an extension timeout while the cost gate itself exits 3 with no code.
+- **Warning codes have no registry.** Eleven error codes live in `ErrorCodes`; about 120
+  warning codes are string literals at their construction sites, in two spellings
+  (`ENSEMBLE_SMALL` beside `ensemble.small-sample`). `docs/warning-codes.md` is hand-compiled
+  for that reason and will drift until a code table exists for a test to count.
+- **Results and regime cannot be stopped from the window**, because their command objects take
+  no token and call back at no point; the window's Stop is for a watch only.
+
+**R1. Somebody else can install it and get through a first hour.** In progress on
+`review/installable-and-usable`. The release workflow publishes `Einzel.Wpf` as the only shell
+and has no macOS asset (confirmed), so deleting WPF as item 5 plans would ship no window at
+all; the Avalonia window cannot cancel a run, though `ShellSession.WatchAsync` takes a token
+(confirmed), and cannot open a model or start one from a template; README, `docs/README.md`,
+`docs/shell.md`, `docs/architecture.md` and `docs/model-format.md` say 19 templates, schema 0.9
+and a Windows shell against 23, 0.14 and Avalonia; and there is no first-lens tutorial, no
+page mapping SIMION's terms onto these, and no index of warning and error codes.
+
+**R2. Magnetic fields.** Three reviewers ranked this the largest gap independently: there is no
+B field and no velocity-dependent force anywhere. A uniform or imported B plus a v x B term in
+the integrator is the first step and opens sectors, Wien filters, Penning and ICR cells and
+electron optics; a solved magnetic potential is a later one. r06 does not ask for it, so this
+is an amendment when it is started, not before.
+
+**R3. Geometry that does not have to be typed.** STL or CAD import (RND-13/15 are Not built),
+union and subtraction of primitives, placing and rotating a solved element the way a SIMION
+workbench places an array, an ideal transparent grid as an electrode kind, and more than one
+detector - the last already a recorded LIB-1 signal from the dual-slot trap.
+
+**R4. Seeing and asking about a field.** No verb returns the potential or field at a point or
+along a line; the viewport draws twelve equipotentials on z = 0 and nothing else; no color
+map, cutting plane or potential-energy surface; an electrode cannot be picked for its name and
+potential; `export` writes basis channels and not the field an ion sees, and no E.
+
+**R5. Interactive speed.** Every edit re-validates, re-solves, re-extracts and re-flies, where
+basis superposition makes a voltage change a re-weighting; the smoother is single-threaded
+(the measured bandwidth ceiling was for concurrent solves, not a tiled red-black sweep); the
+independent-ion cloud loop is single-threaded.
+
+**R6. Space charge that knows about the electrodes.** PIC solves in an earthed box round the
+packet: no image charge on a conductor, no continuous-beam mode.
+
+**R7. Sources, recording, and control in flight.** One Gaussian cloud per model, no time of
+birth, no mixed masses in a trajectory run, no recording at declared planes, and no per-step
+hook - invariant 3 forbids one for extensions on purpose, so what feedback-controlled voltages
+would need is a design question rather than a missing feature.
+
+What the review found sound and said not to disturb: the cut-cell stencils (the cylindrical
+operator was re-derived by hand), Galerkin coarsening judged on the fine residual, ghost-node
+extrapolation and reflection in the interpolants, event landing on real Runge-Kutta steps, the
+Scharfetter-Gummel solver's conservative weights, UI-1 in the shell, and the handoff between
+the UI and render threads.
+
 ### Open, in priority order
 
 1. ~~**Run the front-end study.**~~ - **run, and it turned into a study of the resolving-power law rather than of the front end.** The front end costs **nothing** once the two models are compared on matched cell sizes (-1.9 percent; 18 percent on unmatched ones, which is a 1.68x difference in cell size and nothing else). What the study found instead is that **gas speed is not an independent knob** - the tunnel holds up to `K E_peak` = 93.7 m/s at 60 V and a scan past it walks out of the device while still reporting a clean rising resolving power - and that **the field and the ramp time do not enter through their ratio**, because the release lag goes as `1/(V T)` and a scan rate is `V/T`. The published `R ~ v_g` is recovered as an asymptotic statement, exponent 0.971, approached from above as `tau/T` falls. `docs/literature-targets.md` section 6 and `docs/lessons.md`.

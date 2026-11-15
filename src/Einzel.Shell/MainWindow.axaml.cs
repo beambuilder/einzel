@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 
 using Einzel.Commands;
@@ -31,7 +32,7 @@ namespace Einzel.Shell;
 /// replayed. The session is what makes the window a peer of the CLI rather than a viewer.
 /// </para>
 /// </remarks>
-public sealed partial class MainWindow : Window
+public sealed partial class MainWindow : Window, IDisposable
 {
     private readonly TextBlock _heading;
     private readonly TextBlock _status;
@@ -41,6 +42,18 @@ public sealed partial class MainWindow : Window
     private readonly ItemsControl _parameters;
     private readonly Button _undo;
     private readonly Button _watch;
+    private readonly Button _stop;
+    private readonly Button _openModel;
+    private readonly Button _newModel;
+    private readonly Button _resultsRun;
+    private readonly Button _resultsPreview;
+    private readonly Button _regimeInspect;
+
+    /// <summary>One long run at a time - a watch, a full run or a regime walk - and Stop for a watch.</summary>
+    private readonly RunGate _gate = new();
+
+    /// <summary>What a new model can be made from, read from the command layer on first use.</summary>
+    private readonly ModelCatalog _catalog = new();
 
     private ShellSession? _session;
     private ModelTreeViewModel? _tree;
@@ -85,18 +98,6 @@ public sealed partial class MainWindow : Window
     /// </remarks>
     private bool _current;
 
-    private bool _watching;
-
-    /// <summary>Whether the results or the regime panel is running the model.</summary>
-    /// <remarks>
-    /// Each closes the tree while it runs, as a watch does: what it runs is the document on
-    /// disk, and an edit part way through would give figures of one revision shown beside a
-    /// tree of another. Closing the tree is cheaper and plainer than describing the mixture.
-    /// </remarks>
-    private bool _resultsRunning;
-
-    private bool _regimeRunning;
-
     /// <summary>Whether the results or the regime panel is showing something an edit would date.</summary>
     private bool _resultsShown;
 
@@ -116,9 +117,28 @@ public sealed partial class MainWindow : Window
         _parameters = this.FindControl<ItemsControl>("Parameters")!;
         _undo = this.FindControl<Button>("UndoButton")!;
         _watch = this.FindControl<Button>("WatchRun")!;
+        _stop = this.FindControl<Button>("StopRun")!;
+        _openModel = this.FindControl<Button>("OpenModel")!;
+        _newModel = this.FindControl<Button>("NewModel")!;
+        _resultsRun = this.FindControl<Button>("ResultsRun")!;
+        _resultsPreview = this.FindControl<Button>("ResultsPreview")!;
+        _regimeInspect = this.FindControl<Button>("RegimeInspect")!;
 
         _redraw = new Coalescing(DrawOnceAsync);
         _redraw.BusyChanged += (_, _) => UpdateControls();
+
+        // Each of the three long runs closes the tree while it runs: what it runs is the
+        // document on disk, and an edit part way through would give a picture or figures of
+        // one revision beside a tree of another.
+        _gate.Changed += (_, _) => UpdateControls();
+
+        // The one update check this process makes (UPD-1), in the background, for an installed
+        // copy only. A restart into a new version is refused while a run holds the gate or a redraw is
+        // solving (UPD-6).
+        var updates = this.FindControl<UpdateNoticeBar>("UpdateNotice")!;
+        _gate.Changed += (_, _) => updates.Refresh();
+        _redraw.BusyChanged += (_, _) => updates.Refresh();
+        updates.Attach(Einzel.Update.UpdateCheck.ForThisCopy(), () => _gate.Busy || _redraw.Busy);
 
         Wire();
         Open(modelPath);
@@ -153,11 +173,22 @@ public sealed partial class MainWindow : Window
         };
 
         _watch.Click += (_, _) => _ = WatchAsync();
+        _stop.Click += (_, _) =>
+        {
+            if (_gate.Stop())
+            {
+                _status.Text = _gate.StoppingStatus;
+            }
+        };
         _undo.Click += (_, _) => Undo();
 
-        this.FindControl<Button>("ResultsRun")!.Click += (_, _) => _ = ResultsAsync(preview: false);
-        this.FindControl<Button>("ResultsPreview")!.Click += (_, _) => _ = ResultsAsync(preview: true);
-        this.FindControl<Button>("RegimeInspect")!.Click += (_, _) => _ = RegimeAsync();
+        _openModel.Click += (_, _) => _ = OpenFromPickerAsync();
+        Catalog("NewFromTemplate", ModelSource.Template);
+        Catalog("NewFromExample", ModelSource.Example);
+
+        _resultsRun.Click += (_, _) => _ = ResultsAsync(preview: false);
+        _resultsPreview.Click += (_, _) => _ = ResultsAsync(preview: true);
+        _regimeInspect.Click += (_, _) => _ = RegimeAsync();
         this.FindControl<Button>("SequenceRead")!.Click += (_, _) => Read("Sequence");
         this.FindControl<Button>("ProjectRead")!.Click += (_, _) => Read("Project");
         this.FindControl<Button>("ExtensionsRead")!.Click += (_, _) => Read("Extensions");
@@ -183,6 +214,51 @@ public sealed partial class MainWindow : Window
         // take Enter for itself before it bubbles.
         _parameters.AddHandler(InputElement.KeyDownEvent, OnValueKey, RoutingStrategies.Tunnel);
         _parameters.AddHandler(InputElement.LostFocusEvent, OnValueLeft, RoutingStrategies.Bubble);
+
+        // The catalog's entries as a submenu, read when the menu is first opened rather than
+        // when the window opens: the list is the command layer's, and a window that has not
+        // been asked for it has no reason to read it.
+        void Catalog(string name, ModelSource source)
+        {
+            var menu = this.FindControl<MenuItem>(name)!;
+            var read = false;
+
+            // A placeholder so the submenu arrow shows before the list has been read.
+            menu.ItemsSource = new[] { new MenuItem { Header = "...", IsEnabled = false } };
+
+            menu.SubmenuOpened += (_, _) =>
+            {
+                if (read)
+                {
+                    return;
+                }
+
+                try
+                {
+                    menu.ItemsSource = _catalog.Of(source)
+                        .Select(entry =>
+                        {
+                            var item = new MenuItem { Header = entry.Name };
+
+                            if (!string.IsNullOrEmpty(entry.Description))
+                            {
+                                ToolTip.SetTip(item, entry.Description);
+                            }
+
+                            item.Click += (_, _) => _ = CreateAsync(source, entry.Name);
+
+                            return item;
+                        })
+                        .ToList();
+
+                    read = true;
+                }
+                catch (Exception refused)
+                {
+                    _status.Text = "Could not read the catalog: " + Reason(refused);
+                }
+            };
+        }
 
         void Named(string name, (double Azimuth, double Elevation) at) =>
             this.FindControl<Button>(name)!.Click += (_, _) =>
@@ -216,30 +292,154 @@ public sealed partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(modelPath))
         {
             _heading.Text = "Einzel";
-            _status.Text = "No model. Start the shell with a model document to draw one: "
-                + "einzel-shell models/reflectron.json";
+            _status.Text = "No model open. Open... chooses a model document; New... starts one "
+                + "from a shipped device template or example.";
             UpdateControls();
             return;
         }
 
-        _heading.Text = modelPath;
+        Adopt(() => new ShellSession(modelPath, Person()), modelPath);
+    }
+
+    /// <summary>Who is at the keyboard: the operating-system user, as a person.</summary>
+    private static JournalAuthor Person() => new(Environment.UserName, AuthorKind.Human);
+
+    /// <summary>Asks for a model document and opens it.</summary>
+    /// <remarks>
+    /// Recorded as <c>einzel validate</c> by the session, as a model named on the command line
+    /// is: opening reads and checks the document and changes nothing, so there is no mutation
+    /// to journal and no "open" verb to invent.
+    /// </remarks>
+    private async Task OpenFromPickerAsync()
+    {
+        if (_gate.Busy)
+        {
+            return;
+        }
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Open a model document",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Einzel model") { Patterns = ["*.json"] },
+                FilePickerFileTypes.All,
+            ],
+        }).ConfigureAwait(true);
+
+        if (files is not [var file])
+        {
+            return;
+        }
+
+        if (file.TryGetLocalPath() is not { } path)
+        {
+            _status.Text = "Could not open this: it is not a file on this machine, and a model "
+                + "is resolved against its own directory.";
+            return;
+        }
+
+        Open(path);
+    }
+
+    /// <summary>Asks where a new model goes, writes it from the catalog, and opens it.</summary>
+    /// <param name="source">Template or example.</param>
+    /// <param name="name">Which one.</param>
+    /// <remarks>
+    /// Written by the same command object <c>einzel new</c> calls, and journalled as that
+    /// line - see <see cref="ShellSession.New"/>. An existing file is refused by the command
+    /// rather than overwritten, and the refusal is shown.
+    /// </remarks>
+    private async Task CreateAsync(ModelSource source, string name)
+    {
+        if (_gate.Busy)
+        {
+            return;
+        }
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = source == ModelSource.Template
+                ? "New model from the template " + name
+                : "New model from the example " + name,
+            SuggestedFileName = ModelCatalog.SuggestedFileName(name),
+            DefaultExtension = "json",
+            ShowOverwritePrompt = false,
+            FileTypeChoices = [new FilePickerFileType("Einzel model") { Patterns = ["*.json"] }],
+        }).ConfigureAwait(true);
+
+        if (file?.TryGetLocalPath() is not { } destination)
+        {
+            return;
+        }
+
+        // Built once inside New so that a model which fails to open is removed again rather than
+        // left to block the retry with "already exists"; Adopt then builds the tree it shows.
+        Adopt(
+            () => ShellSession.New(destination, source, name, Person(), s =>
+            {
+                _ = new ModelTreeViewModel(s);
+                return s;
+            }),
+            destination);
+    }
+
+    /// <summary>Makes a session the one the window is looking at, or says why it could not be.</summary>
+    /// <param name="open">Builds the session; may throw a refusal.</param>
+    /// <param name="described">What is being opened, for the message when it cannot be.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>A model that cannot be opened leaves the open one open.</b> Named rather than
+    /// swallowed: a window that went empty because the model was refused looks exactly like
+    /// one that went empty because the renderer failed, and only one of those is the reader's
+    /// to fix.
+    /// </para>
+    /// <para>
+    /// <b>Every panel is rebuilt over the new session</b>, and the viewport is emptied until
+    /// the new model draws, so nothing of the previous model is left showing beside the tree
+    /// of the next.
+    /// </para>
+    /// </remarks>
+    private void Adopt(Func<ShellSession> open, string described)
+    {
+        if (_gate.Busy)
+        {
+            return;
+        }
+
+        ShellSession session;
+        ModelTreeViewModel tree;
 
         try
         {
-            _session = new ShellSession(
-                modelPath, new JournalAuthor(Environment.UserName, AuthorKind.Human));
-            _tree = new ModelTreeViewModel(_session);
+            session = open();
+            tree = new ModelTreeViewModel(session);
         }
         catch (Exception refused)
         {
-            // Named rather than swallowed. A window that opens empty because the model was
-            // refused looks exactly like one that opened empty because the renderer failed,
-            // and only one of those is the reader's to fix.
-            _session = null;
-            _tree = null;
-            _status.Text = "Could not open this model: " + Reason(refused);
+            _status.Text = "Could not open " + described + ": " + Reason(refused)
+                + (_session is { } still ? "   ·   still showing " + still.Journal.ModelPath : string.Empty);
             UpdateControls();
             return;
+        }
+
+        _session = session;
+        _tree = tree;
+        _heading.Text = session.Journal.ModelPath;
+        Title = "Einzel - " + Path.GetFileName(session.Journal.ModelPath);
+
+        // Whatever the last model left showing goes with it.
+        _current = false;
+        _read.Clear();
+        _resultsShown = false;
+        _regimeShown = false;
+        this.FindControl<Border>("ResultsTaint")!.IsVisible = false;
+
+        if (_view is not null)
+        {
+            _host.Children.Clear();
+            _view = null;
         }
 
         _parameters.ItemsSource = _tree.Parameters;
@@ -267,8 +467,13 @@ public sealed partial class MainWindow : Window
 
         Text("ResultsStatus", _results.Status);
         Text("RegimeStatus", _regime.Status);
+        Text("SequenceStatus", _sequence.Status);
+        Text("ProjectStatus", _project.Status);
+        Text("ExtensionStatus", _extensions.Status);
+        Text("ExtensionInterpreter", string.Empty);
 
         ShowTree(refused: false);
+        ReadIfUnread();
 
         _ = _redraw.RequestAsync();
     }
@@ -293,12 +498,12 @@ public sealed partial class MainWindow : Window
     /// </remarks>
     private async Task DrawOnceAsync()
     {
-        if (_session is null)
+        if (_session is not { } session)
         {
             return;
         }
 
-        var path = _session.Journal.ModelPath;
+        var path = session.Journal.ModelPath;
 
         _status.Text = "einzel render section " + path + "   ·   solving";
 
@@ -306,7 +511,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            drawing = _session.ViewportAsync();
+            drawing = session.ViewportAsync();
         }
         catch (Exception refused)
         {
@@ -327,6 +532,13 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception refused)
         {
+            if (!ReferenceEquals(session, _session))
+            {
+                // Another model was opened while this one solved; its redraw is owed and
+                // reports for itself.
+                return;
+            }
+
             _current = false;
             _status.Text = (_view is null
                 ? "Could not draw this model: "
@@ -334,6 +546,13 @@ public sealed partial class MainWindow : Window
                     + "could not be: ")
                 + Reason(refused);
 
+            return;
+        }
+
+        if (!ReferenceEquals(session, _session))
+        {
+            // A picture of the model the window has just stopped looking at. The redraw the
+            // new model asked for runs next and draws it.
             return;
         }
 
@@ -408,12 +627,17 @@ public sealed partial class MainWindow : Window
     /// </remarks>
     private async Task WatchAsync()
     {
-        if (_session is null || _view is not { } view || _watching || _redraw.Busy || !_current)
+        if (_session is null || _view is not { } view || _redraw.Busy || !_current)
         {
             return;
         }
 
-        Watching(true);
+        using var lease = _gate.TryBegin(HeavyRun.Watch);
+
+        if (lease is null)
+        {
+            return;
+        }
 
         _status.Text = "einzel run " + _session.Journal.ModelPath
             + " --progress 5   ·   solving, then stepping";
@@ -424,7 +648,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var running = _session.WatchAsync(watcher);
+            var running = _session.WatchAsync(watcher, lease.Stopping);
 
             _tree?.RefreshHistory();
 
@@ -451,42 +675,70 @@ public sealed partial class MainWindow : Window
 
             _status.Text = "run finished · " + drawn + Worst(final.Warnings);
         }
+        catch (OperationCanceledException)
+        {
+            // A stopped watch is not a failure and the packet it drew is not wrong; it is
+            // incomplete, which the status line says rather than the drawing being cleared -
+            // clearing it would throw away the one thing that was gained.
+            if (watcher.LastWithPacket is { } held)
+            {
+                view.Show(held);
+            }
+
+            _status.Text = "stopped - the packet drawn is where the run had got to, not where it ends";
+        }
         catch (Exception refused)
         {
             _status.Text = "Cannot watch this run: " + Reason(refused);
         }
-        finally
-        {
-            Watching(false);
-        }
     }
 
-    /// <summary>Closes the tree and the buttons that change the model, or opens them again.</summary>
-    private void Watching(bool on)
+    /// <inheritdoc />
+    /// <remarks>
+    /// <b>A watch outliving its window would keep stepping a transport nobody can see</b>, and
+    /// on a driven diffusive model that is hours of a core. A full run or a regime walk cannot
+    /// be told to stop; its worker is a background thread, so the process does not wait for it.
+    /// </remarks>
+    protected override void OnClosed(EventArgs e)
     {
-        _watching = on;
-        UpdateControls();
+        Dispose();
+
+        base.OnClosed(e);
     }
+
+    /// <summary>Stops a watch that is still running, and admits no further run.</summary>
+    public void Dispose() => _gate.Dispose();
 
     /// <summary>Enables what may be pressed now, and nothing else.</summary>
     private void UpdateControls()
     {
+        // One long run at a time, whichever it is: each holds a whole solve, and the review
+        // that found Watch pressable while the results ran found the reverse as well.
+        var idle = !_gate.Busy;
+
         _watch.IsEnabled = _session is not null
             && _view is not null
             && _current
             && !_redraw.Busy
-            && !_watching;
+            && idle;
 
-        var open = !_watching && !_resultsRunning && !_regimeRunning;
+        _stop.IsEnabled = _gate.CanStop;
 
-        _parameters.IsEnabled = open;
-        _undo.IsEnabled = open && _tree?.CanUndo == true;
+        _resultsRun.IsEnabled = _resultsPreview.IsEnabled = _regimeInspect.IsEnabled =
+            _session is not null && idle;
+
+        // A different model may not be opened under a run of this one: its panels would be
+        // filled with figures of the model the window had stopped looking at.
+        _openModel.IsEnabled = _newModel.IsEnabled = idle;
+
+        _parameters.IsEnabled = idle;
+        _undo.IsEnabled = idle && _tree?.CanUndo == true;
     }
 
     /// <summary>Reverses the most recent edit that still stands.</summary>
     private void Undo()
     {
-        if (_tree is null || _watching)
+        if (_tree is null || _gate.Busy)
         {
             return;
         }
@@ -516,9 +768,10 @@ public sealed partial class MainWindow : Window
     /// that does not answer. The figures are filled in on this thread once the run returns.
     /// </para>
     /// <para>
-    /// <b>The tree is closed while it runs</b>, for the reason <see cref="_resultsRunning"/>
-    /// gives. An agent on the same session can still edit the file; the command checks that
-    /// the run was of the text it read and refuses rather than mixing two revisions.
+    /// <b>The tree is closed while it runs</b>, because a run is of the document on disk and
+    /// an edit part way through would give figures of one revision beside a tree of another.
+    /// An agent on the same session can still edit the file; the command checks that the run
+    /// was of the text it read and refuses rather than mixing two revisions.
     /// </para>
     /// <para>
     /// <b>A full run stores a result, so the project view is read again</b> - its state for
@@ -533,13 +786,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var run = this.FindControl<Button>("ResultsRun")!;
-        var look = this.FindControl<Button>("ResultsPreview")!;
         var taint = this.FindControl<Border>("ResultsTaint")!;
 
-        run.IsEnabled = look.IsEnabled = false;
-        _resultsRunning = true;
-        UpdateControls();
+        // Not stoppable: the command object takes no cancellation, so the gate offers no Stop
+        // for it rather than a button that would appear to work.
+        using var lease = _gate.TryBegin(HeavyRun.Results);
+
+        if (lease is null)
+        {
+            return;
+        }
+
         Text("ResultsStatus", preview ? "previewing..." : "running - the same work einzel run does...");
 
         try
@@ -567,9 +824,7 @@ public sealed partial class MainWindow : Window
             // GRD-5's taint, where it cannot be missed rather than in a line somebody may have
             // scrolled past.
             taint.IsVisible = _results.Tainted;
-            run.IsEnabled = look.IsEnabled = true;
-            _resultsRunning = false;
-            UpdateControls();
+            lease.Dispose();
             ReadIfUnread();
         }
     }
@@ -583,11 +838,13 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var inspect = this.FindControl<Button>("RegimeInspect")!;
+        using var lease = _gate.TryBegin(HeavyRun.Regime);
 
-        inspect.IsEnabled = false;
-        _regimeRunning = true;
-        UpdateControls();
+        if (lease is null)
+        {
+            return;
+        }
+
         Text("RegimeStatus", "walking the path...");
 
         try
@@ -607,9 +864,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            inspect.IsEnabled = true;
-            _regimeRunning = false;
-            UpdateControls();
+            lease.Dispose();
         }
     }
 
@@ -825,7 +1080,7 @@ public sealed partial class MainWindow : Window
     private void Commit(TextBox box)
     {
         if (_tree is null
-            || _watching
+            || _gate.Busy
             || box.DataContext is not ParameterRow row
             || !_tree.Parameters.Contains(row))
         {

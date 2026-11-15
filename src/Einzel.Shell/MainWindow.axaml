@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:presentation="clr-namespace:Einzel.Shell.Presentation"
+        xmlns:shell="clr-namespace:Einzel.Shell"
         x:Class="Einzel.Shell.MainWindow"
         Width="1500" Height="860"
         Title="Einzel">
@@ -55,6 +56,13 @@
 
   <DockPanel>
 
+    <!--
+      A newer release, offered and never imposed (UPD-3, UPD-4): hidden unless an installed
+      copy's one launch-time check found something, and nothing is downloaded until a button
+      here is pressed. Its decisions are Einzel.Update's UpdateWorkflow.
+    -->
+    <shell:UpdateNoticeBar x:Name="UpdateNotice" DockPanel.Dock="Top" />
+
     <Border DockPanel.Dock="Top" Background="#1B1B1B" Padding="10,6">
       <TextBlock x:Name="Heading" FontSize="13" Foreground="#E8E8E8" />
     </Border>
@@ -67,6 +75,24 @@
     -->
     <Border DockPanel.Dock="Top" Background="#242424" Padding="8,5">
       <StackPanel Orientation="Horizontal" Spacing="6">
+        <!--
+          A model can be opened or started from the window itself. Before these existed a
+          shell started without an argument could only tell somebody to restart it with one,
+          which is not a window anybody who did not write it can use. Opening is recorded as
+          `einzel validate`, creating as the `einzel new` line that would make the same file.
+        -->
+        <Button x:Name="OpenModel" Content="Open..." MinWidth="70"
+                ToolTip.Tip="Open a model document" />
+        <Button x:Name="NewModel" Content="New..." MinWidth="64"
+                ToolTip.Tip="Start a model from a shipped device template or example (einzel new)">
+          <Button.Flyout>
+            <MenuFlyout Placement="BottomEdgeAlignedLeft">
+              <MenuItem x:Name="NewFromTemplate" Header="From template" />
+              <MenuItem x:Name="NewFromExample" Header="From example" />
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+        <Border Width="1" Background="#3A3A3A" Margin="6,0" />
         <Button x:Name="ViewIso" Content="Iso" MinWidth="64" />
         <Button x:Name="ViewSide" Content="Side" MinWidth="64" />
         <Button x:Name="ViewTop" Content="Top" MinWidth="64" />
@@ -82,6 +108,14 @@
           as the command a person could have typed, and an agent can call the same one.
         -->
         <Button x:Name="WatchRun" Content="Watch run" MinWidth="110" />
+        <!--
+          Stop asks the watch to end after the step it is on, keeping what it has drawn. A
+          full run and a regime walk cannot be stopped part way - their command objects take
+          no cancellation - so this button is for the watch alone rather than one that would
+          appear to stop them and not.
+        -->
+        <Button x:Name="StopRun" Content="Stop" MinWidth="60" IsEnabled="False"
+                ToolTip.Tip="Stop the watched run after the current step, keeping what has been drawn" />
         <Border Width="1" Background="#3A3A3A" Margin="6,0" />
         <!--
           The gestures said once, where they are used. They worked in the WPF viewport and

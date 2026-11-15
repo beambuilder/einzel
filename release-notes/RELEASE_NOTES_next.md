@@ -3,7 +3,7 @@
 Draft. Append as things land; this file is renamed at release time, so a planned patch can
 become a feature release without being renamed twice.
 
-## What is new
+## New Features
 
 - **`compact-astral-3d`**: the published Astral analyzer at one fifth of its size, as a whole
   three-dimensional instrument - both converging mirrors, the foil, the drift and its reversal.
@@ -71,8 +71,47 @@ become a feature release without being renamed twice.
   viewport turns, moves and zooms with the mouse: drag to turn, right-drag or Shift-drag to
   move, the wheel to zoom toward the cursor, and double-click or **Fit** to fit it again. The
   named views still fit exactly.
+- **`einzel run --progress <seconds>`** reports where a long run has got to on the diagnostic
+  stream, thirty seconds by default, and leaves `results/<name>.progress.json` behind. The
+  checkpoint is removed when the run writes its answer, so finding one means the run did not
+  finish. Reporting is asserted not to change the answer.
+- **`einzel report`** renders a project's runs as one self-contained page, with `--json`
+  carrying the same account. It reads a checkpoint, so an interrupted run is reported with the
+  phases that completed rather than as a run that stored nothing.
+- **Imported gas files and study files are recorded in run manifests.** `verify` detects
+  changed, missing or retargeted inputs and no longer certifies legacy manifests that did not
+  record them.
+- **Collisions and direct or particle-in-cell space charge apply during the trajectory legs of
+  mixed-mode sequences.** Conductor detection is preserved through time shifts, collision
+  diagnostics propagate, and empty packets no longer reseed or crash the printer.
+- **`--vtu` on a sequenced run writes the density** it ended with, where it ended in the
+  diffusive description, with the run's caveats and their severities in the file's own header.
+- **A volume solve's conductor mask is built by asking each electrode only about the nodes and
+  links its bounding box reaches.** Every electrode used to be tested against every node and
+  link, about half a billion closed-form entry tests per mask on `astral-3d`'s ion-foil solve
+  (1.1 million nodes, 86 electrodes). In Release that mask takes 0.15 s where it took 10.3 s,
+  and `einzel solve` on the template takes 11.0 s where it took 20.6 s, with every reported
+  figure unchanged. The mask is bit-identical to the unculled one on every shipped volume
+  template and the corpus's 3-D example, at the shipped mesh and at every coarse level; the
+  test suite repeats that comparison on every change, except that `linear-ion-trap-3d` is
+  compared at twice its shipped cell there, because its unculled reference alone took over
+  two and a half minutes on the Windows CI runner.
+- **Diffusion coefficient and face-operator buffers are reused**, separately per species. A
+  513 x 65 rebuild allocates about 3.4 kB instead of 7.47 MB in a warmed probe; operator
+  values are bit-identical. An allocation reduction, not a claimed end-to-end speedup.
+- **A Windows installer.** Each release now carries `MacCossLab.Einzel-stable-Setup.exe`, built by
+  Velopack as LabOps is: a per-user install with no administrator rights and the .NET runtime
+  included, into `%LocalAppData%\MacCossLab.Einzel\current`, with Start menu and desktop shortcuts to
+  the window and `einzel` added to your user PATH (removed again on uninstall, with every other PATH
+  entry left as it was). It is not code-signed yet, so SmartScreen warns on first run (More info,
+  Run anyway). An installed window checks GitHub once when it starts and, if a newer release exists,
+  shows a bar offering **Download and restart**, **Download only**, **Skip this version** and **Not
+  now**; nothing is downloaded until one is pressed, a restart is refused while a run is in progress,
+  and there is no periodic re-check, so an agent running `einzel` sees one version throughout. The
+  command line, the MCP server, the portable archives and a source build never check. See
+  `docs/install.md`.
 
-## Fixed
+## Bug Fixes
 
 - **Two unnamed electrodes in a driven or sequenced solve were solved at the same potential.**
   Every unnamed electrode was called `electrode`, and a driven or sequenced geometry is solved
@@ -166,13 +205,47 @@ become a feature release without being renamed twice.
   that accepts `0.1` and refuses `0,1`, and so would warnings. The bounds are fixed in both
   shells, and the cross-platform shell now writes every number with a point, as model files
   are.
+- **A sequence whose phases all name a transport mode the model does not** was flown in the
+  model's, with the timeline ignored and exit 0. The fork now asks for the set of modes the
+  run uses rather than whether two adjacent phases differ.
+- **A sequenced run writes a result document beside its manifest.** Three of the four run
+  paths already did; that one stored provenance and no answer, and it is the path every
+  mobility study takes. Its manifest recorded absolute artifact paths and now records
+  portable ones.
+- **Arrival figures for a continuous population require the collected ions to reach a
+  millionth of those launched**, and are absent with `sequence.nothing-eluted` below that.
+  Scharfetter-Gummel's flux across a collecting face behind a barrier is the Boltzmann factor
+  of that barrier, so a held packet emitted values hundreds of orders below one ion from its
+  first step - and a mean and a spread were being reported over 7.74e-245 of them.
+- **Ponderomotive caches are invalidated from their defining RF state**, not spatial probes,
+  and quiver amplitudes are positive for either charge sign.
+
+## Breaking Changes
+
+- **A diffusive detector must coincide with a supported grid face, and one that does not is
+  refused.** Its position was previously ignored - the collecting face was chosen from its
+  normal alone - so a document could name a plane the solver did not use. **This is a
+  breaking change for existing diffusive models**, which are refused at run time rather than
+  silently collected at a different plane. Align the detector with the corresponding
+  `densityGrid` boundary, or move that boundary to the detector. Three corpus examples were
+  corrected to the faces the solver already used, and their numbers are unchanged. **Three
+  shipped templates instead had their grid moved to the declared detector**, so their tracked
+  region and their figures change: `tims-analyzer`, `tims-front-end` and `tims-tandem`. On the
+  front end, `maxX` moves from `tunnelLength + exitLength` (15 mm) to `+ detectorPad` (12 mm),
+  and the elution peak moves from 20.9878 V to 21.1843 V with the resolving power going 7.481
+  to 7.674. Re-measure any figure taken from those templates.
+- **Unsupported RF spectra in the diffusive effective-field path are rejected** instead of
+  applying one frequency to all components. Inactive generators no longer set the averaging
+  period; trajectory RF support is unchanged.
+- **The solver-behaviour version is advanced to 2**, so older numerical results are not
+  reported current after these corrections. The package version is unchanged.
 
 ## Known limits
 
 Carried forward from v26.1.0 until they change:
 
-- **The shells are partial**: eight of the eleven views in the specification exist, in both
-  the Windows shell and the cross-platform one. The cross-platform shell is the one being
+- **The shells are partial**: the figure composer, the animation timeline and the update
+  notice do not exist in either the Windows shell or the cross-platform one. The cross-platform shell is the one being
   kept, and the Windows-only one is removed in a coming release.
 - **A still cannot check the window's own GPU path**, and it does not draw the name of a
   validity violation as text: the codes are in the file's text chunks and on stderr.

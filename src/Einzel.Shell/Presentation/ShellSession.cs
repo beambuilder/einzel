@@ -57,14 +57,159 @@ public sealed class ShellSession
     /// <param name="person">Who is at the keyboard.</param>
     /// <exception cref="ArgumentNullException"><paramref name="person"/> is null.</exception>
     /// <exception cref="EinzelException">The document does not validate.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Opening is recorded as <c>einzel validate</c>.</b> Opening a model changes nothing,
+    /// so there is no mutation to journal and no verb called "open" to invent - Amendment 25
+    /// asks for the invocation that would reproduce what the window did, and what the window
+    /// does on opening is read and check the document. The same line whether the model was
+    /// named on the command line or picked from the window's Open dialog, because it is the
+    /// same act.
+    /// </para>
+    /// </remarks>
     public ShellSession(string modelPath, JournalAuthor person)
+        : this(modelPath, person, leading: null)
+    {
+    }
+
+    private ShellSession(string modelPath, JournalAuthor person, string? leading)
     {
         ArgumentNullException.ThrowIfNull(person);
 
         Journal = new SessionJournal(modelPath);
         Person = person;
 
+        if (leading is not null)
+        {
+            Record(leading, entry: null);
+        }
+
         Record($"einzel validate {Quoted(Journal.ModelPath)}", entry: null);
+    }
+
+    /// <summary>Writes a new model from a shipped template or example, and opens it.</summary>
+    /// <param name="destination">Where the model is to be written. Must not exist.</param>
+    /// <param name="source">Whether <paramref name="name"/> is a device template or an example.</param>
+    /// <param name="name">The template or example, as <c>einzel templates</c> or <c>einzel examples</c> lists it.</param>
+    /// <param name="person">Who is at the keyboard.</param>
+    /// <returns>A session on the new model, whose first action is the command that wrote it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="person"/> is null.</exception>
+    /// <exception cref="EinzelException">
+    /// The name is not one the catalog carries, or something is already at the destination -
+    /// the command refuses to overwrite a model, and the window says so rather than asking.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Through the same command object <c>einzel new</c> calls</b>, so the window cannot
+    /// make a model the command line could not: an example brings its test and its data files
+    /// with it here exactly as it does there, and an existing file is refused here exactly as
+    /// it is there.
+    /// </para>
+    /// <para>
+    /// <b>Journalled as the real spelling</b> -
+    /// <c>einzel new &lt;path&gt; --from-template &lt;name&gt;</c> or <c>--from-example</c> -
+    /// and then <c>einzel validate</c>, which is what opening it does. Somebody reading the
+    /// session's commands can run them in order and arrive at the same file.
+    /// </para>
+    /// </remarks>
+    public static ShellSession New(
+        string destination, ModelSource source, string name, JournalAuthor person)
+    {
+        return New(destination, source, name, person, static s => s);
+    }
+
+    /// <summary>
+    /// Writes a new model as <see cref="New(string, ModelSource, string, JournalAuthor)"/> does,
+    /// opens it, and hands it to <paramref name="adopt"/> - and if anything after the write
+    /// fails, removes exactly the files this call wrote.
+    /// </summary>
+    /// <typeparam name="T">What adopting produces.</typeparam>
+    /// <param name="destination">Where the model is to be written. Must not exist.</param>
+    /// <param name="source">Whether <paramref name="name"/> is a device template or an example.</param>
+    /// <param name="name">The template or example.</param>
+    /// <param name="person">Who is at the keyboard.</param>
+    /// <param name="adopt">
+    /// What the window does with the new session - for instance, building its model tree. A
+    /// throw here is treated as the new model failing to open.
+    /// </param>
+    /// <returns>What <paramref name="adopt"/> returned.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>A model that failed to open must not be left behind.</b> The command writes the model,
+    /// an example's data files and its test before the session exists, so a failure afterwards
+    /// left an orphan that blocked the obvious retry with "already exists" - a refusal about a
+    /// file the person never got to see.
+    /// </para>
+    /// <para>
+    /// <b>Only what this call created.</b> The model is refused by the command if it exists, so
+    /// it is always new; the test path the command reports is one it found absent; an example's
+    /// data file is removed only if it was not there before the call. Nothing that was already
+    /// on disk is ever deleted.
+    /// </para>
+    /// </remarks>
+    public static T New<T>(
+        string destination, ModelSource source, string name, JournalAuthor person, Func<ShellSession, T> adopt)
+    {
+        ArgumentNullException.ThrowIfNull(person);
+        ArgumentNullException.ThrowIfNull(adopt);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var (kind, flag) = source switch
+        {
+            ModelSource.Template => ("template", "--from-template"),
+            ModelSource.Example => ("example", "--from-example"),
+            _ => throw new ArgumentOutOfRangeException(nameof(source), source, "not a model source"),
+        };
+
+        var absolute = System.IO.Path.GetFullPath(destination);
+
+        // Data files that did not exist before this call, and so are this call's to remove.
+        var directory = System.IO.Path.GetDirectoryName(absolute) ?? absolute;
+        var assets = source == ModelSource.Example
+            ? ExampleModels.Assets(name).Select(a => System.IO.Path.Combine(directory, a)).Where(p => !System.IO.File.Exists(p)).ToList()
+            : [];
+
+        // The command refuses an existing model; that refusal must leave everything as it was.
+        var modelExisted = System.IO.File.Exists(absolute);
+        NewOutcome? outcome = null;
+
+        try
+        {
+            outcome = ProjectCommands.New(destination, kind, name);
+
+            return adopt(new ShellSession(
+                outcome.Path, person, $"einzel new {Quoted(outcome.Path)} {flag} {Quoted(name)}"));
+        }
+        catch
+        {
+            if (!modelExisted)
+            {
+                RemoveCreated([absolute, .. assets, .. outcome?.TestPath is { } test ? [test] : Array.Empty<string>()]);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>Deletes files this session's creation wrote, best effort.</summary>
+    /// <param name="paths">Files created by this call.</param>
+    /// <remarks>
+    /// A file that cannot be removed is left: the original failure is the one to report, and a
+    /// second exception from tidying up would hide it.
+    /// </remarks>
+    private static void RemoveCreated(IEnumerable<string> paths)
+    {
+        foreach (var path in paths)
+        {
+            try
+            {
+                System.IO.File.Delete(path);
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+            }
+        }
     }
 
     /// <summary>The shared, attributed, linear journal (MCP-1).</summary>
@@ -231,7 +376,10 @@ public sealed class ShellSession
     /// Asked whether a frame is wanted at every step and told each frame drawn. Called on a
     /// background thread, so a caller binding to it marshals.
     /// </param>
-    /// <param name="stopping">Watched for a request to give up before the run starts.</param>
+    /// <param name="stopping">
+    /// Watched for a request to give up: before the run starts, and at every step after.
+    /// A stopped watch ends in <see cref="OperationCanceledException"/>.
+    /// </param>
     /// <returns>The bundle the finished run leaves.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="progress"/> is null.</exception>
     /// <remarks>
@@ -262,8 +410,39 @@ public sealed class ShellSession
         Record($"einzel run {Quoted(Journal.ModelPath)} --progress 5", entry: null);
 
         var path = Journal.ModelPath;
+        var listening = new Stoppable(progress, stopping);
 
-        return Task.Run(() => ViewportCommand.Watch(path, progress), stopping);
+        return Task.Run(() => ViewportCommand.Watch(path, listening), stopping);
+    }
+
+    /// <summary>Asks the run's own listener, after checking whether anybody still wants the run.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The token used to reach only the start.</b> <see cref="Task.Run(Action, CancellationToken)"/>
+    /// declines to begin a task whose token is already cancelled and does nothing once it has
+    /// begun, so a window that passed its token here could stop a watch in the microsecond
+    /// before it started and never after. The transport asks its listener once a step whether
+    /// a frame is wanted, which is the one place a running watch can be told anything, so that
+    /// is where the token is checked.
+    /// </para>
+    /// <para>
+    /// Thrown rather than answered with "no frame", because "no frame" means carry on: the
+    /// exception is what ends the run, at a step boundary, with the solver's buffers in a state
+    /// that is simply where it stopped.
+    /// </para>
+    /// </remarks>
+    private sealed class Stoppable(
+        ViewportCommand.IViewportProgress inner,
+        CancellationToken stopping) : ViewportCommand.IViewportProgress
+    {
+        public bool Wants(int steps, double timeSeconds)
+        {
+            stopping.ThrowIfCancellationRequested();
+
+            return inner.Wants(steps, timeSeconds);
+        }
+
+        public void Reached(ViewportOutcome frame) => inner.Reached(frame);
     }
 
     /// <summary>Passes frames on, and declines them when nobody is waiting for one.</summary>

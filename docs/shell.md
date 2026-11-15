@@ -1,7 +1,22 @@
 # The shell
 
-WPF on Windows, and §16's eleven views. Six exist: the model tree, the journal, the 3D
-viewport, results by accuracy class, the regime inspector, and the sequence editor.
+§16's eleven views. **The shell that survives is `src/Einzel.Shell`, on Avalonia**: plain
+`net10.0` with an OpenGL viewport, so it is not Windows-only. The test CI builds and runs
+it on Windows and Linux; macOS is supported by the toolkit and not covered by those tests,
+so treat it as untested. It has a model tree whose parameters are edited through the session
+journal and can be undone, a viewport that orbits, pans and zooms with a ruler in the corner,
+and Journal, Results, Regime, Sequence, Project and Extensions tabs. The section
+[A second shell, on Avalonia](#a-second-shell-on-avalonia-that-runs-where-the-engine-runs)
+is the current account.
+
+`src/Einzel.Wpf`, the first shell, still builds and is scheduled for deletion: nothing is
+left that only it has (SPEC.md Amendment 53, item 5). **Most of this page was written
+about it** - it carries the model tree, journal, 3D viewport, results by accuracy class,
+regime inspector, sequence editor, project view and extension manager - and where a section
+says "the shell" without saying which, read the WPF one unless the section is about the
+commands underneath, which both windows share. Do not add anything to the WPF shell, and put
+a new view's logic in a view model under `src/Einzel.Shell/Presentation/`, which the WPF
+project compiles from there.
 
 **UI-1 is the whole design.** The shell owns layout, input, the interactive viewport and
 the update check. It owns no physics, no validation rules, no file format knowledge and
@@ -28,7 +43,7 @@ been built. The one to watch is the in-process path
 acquiring an argument the command form has no spelling for; that is the moment the
 amendment is being broken, and it will look like a convenience at the time.
 
-## Windows-only is the shell, and nothing else
+## Nothing below the shell may know it exists (written for WPF, true of both)
 
 Architecture invariant 1 says nothing below the shell may reference it and every assembly
 above it builds and runs on Linux. Two tests enforce it, both running on Linux:
@@ -722,8 +737,8 @@ that knew where `models/` sits would grow its own idea of what a project is.
   data for the other two is already on each path.
 - **Scrubbing**, which is the animation timeline's shell half. Per-phase playback rates and
   frame export are built.
-- **Six more views**: figure composer, animation timeline, sequence editor, results by
-  accuracy class, regime inspector, project view, extension manager, update notice.
+- **What §16 still lists that neither shell has**: the figure composer, the animation
+  timeline and the update notice. The other views in the list exist in both windows.
 
 The pattern is worth noticing: almost every remaining row is presentation over something
 that already works, which is what AGT-2 is supposed to produce and is weak evidence that it

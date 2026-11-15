@@ -40,3 +40,6 @@ ai/
 ## ask for them again. The tracked record of what they say is the published
 ## register in docs/literature-targets.md section 4.
 papers/
+
+# Agent worktrees: separate checkouts of this repository, never part of it.
+.claude/worktrees/

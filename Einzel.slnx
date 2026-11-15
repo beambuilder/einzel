@@ -14,6 +14,7 @@
     <Project Path="src/Einzel.Shell/Einzel.Shell.csproj" />
     <Project Path="src/Einzel.Sweeps/Einzel.Sweeps.csproj" />
     <Project Path="src/Einzel.Transport/Einzel.Transport.csproj" />
+    <Project Path="src/Einzel.Update/Einzel.Update.csproj" />
     <Project Path="src/Einzel.Wpf/Einzel.Wpf.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -29,6 +30,7 @@
     <Project Path="tests/Einzel.Shell.Tests/Einzel.Shell.Tests.csproj" />
     <Project Path="tests/Einzel.Sweeps.Tests/Einzel.Sweeps.Tests.csproj" />
     <Project Path="tests/Einzel.Transport.Tests/Einzel.Transport.Tests.csproj" />
+    <Project Path="tests/Einzel.Update.Tests/Einzel.Update.Tests.csproj" />
     <Project Path="tests/Einzel.Wpf.Tests/Einzel.Wpf.Tests.csproj" />
   </Folder>
 </Solution>
