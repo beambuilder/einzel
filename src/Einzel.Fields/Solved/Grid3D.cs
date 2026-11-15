@@ -124,10 +124,21 @@ public sealed class Grid3D
     /// <param name="y">y, in metres.</param>
     /// <param name="z">z, in metres.</param>
     /// <returns><see langword="true"/> when inside or on the boundary.</returns>
+    /// <remarks>
+    /// For a grid built by <see cref="OverBox"/> the far boundary is the declared face or the
+    /// last node, whichever is further out: the last node is min + fl(max - min), which can land
+    /// an ulp short of max, and a point on the declared face must not read as outside the domain
+    /// it bounds.
+    /// </remarks>
     public bool Contains(double x, double y, double z) =>
-        x >= OriginX && x <= MaxX
-        && y >= OriginY && y <= MaxY
-        && z >= OriginZ && z <= MaxZ;
+        x >= OriginX && (x <= MaxX || x <= _declaredMaxX)
+        && y >= OriginY && (y <= MaxY || y <= _declaredMaxY)
+        && z >= OriginZ && (z <= MaxZ || z <= _declaredMaxZ);
+
+    // The far corner as the box declared it; NaN, which compares false, when not built from one.
+    private double _declaredMaxX = double.NaN;
+    private double _declaredMaxY = double.NaN;
+    private double _declaredMaxZ = double.NaN;
 
     /// <summary>x of a node index.</summary>
     /// <param name="i">Node index along x.</param>
@@ -222,7 +233,12 @@ public sealed class Grid3D
         return new Grid3D(
             minX, minY, minZ,
             (maxX - minX) / nx, (maxY - minY) / ny, (maxZ - minZ) / nz,
-            (int)nx + 1, (int)ny + 1, (int)nz + 1);
+            (int)nx + 1, (int)ny + 1, (int)nz + 1)
+        {
+            _declaredMaxX = maxX,
+            _declaredMaxY = maxY,
+            _declaredMaxZ = maxZ,
+        };
     }
 
     /// <summary>Refuses a grid with more nodes than a volume solve may hold.</summary>

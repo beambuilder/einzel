@@ -93,6 +93,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel project [dir]` | What the project holds (models, studies, figures, tests, extensions) and the state of each model (see below) |
 | `einzel estimate <model.json\|study.json>` | What a run or a whole study will cost, before starting it (GRD-8) |
 | `einzel solve <model.json>` | Solve the fields only, and report how they went |
+| `einzel probe <model.json> --at-mm x,y,z` | The potential and electric field at a point, or along a line (`--line-mm ... --to-mm ... --samples N`), of the composite field a run flies through |
 | `einzel run <model.json>` | Run; writes a manifest and a result. Reports the ensemble too when the model declares a source cloud, and says where it has got to every 30 s (`--progress`) |
 | `einzel sweep <study.json>` | Tolerance Monte Carlo, and which parameter binds first |
 | `einzel scan <study.json>` | One parameter across a range: one row per point, and a curve |
@@ -103,7 +104,7 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel verify [dir]` | Are the stored results still the answer? (GRD-10) |
 | `einzel report [dir]` | An account of what has been run, as one self-contained page (Amendment 43) |
 | `einzel compare <model.json> [--ions N]` | Run both transport modes on the same model and report where they disagree (REG-3) |
-| `einzel export <model.json>` | Write the solved field as VTK ImageData for ParaView |
+| `einzel export <model.json>` | Write the solved field as VTK ImageData for ParaView; `--composite` writes the summed field and E at one instant on a grid |
 | `einzel render section <model.json \| spec.json>` | Draw a plane through the instrument as line work |
 | `einzel render still <model.json>` | Draw the viewport's shaded 3D picture to a PNG, headlessly - the same composition and camera the window uses |
 | `einzel render animation <spec.json>` | Draw a flight as numbered vector frames on the spec's declared time mapping (RND-7) |
@@ -776,6 +777,78 @@ which the rasterizer multiplies the profile by. So `solve` reported a mirror wit
 boards, converged, with a peak of 4800 V - the cap's, which looks right. Found while
 moving `export` onto the same function, which every static template had to survive
 unchanged: the mirror pair would not have.
+
+### `einzel probe`: what is the potential, what is E, here
+
+```
+einzel probe <model.json> --at-mm x,y,z [--at-us <t>] [--json]
+einzel probe <model.json> --line-mm x,y,z --to-mm x,y,z [--samples N] [--at-us <t>] [--csv <file>]
+```
+
+Axial potential profiles are what ion-optics designers live on, and until this verb there was no way to
+ask the engine for one. The probe reads **the field a run flies through**: it is built by
+`FieldAssembly.BuildReported`, the assembly every run uses, so superposed elements, regions, mirrors,
+tilts and the axisymmetric mapping are all honoured and the assembly's warnings (an unconverged solve,
+`mesh.node-on-shared-face`, a region's potential step) come out on the probe as they do on a run.
+
+- **Units are in the flag's name**, as `--width-mm` and `--at-us` already do it: `--at-mm`, `--line-mm`,
+  `--to-mm` are millimetres, `--at-us` is microseconds. A bare `--at` is refused by name rather than read
+  in some default unit. A line is `--samples` points (default 21, at least 2) with **both ends exactly the
+  points asked for**.
+- **Every number carries its unit in its name**: `potentialV`, `fieldVPerM`, `positionMm`. `--csv` writes
+  the same table with the unit in each column.
+- **A driven or sequenced field has no single value, so it has an instant.** The probe reads it through the
+  time-varying interface at `--at-us`, states the instant in the output (`instantUs`, and `field at
+  t = ... us` above the table), and when none was given it evaluates at t = 0 and says so with the
+  `probe.field-at-instant` warning. Reading such a field through the static interface instead would answer
+  at t = 0 without saying so, the defect `docs/lessons.md` records under "time-free interface".
+- **Each row says what kind of point it is.** `status` is `ok`; `inside-conductor` (with the conductor's
+  name and the signed distance in `conductorDistanceMm`: the potential there is the electrode's and the
+  field is the interpolant's, not a physical field); `outside-domain` (outside the domain of every element -
+  a solve's box together with its mirror image when it declares `reflectAboutX`, a tilted cross-section
+  checked in its own unrotated frame, a bounded analytic element's region - so the value is what the field
+  returns there, which is not a solved value and need not be zero; this wins over `inside-conductor`,
+  because an electrode's declared shape can run on past the solve); or `refused` (the field declines the
+  point, for example the quadro-logarithmic field's singular axis). A refused point is a row with a note,
+  never a failure of the profile; only that refusal is caught, so any other error in the field stack is
+  one error, not a column of refused rows. Warnings summarise the counts (`probe.inside-conductor`,
+  `probe.outside-domain`, `probe.refused`).
+- **A point on a domain face is in the domain.** A face node holds a solved value, so the declared faces
+  are inside, and the solved fields agree: a grid's last node is `min + (max - min)` in floating point and
+  can land an ulp short of the declared face, so a grid built over a box counts as reaching the declared
+  face. Millimetres are converted to metres exactly as the model's own lengths are (`mm` is multiplied by
+  1e-3), so `--at-mm 9,0,0` on a face declared as 9 mm is the same double as that face; a correctly
+  rounded division would land an ulp off it.
+- **`--at-us` is checked once, up front**: a non-finite or negative instant (a run's clock starts at 0) is
+  one `SCHEMA_INVALID` error naming the flag, exit 1.
+- **GRD-1, and why there is no interval.** A probed potential is an evaluation of a field already computed,
+  not a measurement with an ensemble of its own, so the outcome carries no uncertainty and says why
+  (`evidence`): an analytic element is exact to arithmetic, a solved element's error is its discretisation,
+  stated by each element's `cellMm` and by the warnings. An interval invented here would claim a precision
+  nothing measured.
+
+### `einzel export --composite`
+
+`export` writes each solved element's nodal potential, and for a driven geometry one *pattern* per channel -
+no instant, no field, one element at a time. `--composite [--box-mm x0,y0,z0,x1,y1,z1] [--step-mm s]
+[--at-us t]` samples the **summed** field with the probe and writes one `<model>.composite.vti` carrying
+`potential_V` and the vector `E_V_per_m`, with the instant, the grid, each element's cell size and every
+warning in the header. The default box is the union of what the model's bounded elements occupy - each
+solve's box, a reflected solve's mirror image, a tilted cross-section's rotated extent, a bounded analytic
+element's region (a model with none needs `--box-mm`) - taken in metres from the bounds themselves, so its
+last node is the domain's face and not a millimetre round trip of it. The default step is a 64th of the
+longest side, and the box's far faces are nodes exactly. **A box flat along an axis** (`--box-mm
+0,0,0,50,20,0`) is one layer of nodes on that axis with a nominal spacing of 1 m, the spacing the per-channel
+cross-section export writes for its flat axis, so ParaView opens it as a plane. It is a resampling: a step
+coarser than a solve's cell loses what the solve resolved.
+
+A node the field refused is never written as zero: its values are written as `nan` - lower case, the
+spelling VTK's own writers produce - and a `valid` array (UInt8, 1 where the field answered, 0 where it
+refused) marks it, so a reader never has to rely on parsing a non-finite number. The header says both.
+The model is read once, and the header's `model:` hash is of the very text the field was built from (PRJ-3).
+`--dry-run` samples nothing: it reports the grid it would write (`grid` in `--json`, a line on the terminal)
+and its node count. The file is streamed to a temporary file beside the target and moved into place, so a
+grid at the 8 M-node cap never exists as one string in memory.
 
 ### Why `export` writes ImageData
 

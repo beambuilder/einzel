@@ -336,5 +336,184 @@ public static class VtuWriter
         return text.ToString();
     }
 
+    /// <summary>Writes the composite field sampled on a regular grid as VTK ImageData.</summary>
+    /// <param name="counts">Nodes along x, y and z.</param>
+    /// <param name="originMetres">The first node, in metres.</param>
+    /// <param name="spacingMetres">The node spacing along each axis, in metres.</param>
+    /// <param name="potentialVolts">The potential at each node, x fastest, then y, then z.</param>
+    /// <param name="fieldVoltsPerMetre">The field at each node, three components per node, same order.</param>
+    /// <param name="provenance">Provenance lines recorded as an XML comment.</param>
+    /// <returns>The .vti document text.</returns>
+    /// <exception cref="ArgumentException">The arrays do not match the node count.</exception>
+    /// <remarks>
+    /// The same document <see cref="WriteSampledField(TextWriter, IReadOnlyList{int}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{string}?)"/>
+    /// streams, built in memory; for a large grid stream it instead.
+    /// </remarks>
+    public static string WriteSampledField(
+        IReadOnlyList<int> counts,
+        IReadOnlyList<double> originMetres,
+        IReadOnlyList<double> spacingMetres,
+        IReadOnlyList<double> potentialVolts,
+        IReadOnlyList<double> fieldVoltsPerMetre,
+        IReadOnlyList<string>? provenance = null)
+    {
+        using var text = new StringWriter(CultureInfo.InvariantCulture);
+        WriteSampledField(text, counts, originMetres, spacingMetres, potentialVolts, fieldVoltsPerMetre, provenance);
+        return text.ToString();
+    }
 
+    /// <summary>Streams the composite field sampled on a regular grid as VTK ImageData.</summary>
+    /// <param name="writer">Where the document goes.</param>
+    /// <param name="counts">Nodes along x, y and z.</param>
+    /// <param name="originMetres">The first node, in metres.</param>
+    /// <param name="spacingMetres">The node spacing along each axis, in metres.</param>
+    /// <param name="potentialVolts">The potential at each node, x fastest, then y, then z.</param>
+    /// <param name="fieldVoltsPerMetre">The field at each node, three components per node, same order.</param>
+    /// <param name="provenance">Provenance lines recorded as an XML comment.</param>
+    /// <exception cref="ArgumentException">The arrays do not match the node count.</exception>
+    /// <remarks>
+    /// <para>
+    /// One scalar array, <c>potential_V</c>, one vector array, <c>E_V_per_m</c>, so ParaView can
+    /// contour the first and glyph or stream-trace the second, and a <c>valid</c> mask (UInt8, 1
+    /// where the field answered, 0 where it refused the point). A refused node's potential is NaN
+    /// rather than zero, because zero is a real potential.
+    /// </para>
+    /// <para>
+    /// <b>NaN is written as <c>nan</c>, lower case</b>, which is how VTK's own writers spell it
+    /// (C++ stream insertion). Current VTK's ASCII parser (vtkXMLDataParser) retries a token that
+    /// stream extraction rejects, lower-cases it and accepts <c>nan</c>, <c>inf</c> and
+    /// <c>-inf</c>; an older reader built on plain stream extraction may reject a non-finite
+    /// token in any spelling. The mask exists so that no consumer has to depend on parsing one. Every finite value is
+    /// written round-trip (<c>G17</c>, invariant culture), formatted into one reused buffer so that
+    /// streaming millions of values allocates nothing per value.
+    /// </para>
+    /// </remarks>
+    public static void WriteSampledField(
+        TextWriter writer,
+        IReadOnlyList<int> counts,
+        IReadOnlyList<double> originMetres,
+        IReadOnlyList<double> spacingMetres,
+        IReadOnlyList<double> potentialVolts,
+        IReadOnlyList<double> fieldVoltsPerMetre,
+        IReadOnlyList<string>? provenance = null)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(counts);
+        ArgumentNullException.ThrowIfNull(originMetres);
+        ArgumentNullException.ThrowIfNull(spacingMetres);
+        ArgumentNullException.ThrowIfNull(potentialVolts);
+        ArgumentNullException.ThrowIfNull(fieldVoltsPerMetre);
+
+        var nodes = (long)counts[0] * counts[1] * counts[2];
+
+        if (potentialVolts.Count != nodes || fieldVoltsPerMetre.Count != 3 * nodes)
+        {
+            throw new ArgumentException(
+                $"{nodes} nodes need {nodes} potentials and {3 * nodes} field components; got "
+                + $"{potentialVolts.Count} and {fieldVoltsPerMetre.Count}",
+                nameof(potentialVolts));
+        }
+
+        var invariant = CultureInfo.InvariantCulture;
+        // One buffer for every value: formatting into it allocates nothing per number.
+        var buffer = new char[32];
+
+        void Number(double value)
+        {
+            if (double.IsNaN(value))
+            {
+                writer.Write("nan");
+                return;
+            }
+
+            if (!value.TryFormat(buffer, out var written, "G17", invariant))
+            {
+                writer.Write(value.ToString("G17", invariant));
+                return;
+            }
+
+            writer.Write(buffer[..written]);
+        }
+
+        writer.Write("<?xml version=\"1.0\"?>\n");
+
+        if (provenance is { Count: > 0 })
+        {
+            writer.Write("<!--\n");
+
+            foreach (var line in provenance)
+            {
+                writer.Write("  ");
+                writer.Write(line.Replace("--", "- -", StringComparison.Ordinal));
+                writer.Write('\n');
+            }
+
+            writer.Write("-->\n");
+        }
+
+        var extent = string.Create(invariant, $"0 {counts[0] - 1} 0 {counts[1] - 1} 0 {counts[2] - 1}");
+        var origin = string.Create(invariant, $"{originMetres[0]:G17} {originMetres[1]:G17} {originMetres[2]:G17}");
+        var spacing = string.Create(invariant, $"{spacingMetres[0]:G17} {spacingMetres[1]:G17} {spacingMetres[2]:G17}");
+
+        writer.Write("<VTKFile type=\"ImageData\" version=\"1.0\" byte_order=\"LittleEndian\">\n");
+        writer.Write($"  <ImageData WholeExtent=\"{extent}\" Origin=\"{origin}\" Spacing=\"{spacing}\">\n");
+        writer.Write($"    <Piece Extent=\"{extent}\">\n");
+        writer.Write("      <PointData Scalars=\"potential_V\" Vectors=\"E_V_per_m\">\n");
+        writer.Write("        <DataArray type=\"Float64\" Name=\"potential_V\" format=\"ascii\">\n");
+
+        for (var n = 0; n < potentialVolts.Count; n++)
+        {
+            if (n % counts[0] == 0)
+            {
+                writer.Write("          ");
+            }
+
+            Number(potentialVolts[n]);
+            writer.Write(' ');
+
+            if (n % counts[0] == counts[0] - 1)
+            {
+                writer.Write('\n');
+            }
+        }
+
+        writer.Write("        </DataArray>\n");
+        writer.Write("        <DataArray type=\"Float64\" Name=\"E_V_per_m\" NumberOfComponents=\"3\" format=\"ascii\">\n");
+
+        for (var n = 0; n < potentialVolts.Count; n++)
+        {
+            writer.Write("          ");
+            Number(fieldVoltsPerMetre[3 * n]);
+            writer.Write(' ');
+            Number(fieldVoltsPerMetre[(3 * n) + 1]);
+            writer.Write(' ');
+            Number(fieldVoltsPerMetre[(3 * n) + 2]);
+            writer.Write('\n');
+        }
+
+        writer.Write("        </DataArray>\n");
+        writer.Write("        <DataArray type=\"UInt8\" Name=\"valid\" format=\"ascii\">\n");
+
+        for (var n = 0; n < potentialVolts.Count; n++)
+        {
+            if (n % counts[0] == 0)
+            {
+                writer.Write("          ");
+            }
+
+            writer.Write(double.IsNaN(potentialVolts[n]) ? "0 " : "1 ");
+
+            if (n % counts[0] == counts[0] - 1)
+            {
+                writer.Write('\n');
+            }
+        }
+
+        writer.Write("        </DataArray>\n");
+        writer.Write("      </PointData>\n");
+        writer.Write("      <CellData/>\n");
+        writer.Write("    </Piece>\n");
+        writer.Write("  </ImageData>\n");
+        writer.Write("</VTKFile>\n");
+    }
 }
