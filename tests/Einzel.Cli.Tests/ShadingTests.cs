@@ -17,8 +17,9 @@ public sealed class ShadingTests(ITestOutputHelper output)
     /// version took <c>Math.Abs</c> of the drive amplitude and recovered its sign from the DC
     /// potential - which is exactly zero for a purely driven electrode, so the ternary
     /// substituted +1 and every rod of a quadrupole came back at +500 V and the same
-    /// saturated red. The WPF shell computes <c>PotentialVolts + DriveAmplitudeVolts</c> and
-    /// is correct.
+    /// saturated red. The WPF shell this was ported from computed
+    /// <c>PotentialVolts + DriveAmplitudeVolts</c>, which is correct, so the regression was
+    /// introduced in carrying it across.
     /// </para>
     /// <para>
     /// The assertion is that the two are on OPPOSITE SIDES of earth rather than merely

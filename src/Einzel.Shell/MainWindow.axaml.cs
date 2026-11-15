@@ -43,6 +43,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly Button _undo;
     private readonly Button _watch;
     private readonly Button _stop;
+    private readonly ItemsControl _legend;
     private readonly Button _openModel;
     private readonly Button _newModel;
     private readonly Button _resultsRun;
@@ -123,6 +124,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _resultsRun = this.FindControl<Button>("ResultsRun")!;
         _resultsPreview = this.FindControl<Button>("ResultsPreview")!;
         _regimeInspect = this.FindControl<Button>("RegimeInspect")!;
+        _legend = this.FindControl<ItemsControl>("Legend")!;
 
         _redraw = new Coalescing(DrawOnceAsync);
         _redraw.BusyChanged += (_, _) => UpdateControls();
@@ -442,6 +444,9 @@ public sealed partial class MainWindow : Window, IDisposable
             _view = null;
         }
 
+        // The legend describes the picture, and there is none until the new model draws.
+        ShowLegend(null);
+
         _parameters.ItemsSource = _tree.Parameters;
         this.FindControl<ItemsControl>("JournalList")!.ItemsSource = _tree.Journal;
         this.FindControl<ItemsControl>("CommandList")!.ItemsSource = _tree.Commands;
@@ -595,6 +600,23 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _status.Text = "einzel render section " + modelPath + "   ·   " + paths
             + Worst(outcome.Warnings);
+
+        ShowLegend(outcome);
+    }
+
+    /// <summary>The legend under the viewport, saying what the colors in it mean.</summary>
+    /// <remarks>
+    /// <b>Rebuilt whenever a new outcome is shown, including none.</b> The rows are
+    /// <see cref="LegendRow.RowsFor"/>'s answer for it, so a viewport that has been emptied
+    /// has no legend and a frame whose colored content differs from the last is described by
+    /// its own scales rather than the pre-watch ones.
+    /// </remarks>
+    private void ShowLegend(ViewportOutcome? outcome)
+    {
+        var rows = LegendRow.RowsFor(outcome);
+
+        _legend.ItemsSource = rows;
+        _legend.IsVisible = rows.Count > 0;
     }
 
     /// <summary>Runs the model's transport, filling the viewport as it goes.</summary>
@@ -643,7 +665,11 @@ public sealed partial class MainWindow : Window, IDisposable
             + " --progress 5   ·   solving, then stepping";
 
         var watcher = new Watcher(
-            frame => Dispatcher.UIThread.Post(() => view.Show(frame)),
+            frame => Dispatcher.UIThread.Post(() =>
+            {
+                view.Show(frame);
+                ShowLegend(frame);
+            }),
             TimeSpan.FromMilliseconds(400));
 
         try
@@ -661,6 +687,7 @@ public sealed partial class MainWindow : Window, IDisposable
             if (watcher.LastWithPacket is { } held)
             {
                 view.Show(held);
+                ShowLegend(held);
             }
 
             // Counted off the frame ACTUALLY SHOWN rather than off the final bundle. A run
@@ -683,6 +710,7 @@ public sealed partial class MainWindow : Window, IDisposable
             if (watcher.LastWithPacket is { } held)
             {
                 view.Show(held);
+                ShowLegend(held);
             }
 
             _status.Text = "stopped - the packet drawn is where the run had got to, not where it ends";

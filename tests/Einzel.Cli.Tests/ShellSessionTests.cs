@@ -10,11 +10,12 @@ namespace Einzel.Cli.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>ShellSession</c> lives in <c>Einzel.Wpf</c> and this project cannot reference it —
-/// that is invariant 1. So what is tested here is the behaviour it is made of, through
-/// the same command objects and the same journal it drives, which is the honest thing to
-/// check: if this passes and the window misbehaves, the fault is in layout and input,
-/// which is all UI-1 leaves the window to own.
+/// <c>ShellSession</c> lives in the shell and this project cannot reference one — that is
+/// invariant 1. So what is tested here is the behaviour it is made of, through the same
+/// command objects and the same journal it drives, which is the honest thing to check: if
+/// this passes and the window misbehaves, the fault is in layout and input, which is all
+/// UI-1 leaves the window to own. (The session's own tests live in
+/// <c>Einzel.Shell.Tests</c>, which may reference it.)
 /// </para>
 /// <para>
 /// The parts that genuinely need a window — a grid that redraws, a status bar that turns

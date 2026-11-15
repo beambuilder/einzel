@@ -27,40 +27,13 @@
 
   <ItemGroup>
     <!--
-      The 3-D viewport. Section 16 names Helix Toolkit on its DirectX 11 path and says
-      why: plain WPF Media3D cannot render 10^4 trajectories interactively.
-
-      Verified rather than assumed, per section 20's "verify current version and
-      licence" and r06's own caveat that third-party status must be re-checked before
-      being committed to. 3.1.2 is MIT, read from the LICENSE file embedded in the
-      package rather than from a URL, and its transitive closure is MIT throughout -
-      CommunityToolkit, Cyotek, Microsoft.Extensions, and SharpDX. LIC-1 clear.
-
-      TWO THINGS THE RE-CHECK FOUND, both recorded as an amendment in SPEC.md.
-
-      The version contemporaneous with r06 no longer works: 2.27.3 is .NET Framework
-      4.x only and restores on net10 solely through the NU1701 compatibility shim.
-      3.1.2 restores cleanly, and is why this is pinned to the 3.x line.
-
-      And every Helix DirectX package depends on SharpDX, ARCHIVED SINCE DECEMBER 2020.
-      Taken knowingly. The blast radius is small by design: section 17 makes the
-      interactive viewport "screen tuning, not an artifact", so publication figures come
-      out of Einzel.Render - vector, headless, no third-party dependency. If SharpDX
-      breaks on some future Windows we lose interactive tumbling and lose no figure, no
-      number and no test. Vortice.Windows is the maintained successor and the exit if it
-      ever bites; Helix has no Vortice backend today.
-    -->
-    <PackageVersion Include="HelixToolkit.Wpf.SharpDX" Version="3.1.2" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!--
-      The cross-platform shell. Section 16's viewport has to run on Linux as well as
-      Windows: the WPF shell is pinned to Windows by WPF itself, and its 3-D path rides
-      on SharpDX, which the note above records as archived since December 2020. Avalonia
-      is the replacement presentation layer, and UI-1 plus Amendment 25 are what make
-      that a swap rather than a rewrite - the shell owns layout, input and the viewport
-      and reaches the engine only through Einzel.Commands.
+      The shell. Section 16's viewport has to run on Linux as well as Windows, which
+      the WPF shell this replaced could not: WPF pinned it to Windows, and its 3-D path
+      rode on Helix Toolkit's SharpDX backend, archived since December 2020. Avalonia is
+      the presentation layer now, and UI-1 plus Amendment 25 are what made that a swap
+      rather than a rewrite - the shell owns layout, input and the viewport and reaches
+      the engine only through Einzel.Commands. The WPF project was deleted once this one
+      had every view it had.
 
       Avalonia is 2-D, so the viewport is an OpenGL control and the drawing is ours.
       Silk.NET.OpenGL wraps the function pointers Avalonia's GlInterface hands over; it

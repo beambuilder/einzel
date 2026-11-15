@@ -76,11 +76,11 @@ without editing it, and the animation timeline has no scrubbing - while the upda
 waits on `Einzel.Update` (see [the shell section](#the-shell-and-the-rest-of-16)).
 
 The shell is a **deliverable rather than a permission**, and the Windows GUI capability was
-part of why the toolchain is C# - a rationale r06 never records. There are two of them while
-one is carried into the other: `Einzel.Shell` on Avalonia, which runs where the engine runs and
-is the one that survives (decided 2026-11-09), and `Einzel.Wpf`, which is deleted once nothing
-is left that only it has. See [the shell section](#the-shell-and-the-rest-of-16) and
-Amendments 25 and 53.
+part of why the toolchain is C# - a rationale r06 never records. It is `Einzel.Shell` on
+Avalonia, plain `net10.0`, and it runs where the engine runs. There was a second shell on
+WPF; the Avalonia one was built beside it, carried every view across, and the WPF project
+was deleted on 2026-11-09, taking Helix Toolkit and SharpDX out of the dependency graph
+with it. See [the shell section](#the-shell-and-the-rest-of-16) and Amendments 25 and 53.
 
 ---
 
@@ -357,28 +357,49 @@ field as equipotentials - at 2,167 lines, of which the physics is zero. No assem
 the shell changed. The one file ported verbatim from `Einzel.Wpf` was the color ramp, and
 only its namespace differed.
 
-**The WPF shell is untouched and still builds.** Its assembly was renamed
-`einzel-shell-wpf`, because two projects producing one assembly identity is a latent
-collision and it had already made the boundary test ambiguous about which shell it had
-found. Which of the two is the survivor was not settled here: what was settled is that the
-cross-platform one exists, its claim to run anywhere is *checked* rather than asserted, and
-nothing was lost to get it.
+**The two ran side by side for four changes, and then the WPF one was deleted.** While both
+existed its assembly was renamed `einzel-shell-wpf`, because two projects producing one
+assembly identity is a latent collision and it had already made the boundary test ambiguous
+about which shell it had found. **Settled on 2026-11-09: the Avalonia shell survives.**
+Keeping both meant writing every future view twice, and the WPF one carried the SharpDX
+backend Amendment 26 took knowingly and which has been archived since 2020. The port ran in
+four steps - the session and view models moved to plain `net10.0`, the model tree made
+editable through the journal, the remaining panels as tabs, then the deletion - and all
+four are done.
 
-**Settled since, on 2026-11-09: the Avalonia shell survives, and `Einzel.Wpf` is deleted once
-nothing is left that only it has.** Keeping both means writing every future view twice, and the
-WPF one is what carries the SharpDX backend Amendment 26 took knowingly and archived since 2020.
-The port runs in four steps - the session and view models moved to plain `net10.0`, the model
-tree made editable with the journal, the remaining panels as tabs, then the deletion - and the
-first two are done (`docs/shell.md`, "The session moved, and the window stopped going around
-it"). Until the last, the WPF project compiles the moved files from where the Avalonia shell
-keeps them, so the two windows run one source.
+**The claim that nothing was left that only the WPF shell had was wrong twice over**, which a
+review of the deletion found. It had been drawn up by walking §16's eleven views and the
+deleted project's tests; the WPF toolbar also carried a **Stop** button for a watched run and
+a **colour legend** under the viewport, neither of them a §16 view and neither of them tested.
+Both are built now - the stop cooperative, keeping what it drew, with the token reaching the
+listener the run asks at every step rather than only `Task.Run`; the legend from
+`ViewportPicture.Scales` in the command layer, since the potential ramp's ends are symmetric
+about earth rather than the observed range. The lesson is the comparison rather than the two
+features: **a list drawn up from a requirements document does not cover what a window grew
+that no requirement asked for.**
+
+**The deletion is 3,575 lines**, 2,819 of them the window and 756 its tests. What it leaves:
+one shell, no `net10.0-windows` target anywhere in the solution, no skipped test project, and
+`HelixToolkit.Wpf.SharpDX` out of `Directory.Packages.props`. **Before deleting a project the
+question is not whether its code is still wanted but whether anything it asserted is asserted
+nowhere else**, and three of its tests were not: they were written against a *copy* of the
+color ramp, and what they were really about is `Einzel.Commands.ColorRamp`, which the port had
+left with no tests of its own. They are `ColorRampTests` in `Einzel.Cli.Tests` now, pointed at
+the live type - WCAG contrast above 3.0 for both ramps against the viewport ground, Rec. 709
+luminance monotone over 65 samples, and a degenerate energy range giving the middle of the ramp
+rather than a division by zero - and two mutations fail them. The boundary test's `[Theory]`
+over both shells collapses back to one case, and the names of the deleted projects are kept in
+it, because a test that forbids a reference to an assembly should keep forbidding one that was
+deliberately removed.
 
 **Three things are genuinely different rather than merely ported.**
 
 **The invariant is now tested from a test project that runs on Linux.** `Einzel.Wpf.Tests`
-is Windows-only, so the shell's own tests only ever ran on one platform;
-`Einzel.Shell.Tests` targets plain `net10.0` and its eleven tests run on both runners. A
-cross-platform claim checked only on Windows is a cross-platform claim nobody is checking.
+was Windows-only, so the shell's own tests only ever ran on one platform;
+`Einzel.Shell.Tests` targets plain `net10.0` and runs on both runners. A cross-platform
+claim checked only on Windows is a cross-platform claim nobody is checking. With the WPF
+project gone there is no skipped test project at all: 1,795 tests, every one of them run on
+both.
 
 **ANGLE hands back an OpenGL ES context on Windows, and a `#version 330 core` shader does
 not fail loudly there - Avalonia silently disables the control.** So the shader body is
@@ -395,8 +416,9 @@ Avalonia and Silk.NET are both MIT, verified in their nuspecs rather than assume
 
 **What was not carried across at first**: results by accuracy class, the regime inspector, the
 sequence editor, the project view, the extension manager, the journal, an editable model tree,
-and the mouse gestures Helix gives the WPF viewport. **All of it has been carried across
-since**, so nothing is left that only the WPF shell has. Each was presentation over a command
+and the mouse gestures Helix gave the WPF viewport - and, found late, a Stop control on a
+watched run and a legend saying what the viewport's colours mean. **All of it was carried
+across before the deletion.** Each was presentation over a command
 that already worked, which is the same observation
 `docs/shell.md` makes about the WPF shell's own remaining rows - and is the evidence for
 AGT-2 that matters, since it means the second window is a drawing exercise rather than a
@@ -1515,7 +1537,7 @@ to notice.
 **What makes deferring it cheap is architectural rather than optimistic**, which is the
 part that has to stay true for the position to hold:
 
-- **Invariant 1** — no UI type below the shell. Every assembly above `Einzel.Wpf`
+- **Invariant 1** — no UI type below the shell. Every assembly above `Einzel.Shell`
   builds and runs on Linux, and CI runs there from the first commit. `Einzel.Render`
   produces a publication figure headlessly with no display, no window manager and no
   font server (RND-1).
@@ -2169,11 +2191,20 @@ finds a decision taken with open eyes rather than a name that has quietly stoppe
 what it did. The exit, if it is ever needed, is bounded by the same boundary: replacing a
 viewport backend touches the shell and nothing else.
 
-**A second, smaller finding in the same place: WPF cannot run in globalization-invariant
+**The bet was called, and by a different question than the one it was taken on.** The
+failure mode this amendment insured against - an unmaintained library breaking the window -
+never arrived; what arrived was a user asking for the shell to run outside Windows.
+Avalonia is a 2-D toolkit, so the viewport had to be written rather than configured, and
+when the WPF project was deleted on 2026-11-09 the archived dependency left the graph with
+it. The exit cost exactly what this paragraph predicted: the shell and nothing else.
+Amendment 53.
+
+**A second, smaller finding in the same place: WPF could not run in globalization-invariant
 mode.** `Directory.Build.props` sets `InvariantGlobalization` for the whole solution, for
 CLI-5's deterministic output; WPF's font cache constructs `new CultureInfo("en")` while
-measuring the first line of text and the window dies before it is shown. The shell
-reverses the setting, and what it was protecting is unaffected — this codebase achieves
+measuring the first line of text and the window died before it was shown. The Avalonia
+shell reverses the setting too, for the ordinary reason rather than that one - text layout
+and number entry in a window are locale-facing - and what it was protecting is unaffected — this codebase achieves
 locale-independence by passing `CultureInfo.InvariantCulture` explicitly at every
 formatting and parsing site, and the build flag was the belt to those braces. The parse is
 the one that matters: a value typed into the model tree is read invariantly whatever the
@@ -2223,23 +2254,21 @@ whole purpose is showing GRD-1 envelopes revealed that only one of fourteen figu
 one — see Amendment 28. A requirement can be honoured everywhere it is exercised and still
 be unmet where nothing has asked.
 
-**And the shell compiles on Linux**, which was an open bet and is now measured rather than
-assumed: `EnableWindowsTargeting` is enough, XAML markup compilation included. It does not
-run there and is not meant to. Only `Einzel.Wpf.Tests` is Windows-only, and on another host
-it builds as an ordinary `net10.0` assembly with no sources, so a solution-wide
-`dotnet test` walks past it.
+**The shell runs where the engine runs.** `Einzel.Shell` is §16's views on Avalonia and an
+OpenGL viewport, targeting plain `net10.0` and referencing `Einzel.Commands` and nothing
+else - so a user who asked for the platform outside Windows gets a window there. The views:
+the 3-D viewport with orbit, pan and zoom, the model tree - edited through the shared
+journal, validated as it is typed, and undone from a button the WPF shell never had - the
+field, a live run watched while it steps, the journal, results by accuracy class and the
+regime inspector (both run in the background, where WPF froze its window for the length of
+the run), the sequence editor, the project view and the extension manager.
 
-**There are two shells now, and the second one runs where the engine runs.** `Einzel.Shell`
-is the same §16 views on Avalonia and an OpenGL viewport, targeting plain `net10.0` and
-referencing `Einzel.Commands` and nothing else - so a user who asked for the platform
-outside Windows gets a window there. **Every view the WPF shell has is across**: the 3-D
-viewport with orbit, pan and zoom, the model tree - edited through the shared journal,
-validated as it is typed, and undone from a button the WPF shell never had - the field, a live
-run watched while it steps, the journal, results by accuracy class and the regime inspector
-(both run in the background, where WPF froze its window for the length of the run), the
-sequence editor, the project view and the extension manager. **This is the shell that
-survives** (decided 2026-11-09, Amendment 53), and with nothing left that only WPF has, the
-WPF shell is next to be deleted.
+**There were two shells, and the WPF one was deleted on 2026-11-09** (Amendment 53) once
+every view was across. What that leaves: no `net10.0-windows` target anywhere in the
+solution, no skipped test project, and Helix Toolkit and SharpDX out of the dependency
+graph. `Einzel.Shell.Tests` targets plain `net10.0` and runs on both CI runners, which is
+the claim a cross-platform shell has to make and which, while its tests were Windows-only,
+nobody was checking.
 
 **This is Amendment 26's bet being called, and it paid.** The Windows-only decision was
 recorded as a decision with a condition on it - "revisited if the need appears" - resting
@@ -2268,7 +2297,7 @@ Every view §16 requires:
 
 | View | State | What it needs beyond a window |
 | --- | --- | --- |
-| 3D viewport — geometry, potentials by colour, equipotentials, trajectory bundles | **Built** | Geometry, the field, and the bundle, on Helix Toolkit 3.1.2 / DirectX 11. **Every conductor is the zero level set of its own signed distance** (invariant 2), so one routine draws them all — and what differs between symmetries is what the solve claims about the third dimension: a cross-section extrudes (uncapped, because the electrode really does extend past what is drawn, with the depth named as a drawing convention per GRD-12), an axisymmetric half-plane revolves, a volume is extracted by surface nets. Checked against closed forms: a sphere's volume 0.99038 / 0.99760 / 0.99940 under refinement, every edge shared by exactly two triangles, normals exact to 1.000000, a revolved tube against Pappus to 0.99990. **Those revolve and extrude checks ran on profiles built by hand, and the outlines the viewport actually traces were drawn open until this was found**: `Contours` drops a closed run's repeated first point while `Revolve` and `Extrude` looked for it, so every closed 2-D conductor lost its closing segment (a traced tube: 96 open edges, now none, and the Pappus volume of its own polygon to 1e-12); and a face lying on a grounded domain edge was never traced at all, so the einzel lens's 7 mm tube walls drew as thin sleeves with flanges. Both renderers now trace a 2-D conductor as the solve holds it, clipped at every edge that is not a mirror, bit-identical for every conductor clear of such an edge; the lens's tubes enclose 0.99755 / 0.99847 / 0.99882 of the inscribed Pappus volume (`docs/shell.md`, "A face on the domain's edge was not drawn"). Equipotentials on the section plane rather than as surfaces, because a nest of closed surfaces hides the trajectories. Two colour scales, both anchored once across everything drawn — viridis for energy, and a **diverging ramp symmetric about zero** for potential, because earth is what every other potential is measured against and a ramp stretched over the observed range puts the neutral colour at 250 V for a lens holding 0 and 500. RND-8 withholds the paths and not the instrument. Helix's status is Amendment 26 |
+| 3D viewport — geometry, potentials by colour, equipotentials, trajectory bundles | **Built** | Geometry, the field, and the bundle, on Avalonia over an OpenGL control written here (the WPF shell drew it on Helix Toolkit 3.1.2 / DirectX 11, which went with that project). **Every conductor is the zero level set of its own signed distance** (invariant 2), so one routine draws them all — and what differs between symmetries is what the solve claims about the third dimension: a cross-section extrudes (uncapped, because the electrode really does extend past what is drawn, with the depth named as a drawing convention per GRD-12), an axisymmetric half-plane revolves, a volume is extracted by surface nets. Checked against closed forms: a sphere's volume 0.99038 / 0.99760 / 0.99940 under refinement, every edge shared by exactly two triangles, normals exact to 1.000000, a revolved tube against Pappus to 0.99990. **Those revolve and extrude checks ran on profiles built by hand, and the outlines the viewport actually traces were drawn open until this was found**: `Contours` drops a closed run's repeated first point while `Revolve` and `Extrude` looked for it, so every closed 2-D conductor lost its closing segment (a traced tube: 96 open edges, now none, and the Pappus volume of its own polygon to 1e-12); and a face lying on a grounded domain edge was never traced at all, so the einzel lens's 7 mm tube walls drew as thin sleeves with flanges. Both renderers now trace a 2-D conductor as the solve holds it, clipped at every edge that is not a mirror, bit-identical for every conductor clear of such an edge; the lens's tubes enclose 0.99755 / 0.99847 / 0.99882 of the inscribed Pappus volume (`docs/shell.md`, "A face on the domain's edge was not drawn"). Equipotentials on the section plane rather than as surfaces, because a nest of closed surfaces hides the trajectories. Two colour scales, both anchored once across everything drawn — viridis for energy, and a **diverging ramp symmetric about zero** for potential, because earth is what every other potential is measured against and a ramp stretched over the observed range puts the neutral colour at 250 V for a lens holding 0 and 500. RND-8 withholds the paths and not the instrument. Helix's status, and the bet that was called when it left with the WPF shell, is Amendment 26 |
 | Density clouds instead of trajectories for diffusive regions (TRN-2) | **Built** | The viewport draws the density as **nested shells at decades below its peak** - reusing the marching-squares contours the section already draws and the same extrude-or-revolve rule the conductors follow, so a cross-section repeats along z and an axisymmetric half-plane is a solid of revolution. RND-8 on its own is entirely negative: it forbids lines through a diffusive region and, alone, leaves an empty box for the whole pressure range the mode exists to cover - and an empty box is indistinguishable from a model that lost everything. **Drawn at an instant, and the end of the run is the wrong one**: the shipped drift tube collects 9,999.76 of 10,000 ions and leaves 1.8e-302 behind, so anchoring to the end draws nothing for exactly the models that work. The instant is chosen as the middle of those that still hold a packet, is reported rather than implied (GRD-12), and the caller may name its own - which is also the seam animation scrubbing needs. Measured on the corpus drift tube: three shells at 4.555e7 / 4.555e6 / 4.555e5 per m3, nesting outward at 208 / 260 / 292 vertices, the densest spanning **9.7 mm of a 42 mm tracked region centred at 35.2 mm** - a packet three-quarters of the way down the tube rather than a uniform gas |
 | Figure composer | **Seam built** | `RenderSpec` is already text in `figures/` that the CLI executes. A composer edits one of these and nothing else — which is UI-1's own test, and the reason it can be built last |
 | Animation timeline, per-phase playback rates, scrubbing, frame export | **Partial** | Per-phase playback rates and frame export are built: `einzel render animation` on a declared mapping, with the rate stamped on every frame and a `frames.json` schedule beside them. Scrubbing is a shell interaction and needs the window |
@@ -2588,7 +2617,7 @@ in a table.
 
 | Tag | Requirement (abridged from r06) | Status | Where it stands |
 | --- | --- | --- | --- |
-| `UI-1` | The shell owns layout, input, the interactive viewport, and the update check. It owns no physics, no validation rules, no file format knowledge, and no ... | **Partial** | **The shell exists**, and the prohibition is now checked rather than honoured by construction: `ShellBoundaryTests` runs from the Linux-running test project over the assemblies actually present, with a `MustBePresent` guard so a scan that found nothing cannot pass. **Two different checks were needed**, and the difference cost a mutation - `GetReferencedAssemblies` reports what the compiler *emitted*, so declaring a ProjectReference to the transport engine left no trace and the test passed; UI-1 is about what the shell may reach **for**, so the project file is checked too. Every view is built on a command object, and twice a view could not be built until a command existed (`einzel outline`, `ViewportCommand`) - which is Amendment 25 running in the direction it was not designed for. **Partial rather than Met** because the shell does not own the update check: there is nothing to check. **And the prohibition has now been paid for rather than merely kept**: a second shell, `Einzel.Shell`, puts the same views on Avalonia for Linux and macOS, targets plain `net10.0`, and reaches the engine through `Einzel.Commands` alone - 2,167 lines with no change to any assembly below it, which is what UI-1 plus Amendment 25 were being banked for. Its tests target plain `net10.0` too, so a shell's own tests run on both runners for the first time. See Amendment 53. |
+| `UI-1` | The shell owns layout, input, the interactive viewport, and the update check. It owns no physics, no validation rules, no file format knowledge, and no ... | **Partial** | **The shell exists**, and the prohibition is now checked rather than honoured by construction: `ShellBoundaryTests` runs from the Linux-running test project over the assemblies actually present, with a `MustBePresent` guard so a scan that found nothing cannot pass. **Two different checks were needed**, and the difference cost a mutation - `GetReferencedAssemblies` reports what the compiler *emitted*, so declaring a ProjectReference to the transport engine left no trace and the test passed; UI-1 is about what the shell may reach **for**, so the project file is checked too. Every view is built on a command object, and twice a view could not be built until a command existed (`einzel outline`, `ViewportCommand`) - which is Amendment 25 running in the direction it was not designed for. **Partial rather than Met** because the shell does not own the update check: there is nothing to check. **And the prohibition has now been paid for rather than merely kept**: a second shell, `Einzel.Shell`, put the same views on Avalonia for Linux and macOS, targeting plain `net10.0` and reaching the engine through `Einzel.Commands` alone, with no change to any assembly below it - which is what UI-1 plus Amendment 25 were being banked for. **It is the only shell now.** Once every view was across, the WPF project was deleted (2026-11-09): 3,575 lines, and with them the last `net10.0-windows` target, the last skipped test project and an archived 3-D dependency. A boundary test that had become a `[Theory]` over two shells is one case again, and keeps the deleted assembly names, because a rule forbidding a reference to a UI assembly should keep forbidding one that was deliberately removed. See Amendment 53. |
 
 ### Update (§18)
 
@@ -2861,10 +2890,12 @@ test had: all reported, none re-checked unless marked.
   no token and call back at no point; the window's Stop is for a watch only.
 
 **R1. Somebody else can install it and get through a first hour.** In progress on
-`review/installable-and-usable`. The release workflow publishes `Einzel.Wpf` as the only shell
-and has no macOS asset (confirmed), so deleting WPF as item 5 plans would ship no window at
-all; the Avalonia window cannot cancel a run, though `ShellSession.WatchAsync` takes a token
-(confirmed), and cannot open a model or start one from a template; README, `docs/README.md`,
+`review/installable-and-usable`. The release workflow published `Einzel.Wpf` as the only shell
+and had no macOS asset (confirmed), so deleting WPF as item 5 plans would have shipped no
+window at all — **settled**: the workflow now carries the Avalonia shell in every archive,
+macOS included, and `Einzel.Wpf` is deleted (item 5.4); the Avalonia window now has a Stop for a
+watched run (`ShellSession.WatchAsync` takes the token), opens a model and starts one from a
+template - what it still cannot do is stop results or regime; README, `docs/README.md`,
 `docs/shell.md`, `docs/architecture.md` and `docs/model-format.md` say 19 templates, schema 0.9
 and a Windows shell against 23, 0.14 and Avalonia; and there is no first-lens tutorial, no
 page mapping SIMION's terms onto these, and no index of warning and error codes.
@@ -3247,12 +3278,12 @@ the UI and render threads.
     seam is already text the CLI executes; then the animation timeline's scrubbing. The
     update notice needs `Einzel.Update`, which does not exist.
 
-    **The port to Avalonia comes first now, because WPF is being retired (decided
-    2026-11-09).** Every view written for WPF from here would be written twice. Four steps:
+    **The port to Avalonia is finished and WPF is deleted (2026-11-09).** Every view written
+    for WPF from there would have been written twice. The four steps, all done:
 
     1. ~~**Move the session and the view models to plain `net10.0`.**~~ Done. `ShellSession`
        and six view models live in `src/Einzel.Shell/Presentation/`; they held no WPF type,
-       and the WPF project compiles them from there until it is deleted.
+       and the WPF project compiled them from there until it was deleted.
     2. ~~**Make the Avalonia model tree editable, with the journal.**~~ Done, and checked in a
        live window: an edit goes through the journal under the person's name and redraws,
        out of bounds applies with the complaint under the tree and the last picture kept, and
@@ -3265,8 +3296,17 @@ the UI and render threads.
        when their tab opens. Orbit keeps the scale and turns about the centre, zoom is about
        the cursor, and named views fit exactly; the bookkeeping is in `ViewportCamera`, where
        it is tested, and the live window caught the sideways orbit turning the wrong way.
-    4. **Delete `Einzel.Wpf` and `Einzel.Wpf.Tests`**, Helix and SharpDX with them, the
-       Windows-targeting setting, and the `windowsOnly` arm of `ShellBoundaryTests`.
+    4. ~~**Delete `Einzel.Wpf` and `Einzel.Wpf.Tests`**, Helix and SharpDX with them, the
+       Windows-targeting setting, and the `windowsOnly` arm of `ShellBoundaryTests`.~~ Done:
+       3,575 lines, 2,819 of them the window. **The question before deleting a project is not
+       whether its code is still wanted but whether anything it asserted is asserted nowhere
+       else** - and three of its tests were not. They were written against a *copy* of the
+       color ramp and are really about `Einzel.Commands.ColorRamp`, which the port had left
+       with no tests at all; they are `ColorRampTests` in `Einzel.Cli.Tests` now, against the
+       live type, and two mutations fail them. The boundary test keeps the deleted assembly
+       names, because a rule forbidding a reference to a UI assembly should keep forbidding
+       one that was deliberately removed. There is now no `net10.0-windows` target and no
+       skipped test project in the solution: 1,795 tests, all on both runners.
 
 6. **The Astral inverse problem: the mirror is reproduced, and one published number is
     not.** This item has now been rewritten four times, and the rewriting is the point rather

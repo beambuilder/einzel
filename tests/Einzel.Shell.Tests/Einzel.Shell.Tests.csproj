@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The WPF shell's tests target net10.0-windows and a solution-wide `dotnet test` walks
-    past them on Linux, so what they check is checked on one platform. These target plain
-    net10.0 and run on both, which is the point of the shell they cover.
+    These target plain net10.0 and run on both CI runners, which is the point of the shell
+    they cover. The WPF shell's tests targeted net10.0-windows and a solution-wide
+    `dotnet test` walked past them on Linux, so what they checked was checked on one
+    platform - a cross-platform claim checked only on Windows is one nobody is checking.
 
     Nothing here touches a window. What is testable without one is the part that carries
     the decisions: where the camera goes, how often a watched run is sampled, which frame a

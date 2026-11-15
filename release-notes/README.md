@@ -113,7 +113,9 @@ plus `SHA256SUMS.txt`, one file over all six. Each archive holds `einzel` (the c
 not included. **One archive per platform rather than a CLI one and a window one**, because
 framework-dependent the window adds only the Avalonia and Skia files (a few MB of a 30-38 MB
 unpacked directory), and one archive means nobody has to work out which to download.
-`src/Einzel.Wpf` is not shipped.
+The retired WPF shell is gone from the tree, and the workflow still refuses an archive that
+carries it: a rule against shipping something deliberately removed should go on holding after
+the removal, or nothing stops it coming back.
 
 ### The Windows installer (Velopack)
 

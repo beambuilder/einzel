@@ -105,7 +105,7 @@ the same command objects, so nothing exists in one that cannot be reached from a
 | --- | --- |
 | `einzel` | the primary surface: JSON on every verb, results on stdout and diagnostics on stderr, a distinct exit code per failure class, no network call in any path |
 | `einzel-mcp` | a Model Context Protocol server for an agent working alongside a person on one model, with a shared attributed journal and undo |
-| `einzel-shell` | a cross-platform window (Avalonia) over the same model: a parameter tree edited through the shared journal with undo, a 3-D viewport you can orbit, pan and zoom, panels for results, regime, sequence, project and extensions, and a journal that records each action as the `einzel` command that would reproduce it. `src/Einzel.Wpf`, the earlier Windows-only window, is scheduled for deletion |
+| `einzel-shell` | a cross-platform window (Avalonia) over the same model: a parameter tree edited through the shared journal with undo, a 3-D viewport you can orbit, pan and zoom, panels for results, regime, sequence, project and extensions, and a journal that records each action as the `einzel` command that would reproduce it |
 
 ## What is in the box
 

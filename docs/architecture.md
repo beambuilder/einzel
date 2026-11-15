@@ -19,13 +19,14 @@ Engine outward. Each references only what is above it in this list.
 | `Einzel.Commands` | Command objects: every operation as one serialisable thing |
 | `Einzel.Cli` | The primary surface |
 | `Einzel.Mcp` | The live-session server, over one shared attributed journal |
-| `Einzel.Shell` | The windowed shell: §16's views on Avalonia, plain `net10.0`, referencing `Einzel.Commands` and nothing else. The one that survives |
-| `Einzel.Wpf` | The first shell, Windows-only WPF. Still builds; scheduled for deletion, since nothing is left that only it has |
+| `Einzel.Shell` | The shell: §16's views on Avalonia, plain `net10.0`, reaching the engine only through `Einzel.Commands` |
 
-Not yet built: `Einzel.Compute` (`Einzel.Update`, the shell's update check, exists). The shell has a model tree edited through
-the journal, a viewport with orbit, pan and zoom, and journal, results, regime, sequence,
-project and extension panels, plus the tests that keep invariant 1 and UI-1 true. See
-[The shell](shell.md).
+Not yet built: `Einzel.Compute` (`Einzel.Update`, the shell's update check, exists). The
+shell has a model tree edited through the journal, a viewport with orbit, pan and zoom, and
+journal, results, regime, sequence, project and extension panels, plus the tests that keep
+invariant 1 and UI-1 true; the figure composer and animation scrubbing are not built. There
+was a second shell on WPF, Windows-only, and it was deleted once this one had every view it
+had. See [The shell](shell.md).
 
 The CLI, the MCP server, and the shell are **peers, not a stack**. All three drive
 the same command objects. That is what makes "nothing exists only in the window"
@@ -59,18 +60,21 @@ Violating one is a design bug, not a shortcut.
 
 ### 1. No UI type below the shell
 
-Nothing may reference `Einzel.Shell` or `Einzel.Wpf`, and every assembly above them must
-build and run on Linux. CI builds and tests on `ubuntu-latest` *and* `windows-latest` from the
+Nothing may reference `Einzel.Shell`, and every assembly above it must build and run
+on Linux. CI builds and tests on `ubuntu-latest` *and* `windows-latest` from the
 first commit, because an invariant only ever checked on a developer's Windows box
 is one that has already been broken by the time anyone notices.
 
-**The shell itself builds on Linux too**: `EnableWindowsTargeting` is enough for the WPF
-one, XAML markup compilation included, and the Avalonia shell is plain `net10.0` and is
-meant to run there. What the Linux job checks is that nothing below the shell has
-acquired a dependency on either. `Einzel.Wpf.Tests` is the one Windows-only test
-project, and on another host it builds as an ordinary `net10.0` assembly with no
-sources, so a solution-wide `dotnet test` walks past it.
+**The shell itself now runs where the engine runs**, which was the point of replacing a
+WPF one with an Avalonia one: plain `net10.0`, no `-windows` target anywhere in the
+solution, and `Einzel.Shell.Tests` on both runners. While the WPF shell existed its tests
+targeted `net10.0-windows` and a solution-wide `dotnet test` walked past them on Linux, so
+what they checked was checked on one platform - and a cross-platform claim checked only on
+Windows is one nobody is checking. There is no skipped test project now.
 
+**That invariant is what made the swap cheap**, and the swap is what shows it was being
+kept rather than merely asserted: no capability was trapped in the old window, because
+Amendment 25 had already made every one of them a command.
 Its hardest test has now arrived and it passes. `Einzel.Render` draws real device
 templates as SVG and PDF on the Linux runner, where there is no display, no window
 manager and no font server. There is no drawing surface anywhere in the pipeline

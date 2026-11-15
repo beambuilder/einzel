@@ -28,7 +28,9 @@ name: Release
 #                                the feed an installed copy's launch-time update check reads
 #   SHA256SUMS.txt               one checksum file, computed over the assets as published (DST-4)
 #
-# src/Einzel.Wpf is not shipped (it is being retired in favour of the Avalonia shell).
+# The WPF shell is gone (deleted in favour of the Avalonia one), and the two checks below keep
+# refusing an archive that carries it: a rule against shipping something deliberately removed
+# should go on holding after the removal, or nothing stops it coming back.
 #
 # A manual workflow_dispatch run builds and checks every archive and packs the installer exactly
 # as a tag does (against the draft notes) and publishes nothing, so the whole path can be proved

@@ -724,7 +724,7 @@ are along the axis. RND-4 says "perspective"; the disagreement is SPEC.md Amendm
 **Fitted to what the view sees.** The camera used to frame half the bounding diagonal, which
 never jumps when the view turns and put a 767 mm by 30 mm mirror pair across the middle third
 of the picture. It now fits the box each named view sees, field lines included, as the WPF
-viewport always did.
+viewport that preceded this one always did.
 
 **Provenance travels in the file** - `iTXt` chunks carry the engine and solver-behaviour
 versions, the model and its hash, the view, and every warning the viewport earned, in UTF-8
@@ -810,10 +810,6 @@ because the lines are only as good as the pixels they survive being resized into
   provenance; a filled and keyed plot would carry them on the page.
 - **Text in a raster beyond the ruler's.** The line font spells lengths, units and axis
   letters; RND-11's `QUALIFIED` line needs the alphabet. See above.
-- **The ruler in the WPF viewport.** The Avalonia viewport draws it; the WPF one has its own
-  camera, from Helix Toolkit, and would need that camera's projection carried to the same
-  layout.
-
 Also not built for animations: **geometry that moves**. A stage may change what an
 electrode holds and not where it is, which is a rule the sequencer already enforces, so
 the conductors are the same on every frame by construction. That is correct rather than

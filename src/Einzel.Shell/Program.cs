@@ -17,8 +17,8 @@ public static class Program
     /// <remarks>
     /// <para>
     /// <b>No platform is named here.</b> <c>UsePlatformDetect</c> chooses Win32, X11 or
-    /// Cocoa at run time, which is the whole reason this project exists beside the WPF
-    /// one: the engine runs where .NET runs and the window should too.
+    /// Cocoa at run time, which is the whole reason this project replaced a WPF one:
+    /// the engine runs where .NET runs and the window should too.
     /// </para>
     /// </remarks>
     [STAThread]

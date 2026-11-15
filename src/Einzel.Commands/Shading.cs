@@ -49,15 +49,16 @@ public static class Shading
         return conductor.PotentialVolts + conductor.DriveAmplitudeVolts;
     }
 
-    /// <summary>The widest excursion from earth anywhere in a scene.</summary>
-    /// <param name="conductors">Every conductor the command layer extracted.</param>
-    /// <returns>Volts, always positive, and one where there is nothing to measure.</returns>
+    /// <summary>The widest excursion from earth over the conductors given, with no fallback.</summary>
+    /// <param name="conductors">The conductors that are drawn.</param>
+    /// <returns>Volts, zero where every conductor is at earth or there are none.</returns>
     /// <remarks>
-    /// Taken over the same <see cref="Peak"/> the fraction is computed from, so the scale
-    /// cannot be narrower than the values put on it - a span built from a different
-    /// expression would clamp the very electrodes that set it.
+    /// The one statement of "the metal's span is the largest <c>|Peak|</c>". <see cref="Span"/>
+    /// paints with it and the legend states it, so the two cannot drift: the paint needs a
+    /// nonzero divisor and the legend must not invent a range, which is the only way they
+    /// differ and is <see cref="Span"/>'s fallback alone.
     /// </remarks>
-    public static double Span(IReadOnlyList<ConductorSurface> conductors)
+    public static double Widest(IReadOnlyList<ConductorSurface> conductors)
     {
         ArgumentNullException.ThrowIfNull(conductors);
 
@@ -67,6 +68,22 @@ public static class Shading
         {
             widest = Math.Max(widest, Math.Abs(Peak(conductor)));
         }
+
+        return widest;
+    }
+
+    /// <summary>The widest excursion from earth anywhere in a scene, as a divisor.</summary>
+    /// <param name="conductors">The conductors that are drawn.</param>
+    /// <returns>Volts, always positive, and one where there is nothing to measure.</returns>
+    /// <remarks>
+    /// Taken over the same <see cref="Peak"/> the fraction is computed from, so the scale
+    /// cannot be narrower than the values put on it - a span built from a different
+    /// expression would clamp the very electrodes that set it. The fallback of one volt
+    /// exists so the fraction cannot divide by zero; it is not a range to state.
+    /// </remarks>
+    public static double Span(IReadOnlyList<ConductorSurface> conductors)
+    {
+        var widest = Widest(conductors);
 
         return widest > 0.0 ? widest : 1.0;
     }

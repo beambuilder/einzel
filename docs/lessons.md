@@ -5587,3 +5587,48 @@ Editing each site would be done once, and the next string written without a cult
 it. The rule that generalises: **when a property holds because of a process-wide setting, find
 every process that loads the code, and ask which of them has the setting.** A library tested
 only under the setting is tested only where it already holds.
+
+## A requirements list is not an inventory of a surface
+
+Deleting the WPF shell took a comparison: what does it have that the Avalonia one does not?
+The table was drawn up by walking **§16's eleven required views** and the deleted project's
+**tests**. Both are good lists and both missed the same two things, because neither contains
+them: a **Stop** button on a watched run, and a **colour legend** under the viewport. Neither
+is a §16 view. Neither had a test. Both were in the window, one in the toolbar and one in a
+strip below it, and both had been there long enough that the page documenting the shell
+described them in prose without the comparison table carrying a row for either.
+
+So the deletion shipped with a Stop control that did not exist and colours with no numbers
+beside them, under a claim in four files that nothing was left that only the WPF shell had.
+A review of the pull request found both.
+
+**A requirements document is a list of what somebody asked for, and a window accumulates
+things nobody asked for** — a convenience that turned out to be necessary, a control added
+because a run took twenty minutes. When removing a surface, walk the surface: its toolbar,
+its menus, every control it declares. The markup is the inventory, and for the WPF shell it
+was 629 lines of XAML that could have been read in a few minutes.
+
+**Two sharper versions of the same point.** A list of tests is an inventory of what somebody
+thought worth pinning, which is a strict subset again — and both lost features were untested,
+which is unlikely to be a coincidence: a thing nobody wrote a test for is a thing nobody
+wrote a requirement for either, so the two lists fail *together* rather than covering each
+other. And the project's own rule for this, already written down one change earlier — "the
+question before deleting a project is not whether its code is still wanted but whether
+anything it asserted is asserted nowhere else" — was applied to its **tests** and not to its
+**markup**, which is the half that describes what a person could do.
+
+**And the restored features had to be looked at, not only tested.** Both went in with tests
+that pass, and opening the window found two things no assertion had been written for. A
+legend number formatted at three significant figures writes a one-kilovolt beam's energy as
+`1E+03` — correct, and nothing a person reads a scale by; the shipped einzel lens is exactly
+that case. And the potential legend came out as **two rows reading −500 V and −502 V**,
+because the metal and the field anchor on separately computed spans and the interpolant
+overshoots a conductor's step by a couple of volts by construction. Both numbers are right.
+Four parts in a thousand is not a difference an eleven-pixel swatch can show, so what the
+window offered was two rows nobody could tell apart, inviting a reader to go looking for the
+difference between them.
+
+The rule: **a correct value is not the same as a legible one, and only looking tells them
+apart.** Both defects are now pinned by tests — written after the window showed them, which
+is the usual order for this class and the reason a GUI change is not finished when its tests
+are green.

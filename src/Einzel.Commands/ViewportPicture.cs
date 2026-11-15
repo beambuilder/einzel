@@ -35,6 +35,48 @@ public sealed record PictureLayer(
     double Alpha,
     bool WritesDepth);
 
+/// <summary>One color scale, as the picture actually draws it.</summary>
+/// <param name="Quantity">What the colors mean: <c>energy</c> or <c>potential</c>.</param>
+/// <param name="Unit">The unit the ends are in, <c>eV</c> or <c>V</c>.</param>
+/// <param name="Low">The value the low end of the ramp stands for.</param>
+/// <param name="High">The value the high end stands for.</param>
+/// <param name="Diverging">
+/// Whether the ramp is the diverging one, which is symmetric about zero, rather than the
+/// sequential one. A caller drawing the swatch samples
+/// <see cref="ColorRamp.Diverging"/> or <see cref="ColorRamp.At"/> accordingly.
+/// </param>
+/// <remarks>
+/// <para>
+/// <b>GRD-1's argument applied to a picture.</b> A trajectory bundle and a field are drawn
+/// in colors that stand for numbers, and a color with no number beside it is a bare
+/// quantity in the one place a reader cannot recompute it. The viewport anchors both ramps
+/// once across everything shown, so the ends are a property of the whole picture rather
+/// than of any one path or contour - which is exactly what makes them statable.
+/// </para>
+/// <para>
+/// <b>Here rather than in the window, because the ends are not the observed range.</b> The
+/// potential ramp is symmetric about earth: a legend reading the lowest and highest
+/// potentials would not describe the picture, since a lens holding 0 and 500 V is drawn on
+/// a ramp running -500 to +500. The window that computed that for itself had the rule in a
+/// comment in its code-behind, which is how two surfaces come to say different things about
+/// one model.
+/// </para>
+/// </remarks>
+public sealed record ColorScale(
+    string Quantity,
+    string Unit,
+    double Low,
+    double High,
+    bool Diverging)
+{
+    /// <summary>True where the two ends are one value, as for a monoenergetic bundle.</summary>
+    /// <remarks>
+    /// Every path of such a bundle is painted at the ramp's midpoint, so the scale it states
+    /// is one value on one color and not a gradient across a range nothing is drawn over.
+    /// </remarks>
+    public bool IsSingleValue => Low == High;
+}
+
 /// <summary>
 /// What the viewport draws, decided once, for everything that draws it.
 /// </summary>
@@ -193,14 +235,108 @@ public static class ViewportPicture
         return new PictureLayer("density", Density(outcome), [], DensityOpacity, WritesDepth: false);
     }
 
+    /// <summary>The scales the colors in this picture mean, each one that means something.</summary>
+    /// <param name="outcome">The bundle the picture is composed from.</param>
+    /// <returns>
+    /// Energy where there are trajectories, then the potential scales, in drawing order;
+    /// empty for a picture whose layers carry no quantity, such as bare geometry at earth.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>A null outcome, meaning no picture, has no scales.</b>
+    /// </para>
+    /// <para>
+    /// <b>Shown only where it means something</b>, which is the rule the viewport draws by: a
+    /// diffusive model has no trajectories, so an energy scale under it would state a range
+    /// over an empty set. Every end here comes from the helper the matching layer is colored
+    /// with, so a legend cannot describe a ramp the picture is not using.
+    /// </para>
+    /// <para>
+    /// <b>One row per span rather than one row per quantity</b>, because the field and the
+    /// metal anchor separately: contour levels are chosen inside the domain and generally do
+    /// not reach the electrodes, and a driven electrode is colored by the peak it reaches
+    /// rather than the DC it sits at. Where the two agree this collapses to one row saying
+    /// <c>potential</c>; where they differ, saying one number for both would be describing a
+    /// ramp neither layer uses. Whether the two layers should share a span is a separate
+    /// question about the picture and is recorded in <c>docs/shell.md</c>.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<ColorScale> Scales(ViewportOutcome? outcome)
+    {
+        // No picture, no scales: what a window shows when it has cleared its viewport or has
+        // not drawn one yet. Decided here so it is not a second rule in code-behind.
+        if (outcome is null)
+        {
+            return [];
+        }
+
+        var scales = new List<ColorScale>(3);
+
+        if (outcome.Trajectories.Count > 0 && outcome.LowestEnergyEv is not null)
+        {
+            var (low, high) = EnergyEnds(outcome);
+
+            scales.Add(new ColorScale("energy", "eV", low, high, Diverging: false));
+        }
+
+        var field = outcome.Equipotentials.Count > 0 ? PotentialSpan(outcome) : 0.0;
+
+        // The TRUE widest rather than Shading.Span, whose fallback of one volt exists so the
+        // fraction it feeds cannot divide by zero. A geometry entirely at earth has no
+        // potential scale to state, and stating a one-volt one would invent a range. Over the
+        // conductors that are DRAWN, as the paint's span is: metal with no triangles is not
+        // on the screen and must not widen a scale stated for what is.
+        var metal = Shading.Widest(Drawn(outcome));
+
+        // ONE ROW WHERE THE TWO ARE THE SAME RAMP TO LOOK AT, which is what a legend is
+        // read against. The tolerance is relative and perceptual rather than a rounding: on
+        // the shipped einzel lens the metal reaches 500 V and the field 502 - the interpolant
+        // overshooting a conductor's step, which it does by construction - and two rows
+        // apart by four parts in a thousand are two rows nobody can tell apart, inviting a
+        // reader to go looking for the difference between them. The WIDER is reported, so
+        // nothing drawn falls outside the scale that is stated.
+        var wider = Math.Max(field, metal);
+
+        if (field > 0.0 && metal > 0.0 && Math.Abs(field - metal) <= 0.01 * wider)
+        {
+            scales.Add(new ColorScale("potential", "V", -wider, wider, Diverging: true));
+
+            return scales;
+        }
+
+        if (field > 0.0)
+        {
+            scales.Add(new ColorScale("field", "V", -field, field, Diverging: true));
+        }
+
+        if (metal > 0.0)
+        {
+            scales.Add(new ColorScale("electrodes", "V", -metal, metal, Diverging: true));
+        }
+
+        return scales;
+    }
+
+    /// <summary>
+    /// How far either way the diverging ramp runs: symmetric about earth, because stretching
+    /// it across the observed range puts the neutral color at the arithmetic middle and an
+    /// earthed electrode would be painted like a negative one.
+    /// </summary>
+    private static double PotentialSpan(ViewportOutcome outcome) => Math.Max(
+        Math.Abs(outcome.LowestPotentialVolts ?? 0.0),
+        Math.Abs(outcome.HighestPotentialVolts ?? 0.0));
+
+    /// <summary>The ends of the sequential ramp, anchored once across the whole bundle.</summary>
+    private static (double Low, double High) EnergyEnds(ViewportOutcome outcome)
+    {
+        var low = outcome.LowestEnergyEv ?? 0.0;
+
+        return (low, outcome.HighestEnergyEv ?? low);
+    }
+
     private static List<PictureLine> Field(ViewportOutcome outcome)
     {
-        // The same diverging ramp the conductors take, symmetric about earth: stretching it
-        // across the observed range puts the neutral color at the arithmetic middle, so an
-        // earthed contour would be painted like a negative one.
-        var span = Math.Max(
-            Math.Abs(outcome.LowestPotentialVolts ?? 0.0),
-            Math.Abs(outcome.HighestPotentialVolts ?? 0.0));
+        var span = PotentialSpan(outcome);
 
         var lines = new List<PictureLine>();
 
@@ -226,8 +362,7 @@ public static class ViewportPicture
 
     private static List<PictureLine> Paths(ViewportOutcome outcome)
     {
-        var low = outcome.LowestEnergyEv ?? 0.0;
-        var high = outcome.HighestEnergyEv ?? low;
+        var (low, high) = EnergyEnds(outcome);
 
         // A degenerate range gives a half, not a division: a monoenergetic beam in a
         // field-free drift is the simplest model anyone writes, and dividing by a zero width
@@ -262,18 +397,18 @@ public static class ViewportPicture
         return lines;
     }
 
+    /// <summary>The conductors that have anything to draw: what both the paint and the legend span.</summary>
+    private static List<ConductorSurface> Drawn(ViewportOutcome outcome) =>
+        outcome.Conductors.Where(c => c.Triangles.Count > 0).ToList();
+
     private static List<PictureMesh> Conductors(ViewportOutcome outcome)
     {
-        var span = Shading.Span(outcome.Conductors);
+        var drawn = Drawn(outcome);
+        var span = Shading.Span(drawn);
         var meshes = new List<PictureMesh>();
 
-        foreach (var conductor in outcome.Conductors)
+        foreach (var conductor in drawn)
         {
-            if (conductor.Triangles.Count == 0)
-            {
-                continue;
-            }
-
             var (r, g, b) = ColorRamp.Diverging(Shading.Fraction(conductor, span));
 
             meshes.Add(new PictureMesh(conductor.VerticesMm, conductor.Normals, conductor.Triangles, r, g, b));

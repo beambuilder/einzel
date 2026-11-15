@@ -25,8 +25,8 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 
     <!--
-      The same reversal the WPF shell needs, for a different reason and with the same
-      argument behind it. Text layout and number entry in a window are locale-facing;
+      A reversal of the solution-wide setting, as the WPF shell also needed, for a
+      different reason and with the same argument behind it. Text layout and number entry in a window are locale-facing;
       what invariant globalization was protecting is that CLI output and golden files do
       not move with the host locale (CLI-5), and that is achieved by passing
       CultureInfo.InvariantCulture explicitly at every formatting and parsing site
@@ -36,8 +36,9 @@
     <InvariantGlobalization>false</InvariantGlobalization>
 
     <Description>
-      The shell, cross-platform. Spec section 16's eleven views on Avalonia, replacing
-      the Windows-only WPF presentation layer. UI-1 is the constraint that shapes it:
+      The shell, cross-platform. Spec section 16's eleven views on Avalonia. It replaced
+      a Windows-only WPF presentation layer, which was deleted once this one had every
+      view it had. UI-1 is the constraint that shapes it:
       the shell owns layout, input, the interactive viewport and the update check, and
       owns no physics, no validation rules, no file format knowledge and no render
       output. Amendment 25 adds the constructive half - every action here must be

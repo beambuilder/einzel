@@ -109,9 +109,13 @@
         -->
         <Button x:Name="WatchRun" Content="Watch run" MinWidth="110" />
         <!--
-          Stop asks the watch to end after the step it is on, keeping what it has drawn. A
-          full run and a regime walk cannot be stopped part way - their command objects take
-          no cancellation - so this button is for the watch alone rather than one that would
+          A watch is the one action here measured in minutes, so it is the one that needs a
+          way out. Stopping is cooperative - a density step is not interruptible part way, so
+          what this does is decline to take the next one - and what it drew is KEPT, because
+          the packet on screen is where the run had got to and is the reason somebody pressed
+          it. Clearing the viewport would throw away the only thing the watch produced. A full
+          run and a regime walk cannot be stopped part way - their command objects take no
+          cancellation - so this button is for the watch alone rather than one that would
           appear to stop them and not.
         -->
         <Button x:Name="StopRun" Content="Stop" MinWidth="60" IsEnabled="False"
@@ -214,7 +218,37 @@
 
       <GridSplitter Grid.Column="1" Background="#3A3A3A" />
 
-      <Panel x:Name="ViewportHost" Grid.Column="2" Background="White" />
+      <DockPanel Grid.Column="2" Background="White">
+      <!--
+        The scales the colors mean. A picture colored by a quantity needs them: GRD-1's
+        argument applied to a drawing, since a color is the one place a reader cannot
+        recompute the number for themselves.
+
+        What each row says is ViewportPicture.Scales' decision, not this window's - the
+        potential ramp is symmetric about earth rather than stretched across the observed
+        range, and a legend that worked that out for itself would be a second copy of a rule
+        the picture already applies. Rows appear only where they mean something, so a
+        diffusive model shows no energy scale.
+      -->
+      <ItemsControl x:Name="Legend" DockPanel.Dock="Bottom" Margin="10,6" IsVisible="False">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="shell:LegendRow">
+            <Grid ColumnDefinitions="78,Auto,*,Auto" Margin="0,2">
+              <TextBlock Grid.Column="0" Text="{Binding Quantity}" FontSize="11"
+                         Foreground="#707880" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Text="{Binding Low}" FontSize="11"
+                         Foreground="#303840" VerticalAlignment="Center" Margin="0,0,6,0" />
+              <Border Grid.Column="2" Height="11" BorderThickness="1" BorderBrush="#C9CFD4"
+                      Background="{Binding Swatch}" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="3" Text="{Binding High}" FontSize="11"
+                         Foreground="#303840" VerticalAlignment="Center" Margin="6,0,0,0" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <Panel x:Name="ViewportHost" />
+    </DockPanel>
 
       <GridSplitter Grid.Column="3" Background="#3A3A3A" />
 

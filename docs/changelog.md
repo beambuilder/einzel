@@ -3161,3 +3161,73 @@ Two findings from Stage 1 that bear on the spec:
 
   Left: step 4, deleting `Einzel.Wpf`. Details in `docs/shell.md`, "The five panels, and the two
   that run the model" and "Orbit, pan and zoom".
+
+- **One shell, and the question to ask before deleting a project.** Step 4 of retiring WPF
+  (SPEC.md Amendment 53, item 5): `Einzel.Wpf` and `Einzel.Wpf.Tests` are gone, 3,575 lines,
+  2,819 of them the window. What it leaves is **no `net10.0-windows` target anywhere in the
+  solution, no skipped test project, and `HelixToolkit.Wpf.SharpDX` out of
+  `Directory.Packages.props`** - the bet Amendment 26 took knowingly on a library archived
+  since December 2020, called in by a question it was not taken on. The suite is **1,795 tests,
+  0 failures, 0 skipped**, every one of them run on both CI runners; `einzel-shell` now
+  publishes for `linux-x64` as well as `win-x64`.
+
+  **The question before deleting a project is not whether its code is still wanted but
+  whether anything it asserted is asserted nowhere else.** Most of `Einzel.Wpf.Tests` was
+  covered - the view models had moved to `Presentation/` with their tests, and the watch is
+  `WatchedRunTests` on both runners. **Three were not, and they were about a type that is
+  still live**: they were written against `Einzel.Wpf.ColourRamp`, a *copy*, and what they
+  were really about is `Einzel.Commands.ColorRamp`, which the port had left with no tests at
+  all. `ColorRampTests` in `Einzel.Cli.Tests` now points them at the live type - WCAG
+  contrast above 3.0 for both ramps against the viewport ground, Rec. 709 luminance monotone
+  over 65 samples (which is what stops viridis being "improved" into a rainbow later), and a
+  degenerate energy range giving the middle of the ramp rather than a division by zero, with
+  a spread range as the control. Two mutations fail them. **A test that only ever ran against
+  a copy was testing the copy**, and deleting the copy is when that becomes visible.
+
+  **The boundary test keeps the deleted names.** `ShellBoundaryTests` had become a `[Theory]`
+  over two shells with a `windowsOnly` arm; it is one case again, and `ShellNames` still
+  carries `Einzel.Wpf` and `einzel-shell-wpf`, because **a rule forbidding a reference to a
+  shell should keep forbidding one that was deliberately removed** - the cheapest way for a
+  deletion to be undone is for somebody to add the reference back, and removing the names
+  would make the test quietly narrower than the rule it enforces.
+
+  **And the claim that nothing was left that only the WPF shell had was wrong twice over**,
+  which a review of the deletion found. The WPF toolbar also carried a **Stop** button for a
+  watched run, and a **colour legend** under the viewport saying what energy and potential
+  the colours stood for. **Neither is a §16 view and neither had a test**, which is exactly
+  how they were missed: the comparison was drawn up by walking the eleven required views and
+  the deleted project's tests. **A list drawn up from a requirements document does not cover
+  what a window grew that no requirement asked for.**
+
+  **Stop is cooperative and keeps what it drew.** A density step is not interruptible part
+  way, so stopping declines to take the next one and the run ends where it stands; the packet
+  on screen is where the run had got to and is the reason somebody pressed it, so the status
+  says the run is partial rather than the drawing being taken away to say so. **The token has
+  to reach the listener, not only `Task.Run`** - `Task.Run`'s token decides whether the work
+  ever starts and is never consulted again once it has, so a watch cancelled a second in would
+  run to completion with a Stop button doing nothing visible for twenty minutes. The run
+  offers to be interrupted at one place, when it asks the listener whether it wants a frame,
+  so `ShellSession.WatchAsync` wraps whatever listener it is given rather than asking each
+  caller to remember. The regression test asserts the **step count** against the same run
+  unstopped, because a token reaching only `Task.Run` passes any assertion about the exception
+  alone, and it fails with the wrapper removed.
+
+  **The legend is GRD-1 applied to a drawing**: a colour standing for a number is the one
+  place a reader cannot recompute it. `ViewportPicture.Scales` decides the rows in the command
+  layer, because **the ends are not the observed range** - the potential ramp is symmetric
+  about earth, so a lens holding 0 and 500 V is drawn on a ramp running -500 to +500, and the
+  WPF window kept that rule in a comment in its own code-behind. Five mutations fail the five
+  tests. It also exposed a wrinkle rather than creating one: the equipotentials anchor on the
+  solved field's extremes and the metal on the peak each electrode reaches, and contour levels
+  chosen inside the domain generally do not reach the electrodes - so there is **one row per
+  span actually drawn**, collapsing to one `potential` row where the two agree to a rounding.
+  Whether the two layers should share a span is a separate question about the picture, and
+  changing it would move every still, so it is recorded rather than done under a legend fix.
+
+  Eleven documentation sites were corrected with it, and the shape of what was wrong is worth
+  keeping: nearly all of it was **present tense about a thing that had become history**.
+  `docs/shell.md` opened "WPF on Windows", `docs/architecture.md` said invariant 1 forbids
+  referencing `Einzel.Wpf`, the §16 register row credited the 3-D viewport to Helix Toolkit
+  3.1.2, and a doc comment in `Einzel.Render` said a zero normal behaves one way "in either
+  window". History is kept where it explains a decision - the Helix section, the globalization
+  reversal, the camera defects - and marked as history rather than read as the current state.
