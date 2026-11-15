@@ -1397,8 +1397,8 @@ some restriction buffers, and nothing measured it.
 | solve | bytes a node at peak | measured, Release, live set sampled through the build |
 | --- | --- | --- |
 | volume, Galerkin hierarchy | 149.5 on a deep grid; 151.3 Astral at 1.12 M nodes, 150.4 at 8.68 M | 150.8 and 148.2 |
-| volume, rediscretized hierarchy | 51.2 | 48.7 and 48.0 segmented quadrupole at 0.55 M and 4.28 M; 47.8 C-trap at 1.08 M |
-| plane | 143.25 | 143.3 to 143.9 on four templates at 17 k to 1.05 M nodes |
+| volume, rediscretized hierarchy | 48.8 on a deep grid; the largest instant of a cycle over the real levels, every memoised coarse mask and the bottom solve's scratch included - 46.5 with no coarse level | with each geometry's real cut arms, a sphere 45.0 against 45.0 deep, 42.50 against 42.50 with no coarse level, 44.87 against 44.71 one level deep, 43.87 against 43.87 on a thin grid two levels deep; 45.3 to 47.1 on the C-trap and segmented quadrupole against 48.8 to 48.9 billed (51.2 stated, and 47.8 to 48.7 measured, while first-tier code kept the V-cycle residual) |
+| plane | 135.25 | 135.3 on the quadrupole at 1.05 M to 16.8 M nodes; 135.4 to 135.7 on four rods at 66 k and 263 k, first-tier and fully optimized alike (143.25 stated, and 143.3 to 143.9 measured, while first-tier code kept the V-cycle residual) |
 | each basis channel before the last | + 8 | 156.1 linear ion trap, two channels, against 158.4 |
 | diffusive run, per density node and per species | 263 | 248 and 259, drift tube at 66 k and 263 k nodes; each added species 248 |
 | mean-field self-field, once whatever the species count | 62, and 70 for a mixture | 61.3 to 61.4 on the drift tube at 66 k to 1.05 M nodes; 69.3 to 69.4 with two species |
@@ -1413,18 +1413,42 @@ size it is 241.8 on the Astral at 4 mm and 240.9 at 2 mm, against 241.3 and 240.
 build, by the descent the solver itself takes, rather than over eighths all the way down. Those
 figures are from before the cut links were stored over their cut arms; each is 90.5 lower now.
 
-**The plane figure was 153.3 and is 143.25, and the sampler that checked it hid the
-difference.** The plane's peak is the instant the first coarse level replaces its cut links
-with a zeroed copy and holds both: the fine level's 105, and a quarter of that level's mask,
-two copies of its cut links and two fields. The statement added every deeper level and that
-level's residual, which do not exist at that instant. The live set was sampled every couple of
-milliseconds - a timer tick of about 15 on Windows - and two builds' peaks were differenced,
-so a missed peak read either way; it passed on a sixteen-core workstation and failed on both
-four-core CI runners, where a Release build is fast enough to finish between samples. Sampled
-as densely as the collections allow, and the largest of three builds kept, the shipped plane
-templates read 143.3 to 143.9; a build whose samples all miss the copy reads about 135, and
-one whose samples see only the fine level - a loaded four-core CI runner did - about 126.6, which
-is why the plane test's lower edge is 0.85 where the volume tests' is 0.90.
+**The plane figure was 153.3, then 143.25, and is 135.25.** The plane's peak is the instant the
+first coarse level replaces its cut links with a zeroed copy and holds both: the fine level's
+mask, cut links and three fields, and a quarter of that level's mask, two copies of its cut
+links and two fields. The first statement added every deeper level and that level's residual,
+which do not exist at that instant. The live set was sampled every couple of milliseconds - a
+timer tick of about 15 on Windows - and two builds' peaks were differenced, so a missed peak
+read either way; it passed on a sixteen-core workstation and failed on both four-core CI
+runners, where a Release build is fast enough to finish between samples. Sampled as densely as
+the collections allow, a build whose samples see only the fine level - a loaded four-core CI
+runner did - reads about 126.6, which is why the plane test's lower edge is 0.85 where the
+volume tests' is 0.90.
+
+**The step from 143.25 to 135.25 was what first-tier code held, and the explanation recorded
+for it before was wrong.** The V-cycles kept each level's residual as a local of the frame that
+recursed. Optimized code ends a local at its last use; first-tier code, which every method runs
+as until it has been called often enough to be recompiled, keeps it to the end of the method.
+So the first plane build in a process read 143.6 bytes a node and every later one 135.6. *This
+section used to say* that the shipped templates read 143.3 to 143.9 and that "a build whose
+samples all miss the copy reads about 135" - **superseded**: with call counting off, so nothing
+is ever promoted, every build read 143.4, and fully optimized every build 135.4, so 135 was the
+optimized build holding what it should and 143 was the held residual. The self-field held the
+same array (130 KiB on its 129 by 129 grid) for as long as its Poisson solver had not been
+promoted, which is how `SelfFieldMemoryTests` read 67.3 against 62 on a Windows CI runner and
+61.4 everywhere else. The fine residual is now restricted in a frame of its own in both
+solvers, every tier reads the optimized figure, and `FirstTierMemoryTests` holds that by
+measuring a solve in a child process with promotion switched off.
+
+**The rediscretized volume is worked out instant by instant.** It said 51.2 - the deepest point
+of a cycle with every level's residual held, true of first-tier code only - and then 48.6, the
+fine restriction with one coarse mask. Derived from what is alive at each instant it is 48.8 on
+a deep grid: the coarsener memoises every coarse mask for the whole solve, so from the second
+cycle on all of them are live at the fine restriction (0.16 bytes a node on a deep grid, 0.30
+on an 8193 by 9 by 9 one, which measures 43.87 against 43.87 with them and would read 0.30 over
+without). And a solve that builds no coarse level relaxes the fine grid itself with a scratch
+residual over it, 46.5 bytes a node where 38.5 was billed - an under-bill of 17 percent on any
+rediscretized solve too small to coarsen.
 
 **A diffusive mixture is charged once per species.** Every species has its own walker - its
 density, next step and seed, its coefficients, its face operator and, cycle-averaged, its well
@@ -1549,10 +1573,11 @@ solves on top of the step, and over a flight long enough to refresh the self-fie
 summed charge, so it is charged once, plus that sum's own array: 69.3 to 69.4 with two species.
 It was not billed at all - the diffusive figure's own remarks said "a mean-field solve adds its
 own grids". `SelfFieldMemoryTests` measures it through a real run at 0.90 to 1.02 of the
-statement in an optimized build - 61.4 on a Cartesian tube, and 59.3 on a cylindrical bore whose
+statement - 59.3 to 61.4 on a Cartesian tube, the two readings a sampler alternates between, and 59.3 to 61.4 on a cylindrical bore whose
 earthed wall lies inside the density grid, so the self-field's mask fixes every absorbing node -
-asserting that the self-field was solved inside the loop at least once; **a Debug build holds one array more** (68.7 to 70.1), because it keeps a local alive
-to the end of its method where the optimizer ends it at its last use, and is allowed that much.
+asserting that the self-field was solved inside the loop at least once. **A Debug build is held to the same band**: it
+held one array more (68.7 to 70.1) and was allowed it, and that array was the V-cycle's residual -
+with the residual in a frame of its own, Debug reads 61.4 like Release.
 
 **What a run shows is higher, and depends on the machine.** The collector frees a large array
 lazily when memory is plentiful: the Astral at 4 mm reached 390 bytes a node of heap against a
@@ -1564,12 +1589,14 @@ if it is over.
 
 *How much higher, measured from outside the suite.* `tools/memory-harness` runs the same solve
 twice in fresh processes, once for each quantity, because sampling the live set forces the
-collections that keep the working set down. On main at `de73ec8`, unconstrained, the working set
-is **2.1 to 2.2x the live set on a plane** (143.3 live, 296 to 320 working at 1 to 17 M nodes),
-**2.3 to 4.5x on the shipped volumes**, the ratio growing with size on the rediscretized ones (the
-C-trap 2.8x at 0.14 M nodes and 4.5x at 1.08 M), and **1.03 to 1.12x for a diffusive step**, which
-is nearly all live data. The same runs agree with the estimate's live figures to within six
-percent. That is what a task manager shows on a machine with memory to spare, not what the run needs;
+collections that keep the working set down. Re-measured once the V-cycle's fine residual had a
+frame of its own, unconstrained, the working set is **2.2 to 2.3x the live set on a plane**
+(135.3 live, 295 to 309 working at 1 to 17 M nodes; it read 143.3 live before),
+**2.4 to 4.5x on the shipped volumes**, the ratio growing with size on the rediscretized ones (the
+C-trap 2.5x at 0.14 M nodes and 4.0x at 1.08 M, the segmented quadrupole 2.4x and 4.5x), and
+**1.03 to 1.13x for a diffusive step**, which is nearly all live data. The same runs agree with
+the estimate's live figures to a tenth of a byte a node on the plane and within eight percent
+over on the volumes, which is the cut-arm allowance those geometries do not use. That is what a task manager shows on a machine with memory to spare, not what the run needs;
 pooling the V-cycle's buffers would close most of the gap.
 
 **The 64,000,000-node limit, reconsidered once the true cost was known.** `main`'s

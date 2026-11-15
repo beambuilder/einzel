@@ -58,30 +58,49 @@ public sealed record SolveMemory(
 /// a node; <b>241.8</b> and <b>240.9</b> with dense cut links
 /// </description></item>
 /// <item><description>
-/// volume, rediscretized: segmented-quadrupole at 0.55 M and 4.28 M nodes, <b>48.7</b> and
-/// <b>48.0</b>, C-trap at 1.08 M, <b>47.8</b>; <b>141.9</b>, <b>141.8</b> and <b>141.8</b> with
-/// dense cut links
+/// volume, rediscretized: segmented-quadrupole at 0.14 M and 1.09 M nodes, <b>47.1</b> and
+/// <b>46.0</b>, C-trap at 0.14 M and 1.08 M, <b>45.7</b> and <b>45.3</b>, against 48.8 to 48.9
+/// stated with the billed cut arms (<c>tools/memory-harness</c>, one process a run); and against
+/// the statement with each geometry's real cut arms, a sphere 45.0 against 45.0 on a deep grid,
+/// 42.50 against 42.50 with no coarse level, 44.87 against 44.71 one level deep and 43.87
+/// against 43.87 on an 8193 by 9 by 9 grid two levels deep (<c>SolveMemoryTests</c>).
+/// <b>141.9</b>, <b>141.8</b> and <b>141.8</b> with dense cut links, before the V-cycle's
+/// residual had a frame of its own
 /// </description></item>
 /// <item><description>
-/// plane: quadrupole at 0.26 M and 1.05 M nodes, <b>143.4</b> and <b>143.3</b>; einzel-lens
-/// at 67 k, <b>143.9</b>; tims-analyzer at 33 k, <b>143.9</b> - the largest of three builds,
-/// sampled as densely as the collections allow, because the plane's peak is a transient
-/// lasting a fraction of a millisecond: a build that misses it reads about 135, and one whose
-/// samples see only the fine level, as on a loaded four-core runner, about 126.6
+/// plane: quadrupole at 1.05 M, 4.2 M and 16.8 M nodes, <b>135.3</b> each
+/// (<c>tools/memory-harness</c>); four rods at 263 k, <b>135.4</b>, sampled as densely as the
+/// collections allow, because the plane's peak is a transient lasting a fraction of a
+/// millisecond: a build whose samples see only the fine level, as on a loaded four-core runner,
+/// reads about 126.6
+/// </description></item>
+/// <item><description>
+/// first-tier code throughout, in a child process with <c>DOTNET_TC_CallCounting=0</c>
+/// (<c>FirstTierMemoryTests</c>): four rods at 66 k nodes <b>135.57</b> against 135.25, a sphere
+/// at 36 k <b>45.25</b> against 45.19 with its real cut arms - the same as optimised code reads
 /// </description></item>
 /// </list>
 /// <para>
-/// The arithmetic below reproduces the Galerkin and plane figures to 1 percent and the
-/// rediscretized ones to about 7, conservatively - the cut-arm allowance those geometries do not
-/// use. It is the arithmetic that is used, rather than the measurements, so that each term names
-/// the array responsible for it.
+/// The arithmetic below reproduces the Galerkin and plane figures to 1 percent, and the
+/// rediscretized ones to within 0.4 percent with each geometry's real cut arms; with the billed
+/// allowance it is 4 to 8 percent over them, conservatively - an allowance those geometries do
+/// not use. It is the arithmetic that is used, rather than the measurements, so that each term
+/// names the array responsible for it.
 /// </para>
 /// <para>
-/// <b>Not counted: an instant.</b> A sampler this dense now and then reads about 7 bytes a node
-/// over - once on a Linux CI runner, once in WSL, never on demand - which is about one
-/// grid-sized array, consistent with catching the moment a new array exists beside the one it
-/// replaces. That is a statement about arrays, not about every instant, and the gap is three
-/// percent of a peak the collector already lets run 1.6 times higher when memory is plentiful.
+/// <b>The plane read 143.3 to 143.9, and the rediscretized volume 47.8 to 48.7, before the
+/// V-cycle's fine residual had a frame of its own</b>: the cycle held it in a local of the frame
+/// that recursed, which first-tier code keeps to the end of the method, so a build made before
+/// the solver was promoted held one array of the fine grid more. The statements said 143.25 and
+/// 51.2 then, and charged that array; "a build that misses the transient reads about 135",
+/// which this record used to say, was the optimised build holding what it should.
+/// </para>
+/// <para>
+/// <b>Superseded: "not counted, an instant".</b> A sampler now and then read about 7 bytes a node
+/// over, and this record put it down to catching a new array beside the one it replaces. It was
+/// the sampler counting garbage allocated after its own collection; it now reads what the
+/// collection left live (<c>SolveMemoryTests</c>' sampler), and a reading over the statement is
+/// an array the statement does not charge.
 /// </para>
 /// </remarks>
 public static class SolveMemoryModel
@@ -157,17 +176,43 @@ public static class SolveMemoryModel
         VolumeMask + VolumeCutLinks + Fields + VolumeStencil + GalerkinForming + GalerkinFirstLevel;
 
     /// <summary>
-    /// A volume solve on the rediscretized hierarchy, at its peak: the deepest point of a V-cycle.
+    /// A volume solve on the rediscretized hierarchy, at its peak, on a grid many cells deep on
+    /// every axis: the instant the fine level restricts its residual onto the first coarse
+    /// level, in the second cycle or any later one.
     /// </summary>
     /// <remarks>
-    /// The fine level's mask, cut links and fields, a fine residual, and on each coarse level a
-    /// mask, a restricted residual, a correction and a residual of its own - 33 bytes a coarse
-    /// node, summed over levels an eighth the size of the one above. 51.2 bytes a node, against
-    /// 47.8 to 48.7 measured; 141.7 with the cut links stored densely.
+    /// <para>
+    /// The fine level's mask, cut links and fields; the V-cycle's fine residual and the
+    /// restricted residual it is becoming, on a first level an eighth the size; and every coarse
+    /// level's mask - 9 bytes a coarse node summed over levels an eighth the size of the one
+    /// above, because the coarsener keeps every mask it has built for the whole solve. 48.8
+    /// bytes a node with the billed quarter of a cut arm a node.
+    /// <see cref="VolumeRediscretizedPeakOn"/> works out every instant of a cycle on the levels a
+    /// particular grid really has, the bottom solve's scratch included, and takes the largest;
+    /// on a deep grid it is this one.
+    /// </para>
+    /// <para>
+    /// <b>The second cycle, not the first.</b> <c>GeometryBuilder3D.Coarsener</c> memoises each
+    /// coarse mask by grid, so the first cycle builds them on its way down - at its fine
+    /// restriction only the first level's mask exists - and from the second cycle on every one
+    /// of them is live throughout. A solve whose coarsener does not memoise holds fewer, and is
+    /// over-billed by the masks below the first level, 0.16 bytes a node.
+    /// </para>
+    /// <para>
+    /// <b>This said 51.2, the deepest point of a cycle with every level's residual still held,
+    /// and it was right only for first-tier code.</b> The V-cycle kept each level's residual
+    /// and coarse arrays as locals of the frame that recursed, which optimised code ends at
+    /// their last use and first-tier code - what a method runs as until it has been called
+    /// often enough to be recompiled - keeps to the end of the method. Measured with call
+    /// counting off, so every method stays first-tier, the sphere's slope read 47.6 against 45.0
+    /// fully optimised; a solve that finished before the solver was promoted held the larger. Both
+    /// read 45.0 now that the descent is in frames of its own. It then said 48.6, which left out
+    /// the masks below the first level.
+    /// </para>
     /// </remarks>
     public const double VolumeRediscretizedPeak =
         VolumeMask + VolumeCutLinks + Fields + sizeof(double)
-        + ((VolumeMask + (3 * sizeof(double))) / 7.0);
+        + (sizeof(double) / 8.0) + (VolumeMask / 7.0);
 
     /// <summary>
     /// <see cref="VolumeGalerkinPeak"/> on a particular grid, its first coarse level charged at
@@ -187,28 +232,61 @@ public static class SolveMemoryModel
     }
 
     /// <summary>
-    /// <see cref="VolumeRediscretizedPeak"/> on a particular grid, summed over the coarse levels
-    /// the solve will build at the sizes they really are, rather than over a series of eighths
-    /// that runs all the way down.
+    /// <see cref="VolumeRediscretizedPeak"/> on a particular grid: the largest instant of a
+    /// cycle over the coarse levels the solve will build, at the sizes they really are, rather
+    /// than a series of eighths.
     /// </summary>
     /// <param name="grid">The finest grid.</param>
     /// <param name="levels">The coarse levels, as <see cref="PoissonSolver3D.RediscretizedLevels"/> gives them.</param>
     /// <returns>Bytes per finest-level node at the peak.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <remarks>
+    /// <para>
+    /// Two kinds of instant. Where level k restricts its residual: every coarse level down to k
+    /// holds its right-hand side and its correction, level k its residual, and level k + 1 the
+    /// restricted residual. Where the bottom level is solved: every coarse level holds its
+    /// right-hand side and its correction, and the bottom a scratch residual of its own size,
+    /// which <c>SolveCoarsest</c> allocates - over the fine grid itself when the solve builds no
+    /// coarse level at all, which makes that case 46.5 bytes a node rather than 38.5. Every
+    /// coarse mask is live at both, from the second cycle on; see
+    /// <see cref="VolumeRediscretizedPeak"/>.
+    /// </para>
+    /// <para>
+    /// Which wins depends on the depth: on a grid many cells deep the fine restriction, by
+    /// about 6 bytes a node; with no coarse level, the bottom, since there is nothing else; and
+    /// on a grid thin on some axis, where a level shrinks by much less than an eighth, the sums
+    /// over the levels decide it - hence every instant, rather than one formula.
+    /// </para>
+    /// </remarks>
     public static double VolumeRediscretizedPeakOn(Grid3D grid, IReadOnlyList<Grid3D> levels)
     {
         ArgumentNullException.ThrowIfNull(grid);
         ArgumentNullException.ThrowIfNull(levels);
 
-        var coarse = 0.0;
+        // Level 0 is the fine grid, whose mask, cut links and fields are the fixed part, and
+        // whose right-hand side and potential are two of those fields.
+        double Size(int level) => level == 0 ? 1.0 : (double)levels[level - 1].NodeCount / grid.NodeCount;
 
-        foreach (var level in levels)
+        var masks = 0.0;
+
+        for (var level = 1; level <= levels.Count; level++)
         {
-            coarse += (double)level.NodeCount / grid.NodeCount;
+            masks += VolumeMask * Size(level);
         }
 
-        return VolumeMask + VolumeCutLinks + Fields + sizeof(double)
-            + ((VolumeMask + (3 * sizeof(double))) * coarse);
+        var held = 0.0;
+        var largest = 0.0;
+
+        for (var k = 0; k < levels.Count; k++)
+        {
+            held += k == 0 ? 0.0 : 2 * sizeof(double) * Size(k);
+            largest = Math.Max(largest, held + (sizeof(double) * (Size(k) + Size(k + 1))));
+        }
+
+        var bottom = levels.Count;
+        var atBottom = held + (bottom == 0 ? 0.0 : 2 * sizeof(double) * Size(bottom)) + (sizeof(double) * Size(bottom));
+
+        return VolumeMask + VolumeCutLinks + Fields + masks + Math.Max(largest, atBottom);
     }
 
     /// <summary>A plane conductor mask.</summary>
@@ -224,22 +302,35 @@ public static class SolveMemoryModel
     /// <para>
     /// A coarse level solves for the error, which is zero on a conductor, so it replaces its
     /// cut links with a copy holding zero potential - and for that instant holds both. The fine
-    /// level then holds its mask, cut links, three fields and a V-cycle residual; the first
-    /// coarse level, a quarter the size, its mask, both copies of its cut links, its restricted
-    /// right-hand side and its correction. Its own residual and every deeper level come later,
-    /// when the old copy is garbage, and every later instant holds less: 143.25 bytes a node.
+    /// level then holds its mask, cut links and three fields; the first coarse level, a quarter
+    /// the size, its mask, both copies of its cut links, its restricted right-hand side and its
+    /// correction. The V-cycle's fine residual is already dead, having been restricted, and
+    /// its own residual and every deeper level come later, when the old copy is garbage, so
+    /// every later instant holds less: 135.25 bytes a node.
+    /// </para>
+    /// <para>
+    /// <b>This said 143.25, with the fine residual held, and that was true of first-tier code
+    /// only.</b> The V-cycle kept the residual as a local of the frame that went on to recurse,
+    /// and first-tier code - what a method runs as until it has been called often enough to be
+    /// recompiled - keeps a local to the end of its method where optimised code ends it at its
+    /// last use. The first plane build in a process read 143.6 and every later one 135.6, which
+    /// the sampler's record put down to catching or missing the copy; with call counting off,
+    /// so that nothing is ever promoted, every build read 143.4, and fully optimised every build
+    /// read 135.4. The residual is now restricted in a frame of its own and every tier reads
+    /// 135.4; <c>FirstTierMemoryTests</c> measures a solve with promotion switched off to hold it.
     /// </para>
     /// <para>
     /// <b>This said 153.3, and the sampler that checked it hid the difference.</b> It summed
     /// every coarse level and that level's residual on top of the transient, which do not
     /// exist together. Sampled every couple of milliseconds the plane build read 143 to 150,
     /// and the test's slope between two meshes read high whenever the smaller build's peak was
-    /// missed; sampled densely, the largest of three builds reads 143.3 to 143.9 on four
-    /// templates and meshes from 17 k to 1.05 M nodes.
+    /// missed; sampled densely, the largest of three builds read 143.3 to 143.9 on four
+    /// templates and meshes from 17 k to 1.05 M nodes - the held residual of the paragraph above,
+    /// not this transient. It reads 135.3 on the quadrupole from 1.05 M to 16.8 M nodes now.
     /// </para>
     /// </remarks>
     public const double PlanePeak =
-        PlaneMask + PlaneCutLinks + Fields + sizeof(double)
+        PlaneMask + PlaneCutLinks + Fields
         + ((PlaneMask + (2 * PlaneCutLinks) + (2 * sizeof(double))) / 4.0);
 
     /// <summary>What a finished field keeps per channel: its solved potential.</summary>

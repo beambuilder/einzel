@@ -160,7 +160,7 @@ public static class GeometryBuilder3D
     /// fixes a node away from the faces, which only rasterizing can answer; this assumes it
     /// does whenever there are electrodes. A geometry whose every conductor is thinner than a
     /// cell, or lies on a face, then reads as taking the Galerkin hierarchy when it will not,
-    /// and is costed at 149.5 bytes a node where it needs about 51.
+    /// and is costed at 149.5 bytes a node where it needs about 49.
     /// </para>
     /// </remarks>
     public static SolveMemory Memory(Geometry3D geometry)
