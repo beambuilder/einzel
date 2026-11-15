@@ -156,6 +156,8 @@ public static class ModelValidator
         var modes = Modes(document, timeline);
         var transport = ValidateTransport(document.Transport, p, modes, errors);
 
+        ValidateMagneticTransport(document.Fields, modes, transport, errors);
+
         // A ramp in a diffusive phase used to be refused here, because the density solver
         // stepped through a field it held fixed within a phase. It re-samples the field
         // every step now, so a ramped diffusive phase is the elution scan of a mobility
@@ -336,6 +338,11 @@ public static class ModelValidator
         CompiledFieldKind.FieldFree => false,
         CompiledFieldKind.Uniform => field.Field.LengthSquared > 0.0,
         CompiledFieldKind.HalfSpaceUniform => field.PotentialGradientSi != 0.0,
+
+        // B does no work: a magnet turns an ion and never changes its speed, so an ion at
+        // rest in one stays at rest. It CAN turn an ion round, which is a different question
+        // and is asked separately where the source-faces-away check needs it.
+        CompiledFieldKind.UniformMagnetic => false,
 
         // A solve with every electrode at the same potential has no gradient
         // anywhere, and grounded boundaries make that potential zero.
@@ -719,6 +726,88 @@ public static class ModelValidator
         }
     }
 
+    /// <summary>
+    /// Refuses every transport path that cannot honour a declared magnetic field.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only single-ion trajectory integration applies v x B.</b> The packet integrator
+    /// that space charge runs on, the drift-diffusion solve, and therefore a sequence phase
+    /// in the diffusive mode and the mode comparison all evaluate an electric field and
+    /// nothing else. Handed a magnet, each would answer - an ion that should have turned
+    /// through a sector would fly straight, a density would drift as though B were zero - and
+    /// nothing in the result would say the magnet had been skipped. That is the "capability
+    /// wired into N-1 of N paths" defect, so each is refused here by name, at the element
+    /// that declares the magnet, before anything is built.
+    /// </para>
+    /// <para>
+    /// Asked over every mode the run uses rather than the model's own, for the reason the
+    /// diffusive requirements already are: a trajectory model with one diffusive phase uses
+    /// the diffusive path for that phase.
+    /// </para>
+    /// <para>
+    /// <b>Indexed by the document, not by the compiled list.</b> An element that failed to
+    /// compile is dropped from the compiled list, so a typo in <c>fields[0]</c> would move the
+    /// magnet at <c>fields[1]</c> to index 0 there and the refusal would point at the wrong
+    /// element (AGT-3: the path is the document's). <c>REGIME_INVALID</c>, with its own exit
+    /// code, because the document is well formed: it asks a transport mode for something
+    /// outside what that mode can describe, as a driven geometry in the diffusive mode does.
+    /// </para>
+    /// </remarks>
+    private static void ValidateMagneticTransport(
+        IReadOnlyList<FieldDocument>? fields,
+        HashSet<string> modes,
+        TransportValues? transport,
+        List<EinzelError> errors)
+    {
+        if (fields is null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < fields.Count; index++)
+        {
+            if (fields[index].Type != "uniformMagnetic")
+            {
+                continue;
+            }
+
+            var path = $"/fields/{index}";
+
+            if (modes.Contains("diffusion"))
+            {
+                errors.Add(new EinzelError
+                {
+                    Code = ErrorCodes.RegimeInvalid,
+                    Path = path,
+                    Constraint = "a magnetic field is applied only by single-ion trajectory "
+                        + "integration, and this run uses the diffusive mode (as its transport "
+                        + "mode or in a sequence phase), whose drift-diffusion solve evaluates "
+                        + "the electric field alone",
+                    Observed = new ObservedValue(0.0, "diffusion"),
+                    Suggestion = "fly the model with \"mode\": \"trajectory\" in every phase, or "
+                        + "remove the magnetic element; a magnetised drift-diffusion "
+                        + "(anisotropic mobility) is not built",
+                });
+            }
+
+            if (transport is not null && transport.SpaceCharge is not "none")
+            {
+                errors.Add(new EinzelError
+                {
+                    Code = ErrorCodes.RegimeInvalid,
+                    Path = path,
+                    Constraint = $"a magnetic field is applied only by single-ion trajectory "
+                        + $"integration, and spaceCharge '{transport.SpaceCharge}' flies the "
+                        + "packet on the space-charge integrator, which evaluates the electric "
+                        + "field alone",
+                    Observed = new ObservedValue(0.0, transport.SpaceCharge),
+                    Suggestion = "set \"spaceCharge\": \"none\", or remove the magnetic element",
+                });
+            }
+        }
+    }
+
     /// <summary>Resolves the parameter surface as it stands during one stage.</summary>
     /// <param name="set">The values the stage holds, with units.</param>
     /// <param name="into">Where to report a value that does not resolve.</param>
@@ -785,6 +874,15 @@ public static class ModelValidator
             return null;
         }
 
+        // The same rule for every other property that belongs to one kind of element: a
+        // Wien filter written as one element {"type": "uniform", "field": ..., "fluxDensity": ...}
+        // validated and flew with no magnet, because only the uniformMagnetic case reads
+        // fluxDensity. Refused where it is declared, naming the kind that would read it.
+        if (MisplacedProperty(field, path, errors))
+        {
+            return null;
+        }
+
         var baseline = CompileOnce(field, path, p, timeline, errors);
 
         if (baseline is null)
@@ -794,6 +892,26 @@ public static class ModelValidator
 
         if (region is not null)
         {
+            // A hard edge only. A ramped B has a curl across the ramp that no magnet in
+            // vacuum can make, so a fringe here would be a field nobody can build presented
+            // as a refinement of one that can.
+            if (baseline.Kind == CompiledFieldKind.UniformMagnetic && region.FringeSi > 0.0)
+            {
+                errors.Add(new EinzelError
+                {
+                    Code = ErrorCodes.SchemaInvalid,
+                    Path = $"{path}/region/fringe",
+                    Constraint = "a magnetic region is a hard edge (the sharp cut-off of "
+                        + "first-order beam optics): a B scaled by a linear ramp is not curl-free "
+                        + "across the ramp, so it is not a field a magnet in vacuum can make",
+                    Observed = new ObservedValue(region.FringeSi, "m"),
+                    Suggestion = "remove fringe from this region; the field integral of a hard "
+                        + "edge placed at the effective field boundary is the first-order answer",
+                });
+
+                return null;
+            }
+
             baseline = baseline with { Region = region };
         }
 
@@ -843,6 +961,26 @@ public static class ModelValidator
             boundaries.Add(elapsed);
             phases.Add(state);
             moved |= !Same(baseline, state);
+        }
+
+        // A magnet a phase switches is refused rather than followed. The integrator's
+        // cyclotron cap and the analytic-drift bound read one static magnetic field, and
+        // switching one would need a time-varying B interface this build does not have -
+        // so following it would mean freezing it, which is the silent half-instrument the
+        // model-level timeline exists to prevent.
+        if (moved && baseline.Kind == CompiledFieldKind.UniformMagnetic)
+        {
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{path}/fluxDensity",
+                Constraint = "a sequence phase changes this magnetic field, and a magnetic field "
+                    + "is static in this build: there is no time-varying B",
+                Suggestion = "keep the parameters the flux density is written over out of every "
+                    + "phase, or write the field with literal values",
+            });
+
+            return null;
         }
 
         return moved
@@ -976,12 +1114,76 @@ public static class ModelValidator
     /// </remarks>
     private static bool NeedsPhases(string? type) =>
         type is "uniform" or "halfSpaceUniform" or "idealQuadrupoleRf"
-            or "quadroLogarithmic";
+            or "quadroLogarithmic" or "uniformMagnetic";
+
+    /// <summary>
+    /// Refuses a property declared on an element kind that does not read it.
+    /// </summary>
+    /// <returns>Whether any was found.</returns>
+    /// <remarks>
+    /// Only for a recognised type: an unrecognised one is refused by name elsewhere, and
+    /// listing every property it carries as misplaced would bury that one error.
+    /// </remarks>
+    private static bool MisplacedProperty(FieldDocument field, string path, List<EinzelError> errors)
+    {
+        if (field.Type is not ("fieldFree" or "uniform" or "uniformMagnetic" or "halfSpaceUniform"
+            or "idealQuadrupoleRf" or "quadroLogarithmic" or "solved2d" or "solved3d"))
+        {
+            return false;
+        }
+
+        (string Name, object? Value, string Owner)[] properties =
+        [
+            ("field", field.Field, "uniform"),
+            ("fluxDensity", field.FluxDensity, "uniformMagnetic"),
+            ("planePoint", field.PlanePoint, "halfSpaceUniform"),
+            ("inwardNormal", field.InwardNormal, "halfSpaceUniform"),
+            ("capPotential", field.CapPotential, "halfSpaceUniform"),
+            ("turningDepth", field.TurningDepth, "halfSpaceUniform"),
+            ("directPotential", field.DirectPotential, "idealQuadrupoleRf"),
+            ("driveAmplitude", field.DriveAmplitude, "idealQuadrupoleRf"),
+            ("driveFrequency", field.DriveFrequency, "idealQuadrupoleRf"),
+            ("inscribedRadius", field.InscribedRadius, "idealQuadrupoleRf"),
+            ("curvature", field.Curvature, "quadroLogarithmic"),
+            ("characteristicRadius", field.CharacteristicRadius, "quadroLogarithmic"),
+            ("centre", field.Centre, "quadroLogarithmic"),
+            ("solve", field.Solve, "solved2d"),
+            ("solve3d", field.Solve3d, "solved3d"),
+        ];
+
+        var found = false;
+
+        foreach (var (name, value, owner) in properties)
+        {
+            if (value is null || field.Type == owner)
+            {
+                continue;
+            }
+
+            errors.Add(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = $"{path}/{name}",
+                Constraint = $"{name} belongs to a {owner} element and a {field.Type} element does "
+                    + "not read it, so it would be accepted and ignored",
+                Observed = new ObservedValue(0.0, name),
+                Suggestion = owner == "uniformMagnetic"
+                    ? "declare the magnet as an element of its own, {\"type\": \"uniformMagnetic\", "
+                        + "\"fluxDensity\": ...}, beside this one; elements superpose"
+                    : $"remove {name}, or make the element a {owner}",
+            });
+
+            found = true;
+        }
+
+        return found;
+    }
 
     /// <summary>Whether two compilations of one analytic element hold the same numbers.</summary>
     private static bool Same(CompiledField a, CompiledField b) =>
         a.Kind == b.Kind
         && a.Field == b.Field
+        && a.FluxDensity == b.FluxDensity
         && a.PlanePoint == b.PlanePoint
         && a.InwardNormal == b.InwardNormal
         && a.PotentialGradientSi.Equals(b.PotentialGradientSi)
@@ -1014,6 +1216,39 @@ public static class ModelValidator
                 {
                     Kind = CompiledFieldKind.Uniform,
                     Field = vector.Value,
+                };
+            }
+
+            case "uniformMagnetic":
+            {
+                var flux = TryVector(
+                    field.FluxDensity, $"{path}/fluxDensity", Dimension.MagneticFluxDensity, p, errors);
+
+                if (flux is null)
+                {
+                    return null;
+                }
+
+                var b = flux.Value;
+
+                if (!double.IsFinite(b.X) || !double.IsFinite(b.Y) || !double.IsFinite(b.Z))
+                {
+                    errors.Add(new EinzelError
+                    {
+                        Code = ErrorCodes.ValueOutOfBounds,
+                        Path = $"{path}/fluxDensity",
+                        Constraint = "every component of a flux density must be finite",
+                        Observed = new ObservedValue(b.Length, "T"),
+                        Suggestion = "check the expressions for a division by a parameter set to zero",
+                    });
+
+                    return null;
+                }
+
+                return new CompiledField
+                {
+                    Kind = CompiledFieldKind.UniformMagnetic,
+                    FluxDensity = b,
                 };
             }
 
@@ -1206,7 +1441,7 @@ public static class ModelValidator
                     Path = $"{path}/type",
                     Constraint =
                         "a field element must declare one of: fieldFree, uniform, halfSpaceUniform, "
-                        + "idealQuadrupoleRf, quadroLogarithmic, solved2d, solved3d",
+                        + "idealQuadrupoleRf, quadroLogarithmic, uniformMagnetic, solved2d, solved3d",
                     Observed = new ObservedValue(0.0, field.Type ?? "null"),
                     Suggestion = "use \"halfSpaceUniform\" for an ideal single-stage ion mirror",
                 });
@@ -5178,7 +5413,12 @@ public static class ModelValidator
         {
             // Launching directly away from the detector is legal — a reflectron
             // does exactly that — but only if something turns the ion around.
-            var hasMirror = CanAccelerate(model.Fields);
+            // A magnet turns an ion round without doing work on it - a 180 degree sector
+            // launches away from its detector by design - so it counts here although it can
+            // never accelerate an ion from rest.
+            var hasMirror = CanAccelerate(model.Fields)
+                || model.Fields.Any(f => f.Kind == CompiledFieldKind.UniformMagnetic
+                    && f.FluxDensity.LengthSquared > 0.0);
 
             if (!hasMirror)
             {

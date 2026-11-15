@@ -115,6 +115,10 @@ public sealed class PonderomotiveField : IElectrostaticField
         ArgumentOutOfRangeException.ThrowIfNegative(collisionRateSi);
         ArgumentOutOfRangeException.ThrowIfLessThan(samplesPerCycle, 4);
 
+        // B is applied by single-ion trajectory integration alone; dropping it here would
+        // fly the model as though the magnet were absent, with nothing to say so.
+        Einzel.Fields.Magnetic.MagneticRefusal.ThrowIfMagnetic(driven, "the cycle-averaged RF well");
+
         if (!double.IsFinite(driven.ShortestPeriodSeconds) || driven.ShortestPeriodSeconds <= 0.0)
             throw new ArgumentOutOfRangeException(nameof(driven), "an effective RF well requires an oscillating field; this field has no drive");
         var period = driven.MonochromaticPeriodSeconds;

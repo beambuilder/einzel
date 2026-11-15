@@ -105,6 +105,25 @@ public static class ModeComparison
 
         var model = validation.Model!;
 
+        // REG-3 compares the trajectory mode with the diffusive one, and the diffusive one
+        // cannot apply v x B. A comparison with one side blind to the magnet would report the
+        // magnet's effect as the two modes disagreeing, so it is refused before either runs,
+        // naming the element.
+        var magnet = model.Fields.ToList().FindIndex(f => f.Kind == CompiledFieldKind.UniformMagnetic);
+
+        if (magnet >= 0)
+        {
+            throw new EinzelException(new EinzelError
+            {
+                Code = ErrorCodes.RegimeInvalid,
+                Path = $"/fields/{magnet}",
+                Constraint = "einzel compare runs the model in the diffusive mode as well as the "
+                    + "trajectory mode, and the diffusive mode cannot apply a magnetic field",
+                Suggestion = "compare a copy of the model without the magnetic element, or use "
+                    + "'einzel run' for the trajectory answer alone",
+            });
+        }
+
         // Resolved rather than taken from the document alone: REG-3 only means
         // something if the two modes are asked about the same gas, and a compare that
         // dropped an imported field would be comparing them in a gas neither model

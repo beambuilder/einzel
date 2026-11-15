@@ -1171,13 +1171,25 @@ public static class Program
             Console.Out.WriteLine(string.Create(invariant, $"field at t = {t:G6} us"));
         }
 
+        // B columns only where the model declares a magnet, which adds no phi and no E.
+        var magnetic = outcome.Samples.Any(s => s.FluxDensityT is not null);
+
         Console.Out.WriteLine(
-            "  #       x_mm       y_mm       z_mm     phi_V        Ex_V/m        Ey_V/m        Ez_V/m   status");
+            "  #       x_mm       y_mm       z_mm     phi_V        Ex_V/m        Ey_V/m        Ez_V/m   "
+            + (magnetic ? "      Bx_T          By_T          Bz_T   " : string.Empty) + "status");
 
         foreach (var s in outcome.Samples)
         {
             var phi = s.PotentialV is { } p ? p.ToString("G8", invariant) : "-";
             var e = s.FieldVPerM;
+            var bt = s.FluxDensityT;
+            var bColumns = !magnetic
+                ? string.Empty
+                : string.Create(
+                    invariant,
+                    $"{(bt is null ? "-" : bt[0].ToString("G6", invariant)),10} "
+                    + $"{(bt is null ? "-" : bt[1].ToString("G6", invariant)),13} "
+                    + $"{(bt is null ? "-" : bt[2].ToString("G6", invariant)),13}   ");
             var label = s.Status
                 + (s.Conductor is not null && s.Status == ProbeStatus.InsideConductor
                     ? " (" + s.Conductor + ")"
@@ -1190,7 +1202,7 @@ public static class Program
                 + $"{phi,12} {(e is null ? "-" : e[0].ToString("G6", invariant)),13} "
                 + $"{(e is null ? "-" : e[1].ToString("G6", invariant)),13} "
                 + $"{(e is null ? "-" : e[2].ToString("G6", invariant)),13}   "
-                + $"{label}"));
+                + $"{bColumns}{label}"));
         }
 
         // GRD-2: warnings reach this surface too.

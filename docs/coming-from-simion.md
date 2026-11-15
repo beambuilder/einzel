@@ -31,7 +31,7 @@ Two things to know first.
 | User programs (Lua), time-varying voltages | Declared drives, sequences and ramps; Python extensions for whole-run objectives | No per-step user code, by design |
 | HS1, SDS, drag | `hardSphere` and `langevin` collisions; a drift-diffusion density mode | No simple drag term; a separate transport mode above about 1e-2 mbar |
 | Charge repulsion (beam, Coulomb, factor), Poisson space charge | `direct` pairwise sum or `pic` for a packet; `meanField` for a density | No continuous-beam mode; no image charges in the electrodes |
-| Magnetic arrays | None | No magnetic fields of any kind |
+| Magnetic arrays | A `uniformMagnetic` field element, optionally bounded to a hard-edge box | Uniform B only, single-ion trajectories only: no magnetic potential arrays, no imported B maps, no fringe fields |
 | Dielectrics | None | Conductors in vacuum or gas only |
 | PE view, contours | `einzel render section` (SVG/PDF), `render still` (PNG), the shell's viewport | Vector figures; no potential-energy surface view |
 | Trajectory quality (T.Qual) | Adaptive Dormand-Prince 5(4), tolerance ladder, energy drift | Tolerance-controlled, with the interval reported |
@@ -265,9 +265,22 @@ the error that neglecting it implies. See
 
 ## Magnetic arrays and dielectrics
 
-Einzel has **no magnetic fields of any kind** (no magnetic arrays, no uniform B,
-no sector magnets) and **no dielectrics**. Electrodes are ideal conductors in vacuum
-or gas. If your instrument needs either, Einzel cannot model it today.
+Einzel has **uniform magnetic fields and nothing more**. A `uniformMagnetic` field
+element declares a flux density B in tesla or gauss, everywhere or inside a
+hard-edge box, and single-ion trajectory integration applies `q v x B`. That is
+enough for cyclotron and Penning-cell motion, E x B drift, a Wien filter (a
+`uniform` electric element crossed with a magnetic one) and a hard-edge sector
+magnet; the corpus examples `cyclotron`, `wien-filter` and `magnetic-sector-180`
+are each checked against a closed form.
+
+What SIMION's magnetic arrays do and Einzel does not: there is **no magnetic
+potential array** (no solved B from pole pieces), **no imported B map**, **no
+fringe field** (the box edge is a sharp cut-off), **no time-varying B**, no
+permeable materials, and no relativistic motion. A magnetic field is refused, by
+name, with space charge, with the diffusive mode and by `einzel compare`, rather
+than silently ignored. See [Magnetic fields](magnetic-fields.md).
+
+There are **no dielectrics**. Electrodes are ideal conductors in vacuum or gas.
 
 ## PE views and contours
 

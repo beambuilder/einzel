@@ -1429,3 +1429,111 @@ geometry. Where that 19 per cent goes is not established and is recorded as not 
 eluted, so the ratio of their separation to their width is a millimetre ratio at equilibrium
 and is one to two orders below a published resolving power by construction. Nothing in this
 comparison should be set beside their 100 to 250.
+
+---
+
+## 8. Quadrupole mass filter peak shape: hyperbolic against round rods
+
+**Gibson and Taylor**, *Prediction of quadrupole mass filter performance for hyperbolic and
+circular cross section electrodes*, Rapid Commun. Mass Spectrom. **14** (2000) 1669-1673
+(University of Liverpool). Full text is held locally in `papers/` (gitignored, not
+published); this section paraphrases and cites. DOI 10.1002/1097-0231(20000930)14:18<1669::AID-RCM80>3.0.CO;2-# (from the publisher's copy).
+
+This is the nearest published match to the "mass filter peak shape against a scan line" item
+in the candidates list, and the only target here whose subject is the *shape* of a filter's
+mass peak rather than its stability boundary.
+
+### What they computed
+
+A purpose-written trajectory code, constant-cross-section electrodes only. **Fringe fields
+are ignored**: the field starts the moment an ion leaves the source and an ion counts as
+transmitted if it reaches a circular exit disc (r0 wide) having never been farther than r0
+from the axis, so the axial speed is constant and the problem is two-dimensional.
+Hyperbolic rods use the analytic field. Round rods use a relaxation solve of Laplace's
+equation on an eighth of the cross-section (rod radius 1.148 r0, a grounded cylindrical
+housing at 3.6 r0), run for days to a 1e-8 relative convergence, with interpolation where a
+rod crosses the mesh; the field is stored on a grid and extrapolated linearly, and results
+were mesh-independent at 0.002 r0 or finer. Motion is fourth-order Runge-Kutta over short
+steps with the x and y motions advanced separately. **100,000 to 200,000 ions per mass
+point**, 50 to 80 mass points per peak, ions random in both **RF phase** and position over
+an entrance aperture of about 0.35 r0, exit aperture r0, singly charged m/z 40. The
+resolution setting eta is the ratio U/V as a fraction of its value at the apex of the first
+stability region (eta = 1 is the apex). The number of RF cycles an ion spends in the filter
+is the governing variable, and other masses with the same cycle count behave the same.
+
+### Checkable results, with where they sit
+
+| Quantity | Reported | Where |
+| --- | --- | --- |
+| Peak shape, hyperbolic against round, 48 cycles | round rods lower in height, with a long low-mass tail and a trailing edge shifted to lower mass; at eta = 0.985 peaks near 16 and 13 per cent transmission, flat topped; at eta = 0.9975 near 5.8 and 4.0, narrow | Fig. 2a, 2b |
+| Peak width (m/z) against eta, 32 and 48 cycles | width falls with eta to a minimum near eta = 0.9975 to 1.000 then rises; round rods wider throughout; hyperbolic minimum about 0.35 (48 cycles) | Fig. 3 |
+| Transmission against eta, 32 and 48 cycles | from about 19 per cent (hyperbolic, 32 cycles) and 16 per cent (others) at eta = 0.980 falling to about 1 per cent near 1.005; curves may cross near eta = 1 because of the round-rod tail | Fig. 4 |
+| Width against cycle count at eta = 0.9975 | hyperbolic falls from about 1.4 at 25 cycles to about 0.19 at 72; round rods plateau near 0.6 above about 50 cycles | Fig. 5 |
+| Transmission against cycle count at eta = 0.9975 | hyperbolic flat at about 6 per cent; round rods fall from about 5.4 at 25 cycles to about 3.7 at 72 | Fig. 6 |
+| Resolution at high cycle count | round rods typically halve the resolution at 10 per cent height; the penalty is smaller if width is taken at 25 or 50 per cent | text, Figs. 3 and 5 |
+| Transmission at high resolution | reduced about twofold for round rods, varying strongly with eta | text |
+| Low-eta transmission | hyperbolic independent of cycle count; round rods lose a little as cycles grow | text |
+
+All values are read off plotted curves; the paper tabulates nothing, so any comparison is to
+plotting accuracy at best.
+
+### What Einzel reproduces, and what it does not
+
+**Today.** Round rods with a solved cross-section field and cut-cell rod surfaces
+(`quadrupole-rf`, ratio set by `rodRatio`, default 1.1468; Denison's ratio is itself
+reproduced above), sinusoidal RF and DC on the rod pairs in one basis solve, an ion
+launched anywhere across the entrance, and a two-dimensional treatment with no fringe
+field, which is exactly the paper's. The stability-band width against U/V is already
+measured by bisection (`docs/optimisation.md`, "transmission against resolution"), and the
+band edges are the same physics as the peak.
+
+**With a workaround.** The RF phase at entry has no ensemble spread: the cloud has no
+time-of-birth distribution (confirmed in `CloudDocument`; nothing in `src` carries an
+entry time). But `drivePhase` is an expression, so adding a parameter `entryPhase` to all
+four rods and scanning it with `einzel scan` gives transmission as a function of entry
+phase, one ion per point; the phase average is then the mean of that column. A mass scan
+is a V scan at fixed U/V (q goes as V/m), so peak shape is a transmission-against-V scan
+repeated over phases. Cycle count is a detector position. Aperture radius is the cloud's
+transverse spread, but that is Gaussian where the paper's entrance is a disc.
+
+**Blocked, or only approximately met.**
+- *Hyperbolic electrodes in a cross-section.* The only hyperbolic bodies are the polygon
+  rods of the linear ion trap templates and the analytic `idealQuadrupoleRf`; there is no
+  hyperbolic quadrupole template with housing. The analytic element is the paper's
+  hyperbolic case exactly (no solve), so it is the quickest route to the hyperbolic curves,
+  but it has no rods to strike.
+- *A peak-shape figure of merit.* `transmission` and the arrival-time `resolvingPower`
+  exist; there is no width at 10, 25 or 50 per cent of a mass peak, and no tail measure.
+  A scan returns a curve, so these can be computed outside the engine, not inside a study.
+- *The rejection rule.* The paper discards an ion when its radius exceeds r0; Einzel loses
+  it on a rod surface, which is farther than r0 along the diagonals. A small difference at
+  round-rod stability edges, but not none.
+- *Ensemble size.* 1e5 to 2e5 ions per point over 50 to 80 points is cheap for the
+  trajectory path here (tens of milliseconds a point in the first look below), so size is
+  not the obstacle; phase spread is.
+
+### A first look, not a result
+
+Round rods at the paper's 1.148 r0 (the template's `rodRatio`), eta = 0.985, 48 RF cycles,
+`quadrupole-rf` rescaled so that m/z 500 at 1 MHz, 10 eV, has the same cycle count as the
+paper's m/z 40 (cycles are the governing variable). One ion per point, launched at rest
+1 mm off axis on a diagonal, **40 entry phases** per mass point, **17 mass points** from
+q = 0.660 to 0.740 in steps of 0.005. Mean transmission over phase is zero below q = 0.690
+and above 0.710, with a single peak of 7.5 per cent (3 of 40 phases) at q = 0.700 and
+2.5 and 5.0 per cent either side. That places the peak where a filter at eta = 0.985
+should put it and shows it a few grid points wide, which is consistent with the paper's
+width near 0.7 m/z at this eta (resolution of order 50 to 60), but the grid is too coarse
+to say more. **It is not a comparison**: one radius, zero transverse speed and 40 samples
+mean the 7.5 per cent is a count of 3, the paper's 13 per cent is for a 0.35 r0 disc, and
+no width was extracted. It only shows the workaround runs in seconds.
+
+### What a full reproduction would take
+
+In order of how much each unlocks: **(1)** an RF-phase spread on a cloud (a time-of-birth
+distribution, or a `drivePhase` drawn per ion), since the paper's central averaging is over
+phase and everything below depends on it; **(2)** a peak-width figure of merit at a stated
+fraction of height, plus a low-mass-tail measure, which is what the paper's headline
+(factor-of-two resolution loss, a tail) is about; **(3)** a hyperbolic-rod cross-section
+template with housing, or an `idealQuadrupoleRf` that can stop ions at r0, for the baseline
+curves; **(4)** a uniform-disc entrance in the cloud; **(5)** a rejection radius option. The
+peak shift of the round-rod trailing edge needs only (1) to (3).

@@ -41,6 +41,12 @@ public sealed class TimeShiftedField : ITimeVaryingField, IConductorBounded
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentOutOfRangeException.ThrowIfNegative(offsetSeconds);
 
+        // Answers ITimeVaryingField only, so a magnetic field wrapped here would lose its B
+        // on the way to the integrator. A sequenced leg of a magnetic model never reaches
+        // here (the validator refuses the diffusive phase that makes legs), and if one did
+        // it must refuse rather than fly straight through the magnet.
+        Magnetic.MagneticRefusal.ThrowIfMagnetic(inner, "a time-shifted sequence leg");
+
         if (!double.IsFinite(offsetSeconds))
         {
             throw new ArgumentOutOfRangeException(

@@ -63,7 +63,20 @@ public sealed record ProbeSample(
     string? Conductor,
     double? ConductorDistanceMm,
     IReadOnlyList<int> OutsideElements,
-    string? Note);
+    string? Note)
+{
+    /// <summary>
+    /// The magnetic flux density vector in tesla where the model declares a magnet; absent
+    /// where it declares none (so a model without one reads exactly as it always did) and where
+    /// the point was refused.
+    /// </summary>
+    /// <remarks>
+    /// A magnet adds no potential and no electric field, so a probe that reported only those
+    /// would print 0 V and 0 V/m inside a 0.5 T sector with status ok - a field that turns
+    /// every ion through it, reported as nothing at all.
+    /// </remarks>
+    public IReadOnlyList<double>? FluxDensityT { get; init; }
+}
 
 /// <summary>What each field element is made of and how well it is known.</summary>
 /// <param name="Index">Element index in the model.</param>
@@ -142,6 +155,7 @@ public sealed class FieldProbe
     private readonly IElectrostaticField _field;
     private readonly ITimeVaryingField? _driven;
     private readonly IConductorBounded? _bounded;
+    private readonly Einzel.Fields.Magnetic.IMagneticField? _magnetic;
     private readonly CompiledModel _model;
     private readonly RotatedField?[] _tilts;
     private readonly bool _allBounded;
@@ -157,6 +171,7 @@ public sealed class FieldProbe
         _field = field;
         _driven = field as ITimeVaryingField;
         _bounded = field as IConductorBounded;
+        _magnetic = field as Einzel.Fields.Magnetic.IMagneticField;
         Warnings = warnings;
         ModelPath = modelPath;
         ModelHash = modelHash;
@@ -202,6 +217,9 @@ public sealed class FieldProbe
 
     /// <summary>Whether the assembled field varies with time.</summary>
     public bool TimeVarying => _driven is not null;
+
+    /// <summary>Whether the model declares a magnetic field, so B is reported beside phi and E.</summary>
+    public bool Magnetic => _magnetic is not null;
 
     /// <summary>Validates and assembles the field of a model file.</summary>
     /// <param name="modelPath">The model.</param>
@@ -328,7 +346,45 @@ public sealed class FieldProbe
 
         return new ProbeSample(
             index, position, potential, [field.X, field.Y, field.Z], magnitude, status,
-            conductor, distance * 1e3, outside, null);
+            conductor, distance * 1e3, outside, null)
+        {
+            FluxDensityT = _magnetic is null ? null : FluxDensityAt(in point) is var b ? [b.X, b.Y, b.Z] : null,
+        };
+    }
+
+    /// <summary>
+    /// The same evaluation as <see cref="Sample(in Vec3, double, out double, out Vec3)"/>, with the
+    /// magnetic flux density as well: zero where the model declares no magnet, NaN where refused.
+    /// </summary>
+    /// <param name="pointMetres">Where, in metres.</param>
+    /// <param name="atSeconds">The instant, used only by a time-varying field.</param>
+    /// <param name="potential">The potential in volts; NaN where the point was refused.</param>
+    /// <param name="field">The electric field in volts per metre; NaN components where refused.</param>
+    /// <param name="fluxDensity">B in tesla; NaN components where refused.</param>
+    /// <returns>One of the <see cref="ProbeStatus"/> values.</returns>
+    public string Sample(
+        in Vec3 pointMetres, double atSeconds, out double potential, out Vec3 field, out Vec3 fluxDensity)
+    {
+        var status = Sample(in pointMetres, atSeconds, out potential, out field);
+
+        fluxDensity = ReferenceEquals(status, ProbeStatus.Refused)
+            ? new Vec3(double.NaN, double.NaN, double.NaN)
+            : FluxDensityAt(in pointMetres);
+
+        return status;
+    }
+
+    // B is static in this build, so there is no instant to ask it at. Adding zero turns a
+    // negative zero into a plain one, as for E.
+    private Vec3 FluxDensityAt(in Vec3 point)
+    {
+        if (_magnetic is null)
+        {
+            return Vec3.Zero;
+        }
+
+        var b = _magnetic.MagneticFieldAt(in point);
+        return new Vec3(b.X + 0.0, b.Y + 0.0, b.Z + 0.0);
     }
 
     /// <summary>
@@ -673,18 +729,28 @@ public static class ProbeCommand
             text.Append(invariant, $"# {warning.Severity}: {warning.Code}: {warning.Message}\n");
         }
 
-        text.Append("x_mm,y_mm,z_mm,potential_V,Ex_V_per_m,Ey_V_per_m,Ez_V_per_m,status,conductor\n");
+        // B columns only for a model that declares a magnet, so every other model's CSV is the
+        // file it always was.
+        var magnetic = outcome.Samples.Any(s => s.FluxDensityT is not null);
+
+        text.Append(magnetic
+            ? "x_mm,y_mm,z_mm,potential_V,Ex_V_per_m,Ey_V_per_m,Ez_V_per_m,Bx_T,By_T,Bz_T,status,conductor\n"
+            : "x_mm,y_mm,z_mm,potential_V,Ex_V_per_m,Ey_V_per_m,Ez_V_per_m,status,conductor\n");
 
         foreach (var s in outcome.Samples)
         {
             static string Cell(double? value) =>
                 value is { } v ? v.ToString("G17", CultureInfo.InvariantCulture) : string.Empty;
 
+            var b = magnetic
+                ? $"{Cell(s.FluxDensityT?[0])},{Cell(s.FluxDensityT?[1])},{Cell(s.FluxDensityT?[2])},"
+                : string.Empty;
+
             text.Append(
                 invariant,
                 $"{s.PositionMm[0]:G17},{s.PositionMm[1]:G17},{s.PositionMm[2]:G17},{Cell(s.PotentialV)},"
                 + $"{Cell(s.FieldVPerM?[0])},{Cell(s.FieldVPerM?[1])},{Cell(s.FieldVPerM?[2])},"
-                + $"{s.Status},{s.Conductor}\n");
+                + $"{b}{s.Status},{s.Conductor}\n");
         }
 
         return text.ToString();

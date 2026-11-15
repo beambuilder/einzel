@@ -797,6 +797,11 @@ tilts and the axisymmetric mapping are all honoured and the assembly's warnings 
   points asked for**.
 - **Every number carries its unit in its name**: `potentialV`, `fieldVPerM`, `positionMm`. `--csv` writes
   the same table with the unit in each column.
+- **A magnet is reported, not left out.** A `uniformMagnetic` element adds no potential and no electric
+  field, so a probe that printed only those would read 0 V and 0 V/m inside a 0.5 T sector with status `ok`.
+  Where the model declares a magnet every row also carries `fluxDensityT` (B in tesla, zero outside a
+  bounded magnet's box), the terminal table gains `Bx_T By_T Bz_T`, and the CSV gains `Bx_T,By_T,Bz_T`
+  after `Ez_V_per_m`. A model with no magnet produces exactly the output it always did: no key, no columns.
 - **A driven or sequenced field has no single value, so it has an instant.** The probe reads it through the
   time-varying interface at `--at-us`, states the instant in the output (`instantUs`, and `field at
   t = ... us` above the table), and when none was given it evaluates at t = 0 and says so with the
@@ -833,7 +838,8 @@ tilts and the axisymmetric mapping are all honoured and the assembly's warnings 
 no instant, no field, one element at a time. `--composite [--box-mm x0,y0,z0,x1,y1,z1] [--step-mm s]
 [--at-us t]` samples the **summed** field with the probe and writes one `<model>.composite.vti` carrying
 `potential_V` and the vector `E_V_per_m`, with the instant, the grid, each element's cell size and every
-warning in the header. The default box is the union of what the model's bounded elements occupy - each
+warning in the header. A model that declares a magnet also gets the vector `B_T` (tesla), and the header's
+units line says what it is; without one the file is exactly what it was. The default box is the union of what the model's bounded elements occupy - each
 solve's box, a reflected solve's mirror image, a tilted cross-section's rotated extent, a bounded analytic
 element's region (a model with none needs `--box-mm`) - taken in metres from the bounds themselves, so its
 last node is the domain's face and not a millimetre round trip of it. The default step is a 64th of the

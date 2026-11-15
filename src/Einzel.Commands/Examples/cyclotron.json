@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "0.15",
+  "name": "cyclotron",
+  "description": "Closed form: t = (7/6) pi m / (|q| B). An m/z 100 cation accelerated through 1 kV and launched along +x into a uniform 0.5 T field along +z goes round a circle of radius r = m v / (|q| B) = 91.057 mm, clockwise seen from +z (F = q v x B points to -y). The detector is the plane x = -r/2, which the ion first crosses seven twelfths of the way round, so the flight time is 7/12 of the cyclotron period 2 pi m / (|q| B) = 13.024 us - a period with no energy in it at all. With B ignored, or with the field-free drift shortcut taken inside the magnet, the ion flies straight away from the detector and never arrives. The sense of rotation is not checked here (a mirror-image orbit crosses the same plane at the same instant); the unit tests check it. The expectation is arithmetic this engine had no part in.",
+  "ion": {
+    "massToCharge": { "value": 100.0, "unit": "Da" },
+    "chargeNumber": 1
+  },
+  "source": {
+    "position": { "value": [0.0, 0.0, 0.0], "unit": "mm" },
+    "direction": { "value": [1, 0, 0] },
+    "accelerationPotential": { "value": 1000.0, "unit": "V" }
+  },
+  "fields": [
+    {
+      "type": "uniformMagnetic",
+      "fluxDensity": { "value": [0.0, 0.0, 0.5], "unit": "T" }
+    }
+  ],
+  "detector": {
+    "planePoint": { "value": [-45.528605660970565, 0.0, 0.0], "unit": "mm" },
+    "normal": { "value": [1, 0, 0] }
+  },
+  "transport": {
+    "maximumFlightTime": { "value": 50.0, "unit": "us" },
+    "relativeTolerance": 1e-11
+  }
+}

@@ -215,6 +215,10 @@ public static class ExportCommand
 
         var potential = new double[nodes];
         var field = new double[3 * nodes];
+
+        // B only for a model that declares a magnet: a magnet adds no potential and no E, so
+        // without it "the field an ion sees" would be written as zeros inside a sector.
+        var flux = probe.Magnetic ? new double[3 * nodes] : null;
         var at = (atUs ?? 0.0) * 1e-6;
         long refused = 0;
         long outside = 0;
@@ -234,12 +238,19 @@ public static class ExportCommand
                         j == counts[1] - 1 ? high[1] : low[1] + (j * spacing[1]),
                         k == counts[2] - 1 ? high[2] : low[2] + (k * spacing[2]));
 
-                    var status = probe.Sample(in point, at, out var phi, out var e);
+                    var status = probe.Sample(in point, at, out var phi, out var e, out var b);
 
                     potential[n] = phi;
                     field[3 * n] = e.X;
                     field[(3 * n) + 1] = e.Y;
                     field[(3 * n) + 2] = e.Z;
+
+                    if (flux is not null)
+                    {
+                        flux[3 * n] = b.X;
+                        flux[(3 * n) + 1] = b.Y;
+                        flux[(3 * n) + 2] = b.Z;
+                    }
 
                     refused += ReferenceEquals(status, ProbeStatus.Refused) ? 1 : 0;
                     outside += ReferenceEquals(status, ProbeStatus.OutsideDomain) ? 1 : 0;
@@ -279,7 +290,11 @@ public static class ExportCommand
             probe.TimeVarying
                 ? string.Create(invariant, $"instant: t = {atUs ?? 0.0:G8} us (the field varies with time; this file is one frame of it)")
                 : "instant: none - the field does not vary with time",
-            "units: potential_V in volts, E_V_per_m in volts per metre (E = -grad phi); the grid itself is in metres",
+            flux is null
+                ? "units: potential_V in volts, E_V_per_m in volts per metre (E = -grad phi); the grid itself is in metres"
+                : "units: potential_V in volts, E_V_per_m in volts per metre (E = -grad phi), B_T the magnetic "
+                    + "flux density in tesla (it adds nothing to phi or E, and turns every ion through it); "
+                    + "the grid itself is in metres",
             "valid: 1 where the field answered, 0 where it refused the point; a refused node's values are "
             + "written as nan (the lower-case spelling VTK itself writes), so read valid rather than relying on nan parsing",
             "resampled: nodes are where this box puts them, not where the solves put theirs; " + elements,
@@ -305,7 +320,8 @@ public static class ExportCommand
                     spacing,
                     potential,
                     field,
-                    provenance);
+                    provenance,
+                    flux);
             }
 
             File.Move(temporary, target, overwrite: true);

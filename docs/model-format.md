@@ -1,4 +1,4 @@
-# Model format, schema 0.14
+# Model format, schema 0.15
 
 A model is declarative, schema-validated, diffable JSON. A model file plus its
 referenced artifacts fully determines a run.
@@ -802,6 +802,43 @@ quadrupole is not axisymmetric, but its pseudopotential is (the field magnitude
 depends on radius alone), which is what lets it enter the r-z density solve. An
 `axis` on any other element kind is refused rather than ignored.
 
+### A magnetic field (schema 0.15)
+
+```json
+{ "type": "uniformMagnetic",
+  "fluxDensity": { "value": [0, 0, 0.5], "unit": "T" },
+  "region": {
+    "minX": { "value": 0,    "unit": "mm" }, "maxX": { "value": 500, "unit": "mm" },
+    "minY": { "value": -500, "unit": "mm" }, "maxY": { "value": 500, "unit": "mm" },
+    "minZ": { "value": -50,  "unit": "mm" }, "maxZ": { "value": 50,  "unit": "mm" } } }
+```
+
+A uniform magnetic flux density B, the velocity-dependent half of the Lorentz force
+`F = q (E + v x B)`. Units of flux density are `T`, `mT`, `uT` (or `µT`), `G` and
+`kG`; a value in V/m is a units error, as it should be. Like every other placement
+the vector may be written as three expressions over the parameters
+(`{ "expression": ["0", "0", "bField"] }`). Several magnetic elements add. Sense: a
+positive ion moving along +x in a B along +z is pushed toward -y.
+
+- **The region is a hard edge**, with no `fringe`: B is the declared value inside
+  the box and exactly zero outside, the sharp cut-off of first-order beam optics.
+  A fringe is refused, because B scaled by a linear ramp has a curl across the
+  ramp that no magnet in vacuum makes. Every bounded magnet carries a Provenance
+  note, `field.magnet-hard-edge`, saying so. Without a region the field fills all
+  space.
+- **Only single-ion trajectory integration applies v x B.** A model declaring a
+  magnetic element is refused with `SCHEMA_INVALID` at the element when it also
+  asks for `spaceCharge` other than `none`, for the diffusive mode (as its own mode
+  or in any sequence phase), or when a sequence phase changes the flux density
+  (there is no time-varying B). `einzel compare` refuses it too.
+- **A magnet can turn an ion round but not start one moving.** A source launched
+  away from its detector validates when a non-zero magnet is declared, because a
+  180 degree sector does exactly that; an ion at rest in a pure magnet is refused,
+  because B does no work.
+- Non-relativistic, like the rest of transport.
+
+Details, the closed-form checks and what is not built: [Magnetic fields](magnetic-fields.md).
+
 ### Solved fields
 
 ```json
@@ -1202,7 +1239,7 @@ here.
 
 ## Versioning
 
-Schema 0.1 through 0.14 all load, and a test reads a document at every version the
+Schema 0.1 through 0.15 all load, and a test reads a document at every version the
 build claims. Every bump ships a migration and a test that the prior corpus still
 loads. Codes and field names are a compatibility surface that agent workflows bind
 to: they are added, never reworded or repurposed.
@@ -1211,8 +1248,8 @@ to: they are added, never reworded or repurposed.
 model-level sequence, 0.7 parametric directions, 0.8 a tilt on a cross-section's
 extrusion axis, 0.9 the polygon electrode, 0.10 parameter provenance, 0.11 an
 `axis` on the analytic RF quadrupole, 0.12 a `fringe` on a bounded element's
-region, 0.13 several ion species in one run and 0.14 the revolved
-outline. All purely additive, so every earlier
+region, 0.13 several ion species in one run, 0.14 the revolved
+outline and 0.15 the uniform magnetic field. All purely additive, so every earlier
 document still reads — but a document whose ions push on each other genuinely is
 not a 0.4 document, and saying so is cheaper than an older build reading it,
 ignoring the field it does not know, and reporting a different flight with nothing

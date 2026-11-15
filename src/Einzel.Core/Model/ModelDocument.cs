@@ -193,7 +193,7 @@ public static class ModelSchema
     /// <remarks>
     /// 0.3 adds the source cloud, 0.5 the mutual Coulomb force, 0.6 the model-level
     /// sequence, 0.8 a tilt on a cross-section's extrusion axis, 0.9 the polygon
-    /// electrode. All additive, so every
+    /// electrode, 0.15 the uniform magnetic field. All additive, so every
     /// earlier document still reads - but a document whose ions push on each other
     /// genuinely is not a 0.4 document, and saying so is cheaper than an older build
     /// reading it, ignoring the field it does not know, and reporting a different flight
@@ -201,7 +201,7 @@ public static class ModelSchema
     /// case in a sharper form: an older build would solve the untilted cross-section and
     /// report a converging analyser as a parallel one.
     /// </remarks>
-    public const string CurrentVersion = "0.14";
+    public const string CurrentVersion = "0.15";
 
     /// <summary>Versions this build can read.</summary>
     /// <remarks>
@@ -211,7 +211,7 @@ public static class ModelSchema
     /// </remarks>
     public static IReadOnlyList<string> SupportedVersions { get; } =
         ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12",
-         "0.13", "0.14"];
+         "0.13", "0.14", "0.15"];
 }
 
 /// <summary>The ion being tracked.</summary>
@@ -473,8 +473,9 @@ public sealed record GasPressureFieldDocument
 public sealed record FieldDocument
 {
     /// <summary>
-    /// One of <c>fieldFree</c>, <c>uniform</c>, <c>halfSpaceUniform</c>, or
-    /// <c>solved2d</c>.
+    /// One of <c>fieldFree</c>, <c>uniform</c>, <c>halfSpaceUniform</c>,
+    /// <c>idealQuadrupoleRf</c>, <c>quadroLogarithmic</c>, <c>uniformMagnetic</c>,
+    /// <c>solved2d</c> or <c>solved3d</c>.
     /// </summary>
     public string? Type { get; init; }
 
@@ -494,6 +495,25 @@ public sealed record FieldDocument
 
     /// <summary>Uniform only: the field vector.</summary>
     public VectorValue? Field { get; init; }
+
+    /// <summary>
+    /// Uniform magnetic only: the magnetic flux density B, with a unit of flux density -
+    /// <c>T</c>, <c>mT</c>, <c>uT</c>, <c>G</c> or <c>kG</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The B of <c>F = q (E + v x B)</c>. A positive ion moving along +x in a B along +z is
+    /// pushed toward -y, and turns clockwise seen from +z: the right-hand rule, with the
+    /// charge's sign carried by the ion.
+    /// </para>
+    /// <para>
+    /// Applied by single-ion trajectory integration only. A model declaring one is refused
+    /// when it also asks for space charge, a diffusive transport mode or phase, or a phase
+    /// that changes B - each of those paths would otherwise fly as though the magnet were
+    /// not there.
+    /// </para>
+    /// </remarks>
+    public VectorValue? FluxDensity { get; init; }
 
     /// <summary>Half-space only: a point on the boundary plane.</summary>
     public VectorValue? PlanePoint { get; init; }

@@ -346,7 +346,7 @@ public static class VtuWriter
     /// <returns>The .vti document text.</returns>
     /// <exception cref="ArgumentException">The arrays do not match the node count.</exception>
     /// <remarks>
-    /// The same document <see cref="WriteSampledField(TextWriter, IReadOnlyList{int}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{string}?)"/>
+    /// The same document <see cref="WriteSampledField(TextWriter, IReadOnlyList{int}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{double}, IReadOnlyList{string}?, IReadOnlyList{double}?)"/>
     /// streams, built in memory; for a large grid stream it instead.
     /// </remarks>
     public static string WriteSampledField(
@@ -370,10 +370,15 @@ public static class VtuWriter
     /// <param name="potentialVolts">The potential at each node, x fastest, then y, then z.</param>
     /// <param name="fieldVoltsPerMetre">The field at each node, three components per node, same order.</param>
     /// <param name="provenance">Provenance lines recorded as an XML comment.</param>
+    /// <param name="fluxDensityTesla">
+    /// B at each node in tesla, three components per node, or null for a model with no magnet,
+    /// whose file is then exactly what it was before B existed.
+    /// </param>
     /// <exception cref="ArgumentException">The arrays do not match the node count.</exception>
     /// <remarks>
     /// <para>
-    /// One scalar array, <c>potential_V</c>, one vector array, <c>E_V_per_m</c>, so ParaView can
+    /// One scalar array, <c>potential_V</c>, one vector array, <c>E_V_per_m</c> (and a second,
+    /// <c>B_T</c>, where the model declares a magnet), so ParaView can
     /// contour the first and glyph or stream-trace the second, and a <c>valid</c> mask (UInt8, 1
     /// where the field answered, 0 where it refused the point). A refused node's potential is NaN
     /// rather than zero, because zero is a real potential.
@@ -395,9 +400,9 @@ public static class VtuWriter
         IReadOnlyList<double> spacingMetres,
         IReadOnlyList<double> potentialVolts,
         IReadOnlyList<double> fieldVoltsPerMetre,
-        IReadOnlyList<string>? provenance = null)
+        IReadOnlyList<string>? provenance = null,
+        IReadOnlyList<double>? fluxDensityTesla = null)
     {
-        ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(counts);
         ArgumentNullException.ThrowIfNull(originMetres);
         ArgumentNullException.ThrowIfNull(spacingMetres);
@@ -412,6 +417,13 @@ public static class VtuWriter
                 $"{nodes} nodes need {nodes} potentials and {3 * nodes} field components; got "
                 + $"{potentialVolts.Count} and {fieldVoltsPerMetre.Count}",
                 nameof(potentialVolts));
+        }
+
+        if (fluxDensityTesla is not null && fluxDensityTesla.Count != 3 * nodes)
+        {
+            throw new ArgumentException(
+                $"{nodes} nodes need {3 * nodes} flux density components; got {fluxDensityTesla.Count}",
+                nameof(fluxDensityTesla));
         }
 
         var invariant = CultureInfo.InvariantCulture;
@@ -492,6 +504,24 @@ public static class VtuWriter
         }
 
         writer.Write("        </DataArray>\n");
+
+        if (fluxDensityTesla is not null)
+        {
+            writer.Write("        <DataArray type=\"Float64\" Name=\"B_T\" NumberOfComponents=\"3\" format=\"ascii\">\n");
+
+            for (var n = 0; n < potentialVolts.Count; n++)
+            {
+                writer.Write("          ");
+                Number(fluxDensityTesla[3 * n]);
+                writer.Write(' ');
+                Number(fluxDensityTesla[(3 * n) + 1]);
+                writer.Write(' ');
+                Number(fluxDensityTesla[(3 * n) + 2]);
+                writer.Write('\n');
+            }
+
+            writer.Write("        </DataArray>\n");
+        }
         writer.Write("        <DataArray type=\"UInt8\" Name=\"valid\" format=\"ascii\">\n");
 
         for (var n = 0; n < potentialVolts.Count; n++)

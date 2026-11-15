@@ -151,6 +151,21 @@ public readonly struct Dimension : IEquatable<Dimension>
     /// <summary>Electric field strength, volt per metre.</summary>
     public static Dimension ElectricField { get; } = new(length: 1, mass: 1, time: -3, current: -1);
 
+    /// <summary>Magnetic flux density, tesla: a volt second per square metre.</summary>
+    /// <remarks>
+    /// <para>
+    /// The B of the Lorentz force <c>F = q (E + v x B)</c>, so that <c>v x B</c> has the
+    /// dimension of an electric field - a velocity times a tesla is a volt per metre, which
+    /// is the identity a dimension system has to get right for the two terms to be added.
+    /// </para>
+    /// <para>
+    /// Distinct from magnetic field strength H (ampere per metre), which differs by the
+    /// permeability. This engine models no permeable material, so B is the quantity an ion
+    /// feels and the only one a document declares.
+    /// </para>
+    /// </remarks>
+    public static Dimension MagneticFluxDensity { get; } = new(mass: 1, time: -2, current: -1);
+
     /// <summary>Electric field per unit length: volts per metre squared.</summary>
     /// <remarks>
     /// The curvature of a potential rather than its slope. It appears wherever a field is

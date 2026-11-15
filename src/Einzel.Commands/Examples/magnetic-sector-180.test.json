@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "0.1",
+  "name": "magnetic-sector-180",
+  "description": "Closed form: t = 15 mm / v + pi m / (|q| B) = 6.853527 us for m/z 100 at 1 kV in a 0.5 T hard-edge sector (declared as 500 mT): 15 mm of drift at v = 43.928 km/s and half of a 13.024 us cyclotron period.",
+  "model": "../models/magnetic-sector-180.json",
+  "expect": [
+    {
+      "figureOfMerit": "flightTime",
+      "value": 6.853527231692463,
+      "unit": "us",
+      "tolerance": 1e-06
+    }
+  ]
+}

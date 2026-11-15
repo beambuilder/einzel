@@ -19,12 +19,13 @@ states the intent and these pages state the reality; both are noted.
 | [Coming from SIMION](coming-from-simion.md) | What maps to what, for someone who knows SIMION |
 | [Warning codes](warning-codes.md) | What each warning and error code means and what to do about it |
 | [Architecture](architecture.md) | Assemblies, layering, the four invariants, and why each exists |
-| [Model format](model-format.md) | Schema 0.14 in full: parameters and their provenance, expressions, fields, electrodes (rectangle, disc, polygon, prism, revolve, edge profile), source clouds, ion species, drives, sequences, bounded analytic elements |
+| [Model format](model-format.md) | Schema 0.15 in full: parameters and their provenance, expressions, fields (including a uniform magnetic field), electrodes (rectangle, disc, polygon, prism, revolve, edge profile), source clouds, ion species, drives, sequences, bounded analytic elements |
 | [Device templates](device-templates.md) | Writing a new device as data, and the shipped templates, each with what solving it bought |
 | [Numerics](numerics.md) | Integrator, field solver, interpolation, and the accuracy budget |
 | [Sweeps and optimisation](optimisation.md) | Tolerance studies, sensitivity fields, Nelder-Mead and CMA-ES |
 | [Rendering](rendering.md) | Vector sections in SVG and PDF, conductor surfaces for the viewport, decimation bounds, and how a figure carries its own caveats |
 | [Pressure](pressure.md) | Collision models, regime validity, and what gas does to a funnel |
+| [Magnetic fields](magnetic-fields.md) | The uniform B element, the v x B force in the integrator, its closed-form checks, and every path that refuses a magnet |
 | [Extensions](extensions.md) | The Python extension surface, what the sandbox contains, and what it does not |
 | [Agent acceptance](agent-acceptance.md) | The prose-task suite, what it measures, and what gates a release |
 | [Extending](extending.md) | The three kinds of change a device has needed below `Einzel.Library`, where each goes, and the traps each has sprung |
