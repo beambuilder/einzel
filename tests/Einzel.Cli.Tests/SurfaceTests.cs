@@ -278,7 +278,16 @@ public sealed class SurfaceTests : IDisposable
         // An estimate presented with the confidence of a measurement is the same
         // mistake GRD-1 exists to prevent, so it states its basis.
         Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("basis").GetString()));
-        Assert.False(root.GetProperty("aboveThreshold").GetBoolean());
+
+        // The gate is the comparison it reports, and nothing about this machine. The rates behind
+        // an estimate are measured by a pilot on the machine it runs on (Amendment 33), so
+        // asserting that this model sits UNDER the threshold was asserting how fast the runner
+        // was: it failed on a loaded Windows runner whose pilot put the estimate over 30 s.
+        var seconds = root.GetProperty("seconds").GetDouble();
+        var threshold = root.GetProperty("thresholdSeconds").GetDouble();
+
+        Assert.True(threshold > 0.0);
+        Assert.Equal(seconds > threshold, root.GetProperty("aboveThreshold").GetBoolean());
     }
 
     [Fact]

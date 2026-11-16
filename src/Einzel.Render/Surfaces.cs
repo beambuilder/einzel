@@ -435,9 +435,9 @@ public static class Surfaces
     /// </para>
     /// <para>
     /// <b>This said "keeps a zero normal" and claimed that produced a flat-shaded facet. It
-    /// does not, in either window.</b> A zero normal is not a direction: the cross-platform
-    /// shader normalizes it, which GLSL leaves undefined, and the WPF viewport lights it at
-    /// its ambient term alone. The planar mirror pair's end cap is such a sheet, and every
+    /// does not, in either window this project has had.</b> A zero normal is not a direction:
+    /// the shader normalizes it, which GLSL leaves undefined, and the WPF viewport that
+    /// preceded it lit such a facet at its ambient term alone. The planar mirror pair's end cap is such a sheet, and every
     /// one of its vertices came back zero - found by a test asking whether a mirrored image
     /// is wound like its original, which a surface with no normals cannot answer.
     /// </para>

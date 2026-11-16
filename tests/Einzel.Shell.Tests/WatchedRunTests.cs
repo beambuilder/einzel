@@ -1,6 +1,9 @@
+using System.Globalization;
+
 using Einzel.Commands;
 using Einzel.Core.Errors;
 using Einzel.Shell;
+using Einzel.Shell.Presentation;
 
 using Xunit.Abstractions;
 
@@ -17,8 +20,9 @@ namespace Einzel.Shell.Tests;
 /// GUI adds on top is a control that calls this and a control that draws the result.
 /// </para>
 /// <para>
-/// The equivalent for the WPF shell targets net10.0-windows, so a solution-wide test run
-/// walks past it on Linux and the claim was checked on one platform.
+/// The equivalent for the WPF shell targeted net10.0-windows, so a solution-wide test run
+/// walked past it on Linux and the claim was checked on one platform; that project has
+/// since been deleted.
 /// </para>
 /// </remarks>
 public sealed class WatchedRunTests(ITestOutputHelper output) : IDisposable
@@ -100,7 +104,7 @@ public sealed class WatchedRunTests(ITestOutputHelper output) : IDisposable
         var final = ViewportCommand.Watch(_model, watcher);
 
         output.WriteLine($"{centers.Count} frames with a packet; "
-            + $"leading edge {string.Join(" -> ", centers.Take(6).Select(c => c.ToString("F2")))}");
+            + $"leading edge {string.Join(" -> ", centers.Take(6).Select(c => c.ToString("F2", CultureInfo.InvariantCulture)))}");
         output.WriteLine($"final frame has {final.Density.Count} contours");
 
         Assert.True(centers.Count >= 2, $"only {centers.Count} frames carried a packet");
@@ -110,6 +114,114 @@ public sealed class WatchedRunTests(ITestOutputHelper output) : IDisposable
         Assert.True(
             centers[^1] - centers[0] > 1.0,
             $"the packet's leading edge moved {centers[^1] - centers[0]:F3} mm across the run");
+    }
+
+    /// <summary>A watch started through the session is the command that would repeat it.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The window watches through the session, and that is the claim.</b> Its first
+    /// version called <see cref="ViewportCommand.Watch"/> itself: the same physics, and no
+    /// record that anything had run - the one action in the window that could not be read
+    /// back as something to type (Amendment 25).
+    /// </para>
+    /// <para>
+    /// The frames are counted as well as the command, because a session that recorded the
+    /// command and never ran the transport would pass the first assertion alone.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task AWatchThroughTheSessionIsRecordedAsTheCommandThatRepeatsIt()
+    {
+        File.WriteAllText(_model, Model);
+
+        var session = new ShellSession(_model, new JournalAuthor("tester", AuthorKind.Human));
+        var frames = 0;
+
+        var watcher = new Watcher(_ => Interlocked.Increment(ref frames), TimeSpan.FromMilliseconds(20));
+
+        _ = await session.WatchAsync(watcher);
+
+        output.WriteLine(string.Join(Environment.NewLine, session.Actions.Select(a => a.Command)));
+
+        Assert.Contains(
+            session.Actions,
+            a => a.Command == $"einzel run {session.Journal.ModelPath} --progress 5");
+        Assert.True(frames > 0, "the session recorded a watch and no frame arrived");
+        Assert.NotNull(watcher.LastWithPacket);
+    }
+
+    /// <summary>Stopping a watch keeps what it drew, and actually stops it.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A stopped watch is not a failed one.</b> The packet it drew is where the run had
+    /// got to, which is a real state of the instrument and the reason somebody pressed stop
+    /// - discarding it would throw away the only thing the watch produced.
+    /// </para>
+    /// <para>
+    /// <b>The step count is what makes this a test of stopping rather than of cancelling.</b>
+    /// A token passed only to <c>Task.Run</c> decides whether the work ever starts and is
+    /// never looked at again once it has, so a watch cancelled a step in would run to
+    /// completion and pass any assertion about the exception alone. What discriminates is
+    /// that far fewer frames arrive than the same run delivers unstopped - the token has to
+    /// reach the listener the run asks at every step.
+    /// </para>
+    /// <para>
+    /// This is the one claim lost when <c>Einzel.Wpf.Tests</c> was deleted: its
+    /// <c>StoppingAWatchKeepsWhatItDrew</c> had no equivalent here, and the cross-platform
+    /// window had no Stop control at all.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task StoppingAWatchKeepsWhatItDrewAndTookFewerSteps()
+    {
+        File.WriteAllText(_model, Model);
+
+        var session = new ShellSession(_model, new JournalAuthor("tester", AuthorKind.Human));
+
+        // The control: the same run, unstopped, so "few frames" is measured against what
+        // this model actually delivers rather than against a number chosen to pass.
+        var whole = 0;
+
+        _ = await session.WatchAsync(
+            new Watcher(_ => Interlocked.Increment(ref whole), TimeSpan.Zero));
+
+        using var stopping = new CancellationTokenSource();
+
+        var stopped = 0;
+        ViewportOutcome? kept = null;
+
+        var watcher = new Watcher(
+            frame =>
+            {
+                Interlocked.Increment(ref stopped);
+
+                if (frame.Density.Count > 0)
+                {
+                    kept = frame;
+
+                    // Stop at the first frame that actually drew something, which is the
+                    // moment a person would: there is now a picture worth keeping.
+                    stopping.Cancel();
+                }
+            },
+            TimeSpan.Zero);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => session.WatchAsync(watcher, stopping.Token));
+
+        output.WriteLine($"{stopped} frames stopped against {whole} whole");
+
+        Assert.NotNull(kept);
+        Assert.NotEmpty(kept!.Density);
+
+        // What the window shows afterwards, and the reason the viewport is not cleared.
+        Assert.NotNull(watcher.LastWithPacket);
+        Assert.NotEmpty(watcher.LastWithPacket!.Density);
+
+        // THE ASSERTION. A token reaching only Task.Run gives stopped == whole.
+        Assert.True(
+            stopped < whole,
+            $"the run was not stopped: {stopped} frames against {whole} unstopped");
     }
 
     /// <summary>A trajectory model is refused, with a reason.</summary>

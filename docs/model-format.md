@@ -1,4 +1,4 @@
-# Model format, schema 0.9
+# Model format, schema 0.15-esibd.2
 
 A model is declarative, schema-validated, diffable JSON. A model file plus its
 referenced artifacts fully determines a run.
@@ -285,7 +285,8 @@ instrument and almost always a mistake.
 ### Any shape of cycle
 
 The two names are the short form. The object form spells every shape, the two
-named ones included (schema 0.15; a 0.14 document reads unchanged):
+named ones included (fork step 1, written as schema 0.15 before the fork marked its
+numbers; a 0.14 document reads unchanged):
 
 ```json
 "waveform": { "type": "analytic", "expression": "1 - 2*floor(2*p)", "breakpoints": [0, 0.5] }
@@ -853,6 +854,43 @@ quadrupole is not axisymmetric, but its pseudopotential is (the field magnitude
 depends on radius alone), which is what lets it enter the r-z density solve. An
 `axis` on any other element kind is refused rather than ignored.
 
+### A magnetic field (schema 0.15)
+
+```json
+{ "type": "uniformMagnetic",
+  "fluxDensity": { "value": [0, 0, 0.5], "unit": "T" },
+  "region": {
+    "minX": { "value": 0,    "unit": "mm" }, "maxX": { "value": 500, "unit": "mm" },
+    "minY": { "value": -500, "unit": "mm" }, "maxY": { "value": 500, "unit": "mm" },
+    "minZ": { "value": -50,  "unit": "mm" }, "maxZ": { "value": 50,  "unit": "mm" } } }
+```
+
+A uniform magnetic flux density B, the velocity-dependent half of the Lorentz force
+`F = q (E + v x B)`. Units of flux density are `T`, `mT`, `uT` (or `µT`), `G` and
+`kG`; a value in V/m is a units error, as it should be. Like every other placement
+the vector may be written as three expressions over the parameters
+(`{ "expression": ["0", "0", "bField"] }`). Several magnetic elements add. Sense: a
+positive ion moving along +x in a B along +z is pushed toward -y.
+
+- **The region is a hard edge**, with no `fringe`: B is the declared value inside
+  the box and exactly zero outside, the sharp cut-off of first-order beam optics.
+  A fringe is refused, because B scaled by a linear ramp has a curl across the
+  ramp that no magnet in vacuum makes. Every bounded magnet carries a Provenance
+  note, `field.magnet-hard-edge`, saying so. Without a region the field fills all
+  space.
+- **Only single-ion trajectory integration applies v x B.** A model declaring a
+  magnetic element is refused with `SCHEMA_INVALID` at the element when it also
+  asks for `spaceCharge` other than `none`, for the diffusive mode (as its own mode
+  or in any sequence phase), or when a sequence phase changes the flux density
+  (there is no time-varying B). `einzel compare` refuses it too.
+- **A magnet can turn an ion round but not start one moving.** A source launched
+  away from its detector validates when a non-zero magnet is declared, because a
+  180 degree sector does exactly that; an ion at rest in a pure magnet is refused,
+  because B does no work.
+- Non-relativistic, like the rest of transport.
+
+Details, the closed-form checks and what is not built: [Magnetic fields](magnetic-fields.md).
+
 ### Solved fields
 
 ```json
@@ -951,7 +989,7 @@ independent of integration steps — though only in one direction: the stream ca
 be coarser than the steps, never finer, because there is no dense output to
 interpolate within a step.
 
-`edges` (schema 0.16) says how a trajectory step meets an instant at which a drive
+`edges` (fork step 2, schema 0.16 before the fork marked its numbers) says how a trajectory step meets an instant at which a drive
 jumps. `"land"`, the default when the key is absent, lands on every declared waveform
 breakpoint (a rectangular edge, an expression's or a table's `breakpoints`) and on
 every stage switch at the instant the field flips, samples the landing step's end on
@@ -1177,6 +1215,32 @@ reads a partly-filled box. A **solved** element may not declare one, refused rat
 ignored, because a solve is already bounded by its own domain and a document that says a
 thing twice can say it two ways. A region with no extent is refused too.
 
+### A fringe, so the edge is a ramp rather than a wall (schema 0.12)
+
+A region may also declare `fringe`, a length: the depth inside every face over which the
+element rises linearly from nothing to full strength. Absent means a hard edge, which is
+what every earlier document had. The spelling, from the `tims-front-end` template's
+tunnel RF:
+
+```json
+"region": {
+  "minX": { "expression": "...", "unit": "mm" }, "maxX": { "expression": "...", "unit": "mm" },
+  "minY": { "expression": "-funnelOuterRadius", "unit": "mm" }, "maxY": { "expression": "funnelOuterRadius", "unit": "mm" },
+  "minZ": { "expression": "-funnelOuterRadius", "unit": "mm" }, "maxZ": { "expression": "funnelOuterRadius", "unit": "mm" },
+  "fringe": { "expression": "rfFringe", "unit": "mm" }
+}
+```
+
+With a fringe the potential is continuous across the face (zero at it, the element's own a
+fringe inside) and the field is the gradient of the fringed potential, so a confining RF is
+an entrance rather than a wall: an ion arriving at any radius is squeezed toward the axis as
+the well grows under it, instead of meeting the whole well at once. It stands in for a real
+electrode's field decaying over about a bore radius and is a **modelling choice, not
+something solved**; the run says so in place of the region-step warning. The validator
+requires a length no less than zero and no more than half the region's smallest extent
+(`VALUE_OUT_OF_BOUNDS` at `.../region/fringe`), since a larger one never reaches full
+strength anywhere. It is read as an expression like any placement.
+
 ### The boundary is a step, and the step costs less than it looks like it should
 
 **A box is not an equipotential of anything interesting**, so the potential does not match
@@ -1246,8 +1310,8 @@ here.
 
 ## Versioning
 
-Schema 0.1 through 0.14 all load, and a test reads a document at every version the
-build claims. Every bump ships a migration and a test that the prior corpus still
+Schema 0.1 through 0.15 all load, and so do the fork's 0.16 and 0.15-esibd.2 (below);
+a test reads a document at every version the build claims. Every bump ships a migration and a test that the prior corpus still
 loads. Codes and field names are a compatibility surface that agent workflows bind
 to: they are added, never reworded or repurposed.
 
@@ -1255,12 +1319,32 @@ to: they are added, never reworded or repurposed.
 model-level sequence, 0.7 parametric directions, 0.8 a tilt on a cross-section's
 extrusion axis, 0.9 the polygon electrode, 0.10 parameter provenance, 0.11 an
 `axis` on the analytic RF quadrupole, 0.12 a `fringe` on a bounded element's
-region, 0.13 several ion species in one run and 0.14 the revolved
-outline. All purely additive, so every earlier
+region, 0.13 several ion species in one run, 0.14 the revolved
+outline and 0.15 the uniform magnetic field. All purely additive, so every earlier
 document still reads — but a document whose ions push on each other genuinely is
 not a 0.4 document, and saying so is cheaper than an older build reading it,
 ignoring the field it does not know, and reporting a different flight with nothing
 to indicate that anything was dropped.
+
+**The part after the hyphen is this fork's.** `beambuilder/einzel` writes upstream's
+number followed by `-esibd.N`, N being the count of additions the fork has made to the
+format on top of it. An upstream sync moves the part before the hyphen and a fork addition
+the part after, so the two trees cannot hand out the same number for different things:
+
+| Fork step | Adds | Written before the scheme as |
+| --- | --- | --- |
+| 1 | a drive's `waveform` as an object: `analytic`, `tabulated`, `harmonic`, and the two named shapes ([above](#any-shape-of-cycle)) | 0.15 |
+| 2 | `transport.edges` | 0.16 |
+
+That collision happened once: the fork wrote 0.15 for waveform objects, and upstream then
+wrote 0.15 for the magnetic field. Both read. The version is checked as a member of a
+list and switches nothing on or off, and the reader refuses a key it does not know, so a
+file stamped 0.15 reads whichever of the two it holds, and a file stamped 0.16 reads as
+it did. An upstream build refuses `0.15-esibd.2` at `/schemaVersion`, as it would refuse
+the waveform object or the `edges` key under any number. The number is a string and is
+never parsed, split or ordered, and a written file carries it as that plain text.
+A model's hash in a run manifest covers the file's text, version included, so restamping
+a file changes its hash and not its flight; the field cache is not keyed on the version.
 
 ## Several generators on one geometry
 

@@ -525,6 +525,8 @@ public sealed class FlyCommandTests(ITestOutputHelper output) : IDisposable
     /// A row that throws is a defect in the platform, not an outcome: an ion launched on the
     /// axis of a quadro-logarithmic field, where its potential has no value, ends the flight
     /// with exit 6, the exception's type and its stack, and nothing written.
+    /// The type is the field's own refusal of a point (<c>PointRefusedException</c>, an
+    /// <c>ArgumentOutOfRangeException</c>), which is what the report names.
     /// </summary>
     [Fact]
     public void ARowThatThrowsIsADefectAndExitsSix()
@@ -538,7 +540,7 @@ public sealed class FlyCommandTests(ITestOutputHelper output) : IDisposable
         var (exit, _, stderr) = Run("fly", model, "--ions", list, "--project", _root);
 
         Assert.True(exit == 6, $"exit {exit}: {stderr}");
-        Assert.Contains("ArgumentOutOfRangeException", stderr, StringComparison.Ordinal);
+        Assert.Contains("PointRefusedException", stderr, StringComparison.Ordinal);
         Assert.Contains("QuadroLogarithmicField", stderr, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(_root, "results")));
     }

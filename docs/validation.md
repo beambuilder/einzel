@@ -382,7 +382,7 @@ covering everything.
   quadrupole needs three dimensions.
 - **No SIMION reference for a measured drive, and none for a mass line at a duty
   other than 0.5.** A drive may be a sinusoid, a rectangular wave, an expression of
-  the phase, a sampled period or a harmonic series (schema 0.15; a multi-notch
+  the phase, a sampled period or a harmonic series (the fork's 0.15, fork step 1; a multi-notch
   isolation waveform is a harmonic series with a gap), the integrator lands on its
   declared breakpoints by default, checked against the exact Meissner solution, and
   `einzel waveform import` reads a measured scope trace into a drive. The rectangular

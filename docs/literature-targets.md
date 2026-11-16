@@ -1527,3 +1527,201 @@ geometry. Where that 19 per cent goes is not established and is recorded as not 
 eluted, so the ratio of their separation to their width is a millimetre ratio at equilibrium
 and is one to two orders below a published resolving power by construction. Nothing in this
 comparison should be set beside their 100 to 250.
+
+---
+
+## 8. Quadrupole mass filter peak shape: hyperbolic against round rods
+
+**Gibson and Taylor**, *Prediction of quadrupole mass filter performance for hyperbolic and
+circular cross section electrodes*, Rapid Commun. Mass Spectrom. **14** (2000) 1669-1673
+(University of Liverpool). Full text is held locally in `papers/` (gitignored, not
+published); this section paraphrases and cites. DOI 10.1002/1097-0231(20000930)14:18<1669::AID-RCM80>3.0.CO;2-# (from the publisher's copy).
+
+This is the nearest published match to the "mass filter peak shape against a scan line" item
+in the candidates list, and the only target here whose subject is the *shape* of a filter's
+mass peak rather than its stability boundary.
+
+### What they computed
+
+A purpose-written trajectory code, constant-cross-section electrodes only. **Fringe fields
+are ignored**: the field starts the moment an ion leaves the source and an ion counts as
+transmitted if it reaches a circular exit disc (r0 wide) having never been farther than r0
+from the axis, so the axial speed is constant and the problem is two-dimensional.
+Hyperbolic rods use the analytic field. Round rods use a relaxation solve of Laplace's
+equation on an eighth of the cross-section (rod radius 1.148 r0, a grounded cylindrical
+housing at 3.6 r0), run for days to a 1e-8 relative convergence, with interpolation where a
+rod crosses the mesh; the field is stored on a grid and extrapolated linearly, and results
+were mesh-independent at 0.002 r0 or finer. Motion is fourth-order Runge-Kutta over short
+steps with the x and y motions advanced separately. **100,000 to 200,000 ions per mass
+point**, 50 to 80 mass points per peak, ions random in both **RF phase** and position over
+an entrance aperture of about 0.35 r0, exit aperture r0, singly charged m/z 40. The
+resolution setting eta is the ratio U/V as a fraction of its value at the apex of the first
+stability region (eta = 1 is the apex). The number of RF cycles an ion spends in the filter
+is the governing variable, and other masses with the same cycle count behave the same.
+
+### Checkable results, with where they sit
+
+| Quantity | Reported | Where |
+| --- | --- | --- |
+| Peak shape, hyperbolic against round, 48 cycles | round rods lower in height, with a long low-mass tail and a trailing edge shifted to lower mass; at eta = 0.985 peaks near 16 and 13 per cent transmission, flat topped; at eta = 0.9975 near 5.8 and 4.0, narrow | Fig. 2a, 2b |
+| Peak width (m/z) against eta, 32 and 48 cycles | width falls with eta to a minimum near eta = 0.9975 to 1.000 then rises; round rods wider throughout; hyperbolic minimum about 0.35 (48 cycles) | Fig. 3 |
+| Transmission against eta, 32 and 48 cycles | from about 19 per cent (hyperbolic, 32 cycles) and 16 per cent (others) at eta = 0.980 falling to about 1 per cent near 1.005; curves may cross near eta = 1 because of the round-rod tail | Fig. 4 |
+| Width against cycle count at eta = 0.9975 | hyperbolic falls from about 1.4 at 25 cycles to about 0.19 at 72; round rods plateau near 0.6 above about 50 cycles | Fig. 5 |
+| Transmission against cycle count at eta = 0.9975 | hyperbolic flat at about 6 per cent; round rods fall from about 5.4 at 25 cycles to about 3.7 at 72 | Fig. 6 |
+| Resolution at high cycle count | round rods typically halve the resolution at 10 per cent height; the penalty is smaller if width is taken at 25 or 50 per cent | text, Figs. 3 and 5 |
+| Transmission at high resolution | reduced about twofold for round rods, varying strongly with eta | text |
+| Low-eta transmission | hyperbolic independent of cycle count; round rods lose a little as cycles grow | text |
+
+All values are read off plotted curves; the paper tabulates nothing, so any comparison is to
+plotting accuracy at best.
+
+### What Einzel reproduces, and what it does not
+
+**Today.** Round rods with a solved cross-section field and cut-cell rod surfaces
+(`quadrupole-rf`, ratio set by `rodRatio`, default 1.1468; Denison's ratio is itself
+reproduced above), sinusoidal RF and DC on the rod pairs in one basis solve, an ion
+launched anywhere across the entrance, and a two-dimensional treatment with no fringe
+field, which is exactly the paper's. The stability-band width against U/V is already
+measured by bisection (`docs/optimisation.md`, "transmission against resolution"), and the
+band edges are the same physics as the peak.
+
+**With a workaround.** The RF phase at entry has no ensemble spread: the cloud has no
+time-of-birth distribution (confirmed in `CloudDocument`; nothing in `src` carries an
+entry time). But `drivePhase` is an expression, so adding a parameter `entryPhase` to all
+four rods and scanning it with `einzel scan` gives transmission as a function of entry
+phase, one ion per point; the phase average is then the mean of that column. A mass scan
+is a V scan at fixed U/V (q goes as V/m), so peak shape is a transmission-against-V scan
+repeated over phases. Cycle count is a detector position. Aperture radius is the cloud's
+transverse spread, but that is Gaussian where the paper's entrance is a disc.
+
+**Blocked, or only approximately met.**
+- *Hyperbolic electrodes in a cross-section.* The only hyperbolic bodies are the polygon
+  rods of the linear ion trap templates and the analytic `idealQuadrupoleRf`; there is no
+  hyperbolic quadrupole template with housing. The analytic element is the paper's
+  hyperbolic case exactly (no solve), so it is the quickest route to the hyperbolic curves,
+  but it has no rods to strike.
+- *A peak-shape figure of merit.* `transmission` and the arrival-time `resolvingPower`
+  exist; there is no width at 10, 25 or 50 per cent of a mass peak, and no tail measure.
+  A scan returns a curve, so these can be computed outside the engine, not inside a study.
+- *The rejection rule.* The paper discards an ion when its radius exceeds r0; Einzel loses
+  it on a rod surface, which is farther than r0 along the diagonals. A small difference at
+  round-rod stability edges, but not none.
+- *Ensemble size.* 1e5 to 2e5 ions per point over 50 to 80 points is cheap for the
+  trajectory path here (tens of milliseconds a point in the first look below), so size is
+  not the obstacle; phase spread is.
+
+### A first look, not a result
+
+Round rods at the paper's 1.148 r0 (the template's `rodRatio`), eta = 0.985, 48 RF cycles,
+`quadrupole-rf` rescaled so that m/z 500 at 1 MHz, 10 eV, has the same cycle count as the
+paper's m/z 40 (cycles are the governing variable). One ion per point, launched at rest
+1 mm off axis on a diagonal, **40 entry phases** per mass point, **17 mass points** from
+q = 0.660 to 0.740 in steps of 0.005. Mean transmission over phase is zero below q = 0.690
+and above 0.710, with a single peak of 7.5 per cent (3 of 40 phases) at q = 0.700 and
+2.5 and 5.0 per cent either side. That places the peak where a filter at eta = 0.985
+should put it and shows it a few grid points wide, which is consistent with the paper's
+width near 0.7 m/z at this eta (resolution of order 50 to 60), but the grid is too coarse
+to say more. **It is not a comparison**: one radius, zero transverse speed and 40 samples
+mean the 7.5 per cent is a count of 3, the paper's 13 per cent is for a 0.35 r0 disc, and
+no width was extracted. It only shows the workaround runs in seconds.
+
+### What a full reproduction would take
+
+In order of how much each unlocks: **(1)** an RF-phase spread on a cloud (a time-of-birth
+distribution, or a `drivePhase` drawn per ion), since the paper's central averaging is over
+phase and everything below depends on it; **(2)** a peak-width figure of merit at a stated
+fraction of height, plus a low-mass-tail measure, which is what the paper's headline
+(factor-of-two resolution loss, a tail) is about; **(3)** a hyperbolic-rod cross-section
+template with housing, or an `idealQuadrupoleRf` that can stop ions at r0, for the baseline
+curves; **(4)** a uniform-disc entrance in the cloud; **(5)** a rejection radius option. The
+peak shift of the round-rod trailing edge needs only (1) to (3).
+
+## 9. Quadrupole ion trap: three-program comparison (Forbes 1999)
+
+Forbes, Sharifi, Croley, Lausevic and March, "Simulation of ion trajectories in a quadrupole ion
+trap: a comparison of three simulation programs", *J. Mass Spectrom.* **34**, 1219-1239 (1999).
+Full text in `papers/` (gitignored, Wiley). The only cross-code comparison for a quadrupole ion
+trap this project has, and the closest thing to the SIMION tier §19 asks for that is available
+without a licence: the same problem run in ITSIM 4.1 and ISIS (both evaluating the ideal
+quadrupole directly) and SIMION 6.0 (a refined potential array at 0.044 mm per grid unit), with
+the results tabulated.
+
+### What the paper did, and what it states
+
+- **Geometry: the ideal trap only**, r0 = 10 mm, z0 = 7.071 mm, r0² = 2z0². Its SIMION array has
+  holes in both endcaps and an ion gate in front of the entrance, but **no hole radius is
+  stated**, and **no stretched geometry was simulated** - it notes that ITSIM and ISIS can model
+  one. So the paper supplies no provenance for the template's hole radius or stretch, both of
+  which stay unsourced (`device-templates.md`, "Holes in the endcaps").
+- **Single-ion, collision-free comparison** (tables 1 and 2): 1.1 MHz, phase zero, q_z = 0.400,
+  a = 0, m/z 100, start at 0.5 mm on each axis, velocity (0, 200, -100) m/s in (x, y, z), 25 µs.
+  The ring potential is written as `U - V cos(Omega t + phi)`, and the voltages quoted elsewhere
+  (495 V zero-to-peak for q_z = 0.4 at m/z 100; 371.317 V for 0.3) agree with
+  `q_z = 4eV / (m Omega² r0²)`.
+- **Collisional comparisons** (table 3, plates 2-3): one m/z 100 ion at q_z 0.4 in 15 mTorr of
+  helium for 1 ms, Langevin in ISIS and ITSIM (polarisability 0.20495 Å³, 493 K; 149 and 151
+  collisions), hard-sphere in ITSIM (50 Å²) against SIMION's velocity-damping model. Shown as
+  plotted curves only.
+- **Injection** (table 4, table 5, figure 15): sixteen ions captured where SIMION flew them past
+  the entrance endcap, then flown in all three codes for 50 µs at 15 mTorr with a +250 V pulse on
+  the exit endcap; trapping efficiency 62 / 75 / 81 percent (SIMION / ISIS / ITSIM), and the
+  phase-angle trapping windows of figure 15.
+
+### The checkable numbers, and what Einzel gets
+
+Run on the `paul-trap` template scaled whole to r0 = 10 mm (gap, ring and endcap thickness by
+2.5, so the truncation is the shipped one), ring driven as the paper's `-V cos`,
+`PaulTrapForbesComparison.TheSingleIonComparison`:
+
+| | z min / max (mm) | r max (mm) | Ek max (eV) | f_z (kHz) | f_r (kHz) |
+| --- | --- | --- | --- | --- | --- |
+| SIMION (table 2) | -1.0631 / 1.0421 | 1.1477 | 1.6089 | 161.1 | 78.7 |
+| ITSIM (table 2) | -1.0206 / 1.0264 | 1.1475 | 1.5251 | 161.1 | 78.4 |
+| ISIS (table 2) | -1.0100 / 1.0000 | 1.1390 | 1.5298 | 161.0 | 78.4 |
+| Mathieu at q_z = 0.400 | | | | 160.911 | 78.403 |
+| ideal field, integrated here (RK4, 0.5 ns) | -0.5229 / 0.5242 | 0.9119 | 0.5405 | | |
+| **Einzel, solved trap** | **-0.5227 / 0.5242** | **0.9120** | **0.5427** | **161.02** | **78.43** |
+| Einzel, at its own q_eff = 0.40031 (r0_eff 9.9961 mm) | | | | 161.045 predicted | 78.465 predicted |
+
+- **The secular frequencies reproduce.** Einzel's lines are Mathieu's at the q the solved field's
+  curvature implies, to 0.03 kHz (asserted to 0.1 kHz; the whole millisecond is flown once and its
+  first 25 us give the excursions); the truncation makes r0_eff 0.04 percent small, which is worth
+  +0.13 kHz against the nominal q. The three codes agree with each other to 0.1 kHz.
+- **The paper's own frequency claim does not add up**: it states the theoretical axial line as
+  160.91142 kHz and the codes as within 0.01 percent of it, while reporting 161.1, which is
+  0.12 percent above. Einzel's ideal-geometry answer, 161.02, sits between; a 25 µs record cannot
+  resolve either difference (its resolution is 40 kHz) and the paper took its lines from a 1 ms
+  record (figure 13).
+- **The tabulated excursions do not reproduce - and neither does the ideal field.** Integrating
+  the ideal quadrupole directly from table 1's starting point gives half a millimetre of axial
+  excursion and 0.54 eV peak energy; all three codes report about a millimetre and 1.5 eV, and
+  1.15 mm radially against 0.91. Einzel agrees with the ideal field to under a micrometre
+  (worst excursion 0.26 um; asserted under 1 um). With the drive sign flipped the ideal field
+  gives 0.78 mm and 0.85 eV - closer, and still not the table - and Einzel flown with that sign
+  agrees with it too (0.36 um, asserted). So something in table 1 is not what the codes were given (the starting point, the
+  velocity units, or the phase), and the extracted text cannot say which. **Recorded as a
+  disagreement with both sides stated**; it is not tuned away, and the test asserts it stays
+  visible.
+- **What a real trap would have shown**: the same run with holes of 0.175 of the endcap radius
+  in both endcaps (1.49 mm holes at this scale, 4.76 radial spacings of its mesh) and a 0.107 stretch gives
+  f_z = 141.34 kHz and f_r = 69.30 kHz, **12 percent below** the ideal trap's at the same volts
+  - r0_eff 10.63 mm, and both lines are Mathieu's at that radius to 0.02 kHz (asserted to 0.1). None of the three codes as run could see that;
+  SIMION could have, had the paper reported its holed geometry's numbers.
+
+### What is not reproduced, and what is blocked
+
+- **The collisional comparisons** are plotted, not tabulated, apart from the collision counts;
+  the Langevin rate at the stated pressure, polarisability and temperature is a closed form this
+  engine already checks (`pressure.md`), but matching curves read off a plate is not a
+  comparison worth the name.
+- **The injection study** needs ions launched from *outside* the trap through the entrance hole
+  and a pulsed exit endcap. The template now has the hole and a sequence could carry the pulse;
+  what is missing is the ion gate geometry, the hole radius, and the exact starting states, of
+  which table 4 gives sixteen. The sixteen-ion trapping fractions disagree between the codes by
+  19 points and the paper itself warns against reading them, so they would not discriminate
+  anyway.
+- **The stretched-trap and hole numbers** a real instrument needs are not in this paper. What
+  the unsourced 0.175 holes and 0.107 stretch do to the ejection edge is measured in
+  `device-templates.md` ("The edge measured on an ensemble"): the holes move it out 0.0120 of
+  q_eff and the stretch brings back 0.0030 of that. Neither figure is a prediction for a named
+  instrument until the hole radius and the stretch are sourced.

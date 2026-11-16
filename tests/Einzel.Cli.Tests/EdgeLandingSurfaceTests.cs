@@ -71,22 +71,22 @@ public sealed partial class EdgeLandingSurfaceTests(ITestOutputHelper output) : 
     }
 
     /// <summary>
-    /// A 0.15 document validates under this build to the same model as the 0.16 document
+    /// A 0.15 document validates under this build to the same model as the current document
     /// without the key, and both land: the default is a property of the build, not of the
     /// version a document names (the version keys field solves, which have not changed).
     /// </summary>
     [Fact]
     public void AVersion015DocumentMeansWhatThisBuildMeans()
     {
-        var old = ModelValidator.Validate(ModelJson.Parse(Model(null).Replace("\"0.16\"", "\"0.15\"", StringComparison.Ordinal)), null, _root);
+        var old = ModelValidator.Validate(ModelJson.Parse(Model(null).Replace("\"0.15-esibd.2\"", "\"0.15\"", StringComparison.Ordinal)), null, _root);
         var current = ModelValidator.Validate(ModelJson.Parse(Model(null)), null, _root);
 
         Assert.True(old.IsValid && current.IsValid);
-        Assert.Equal("0.16", ModelSchema.CurrentVersion);
+        Assert.Equal("0.15-esibd.2", ModelSchema.CurrentVersion);
         Assert.Contains("0.15", ModelSchema.SupportedVersions);
         Assert.True(old.Model!.LandOnEdges);
         Assert.Equal(
-            old.Model.ToString().Replace("SchemaVersion = 0.15", "SchemaVersion = 0.16", StringComparison.Ordinal),
+            old.Model.ToString().Replace("SchemaVersion = 0.15", "SchemaVersion = 0.15-esibd.2", StringComparison.Ordinal),
             current.Model!.ToString());
     }
 
@@ -229,7 +229,7 @@ public sealed partial class EdgeLandingSurfaceTests(ITestOutputHelper output) : 
     // A rod driven by a 1 MHz square wave beside a 10 V ion's path: ten periods, twenty edges.
     private static string Model(string? edges) => $$"""
         {
-          "schemaVersion": "0.16",
+          "schemaVersion": "0.15-esibd.2",
           "name": "square rod",
           "ion": { "massToCharge": { "value": 100, "unit": "Da" }, "chargeNumber": 1 },
           "source": {

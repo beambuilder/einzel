@@ -317,10 +317,38 @@ public static class PoissonSolver2D
 
         work.Sweeps += PreSmooth;
 
-        var residual = new ScalarField2D(grid);
-        Residual(potential, rightHandSide, mask, residual);
+        Prolong(Correction(potential, rightHandSide, mask, coarseMask, coarsen, work, depth), potential, mask);
+        Smooth(potential, rightHandSide, mask, PostSmooth);
 
-        var coarseRhs = Restrict(residual, coarseMask);
+        work.Sweeps += PostSmooth;
+    }
+
+    /// <summary>The coarse-grid correction for one level of a V-cycle, in a frame of its own.</summary>
+    /// <remarks>
+    /// <para>
+    /// Split out of <see cref="VCycle"/> so that the coarse level's right-hand side is a local of
+    /// a frame that has returned by the time this level prolongs and smooths, whichever tier of
+    /// the JIT is running.
+    /// </para>
+    /// <para>
+    /// <b>It is not what fixed the peak, and that was measured.</b> With this frame inlined
+    /// back and <see cref="RestrictedResidual"/> kept, a first-tier plane build reads 135.57
+    /// bytes a node, the same as with both frames; with <see cref="RestrictedResidual"/> inlined
+    /// and this frame kept it reads 143.57. The coarse arrays this holds are alive through the
+    /// recursion either way, because the recursion works on them; the fine residual was the one
+    /// array that had no business there. <c>FirstTierMemoryTests</c> is the guard.
+    /// </para>
+    /// </remarks>
+    private static ScalarField2D Correction(
+        ScalarField2D potential,
+        ScalarField2D rightHandSide,
+        DirichletMask mask,
+        DirichletMask coarseMask,
+        Func<Grid2D, DirichletMask>? coarsen,
+        CycleWork work,
+        int depth)
+    {
+        var coarseRhs = RestrictedResidual(potential, rightHandSide, mask, coarseMask);
         var coarseCorrection = new ScalarField2D(coarseMask.Grid);
 
         // The coarse problem solves for the error, which is zero on every
@@ -330,10 +358,36 @@ public static class PoissonSolver2D
 
         VCycle(coarseCorrection, coarseRhs, coarseMask, coarsen, work, depth + 1);
 
-        Prolong(coarseCorrection, potential, mask);
-        Smooth(potential, rightHandSide, mask, PostSmooth);
+        return coarseCorrection;
+    }
 
-        work.Sweeps += PostSmooth;
+    /// <summary>
+    /// The fine level's residual, restricted onto the coarse grid, with the fine residual
+    /// itself dead by the time this returns.
+    /// </summary>
+    /// <remarks>
+    /// <b>A frame of its own, because the residual must not live across the recursion.</b>
+    /// Written inline in <see cref="VCycle"/>, the fine residual was a local of the frame that
+    /// goes on to recurse into every coarser level, and whether it stayed reachable through
+    /// that recursion was the JIT's choice rather than the code's: optimised code ends it at
+    /// its last use, while first-tier code - what every method runs as until it has been
+    /// called often enough to be recompiled, and what Debug always runs - keeps every local
+    /// alive to the end of its method. So the deepest instant of a cycle held one more array
+    /// of the fine grid's size than the memory statement charges, for exactly as long as the
+    /// solver had not yet been promoted: 130 KiB on a 129 x 129 self-field, read by
+    /// <c>SelfFieldMemoryTests</c> as 67 bytes a node against 62 on a slow runner, and
+    /// reproduced every time with call counting switched off. Here the array is a local of a
+    /// frame that has returned before the recursion starts, so no tier can keep it.
+    /// <c>FirstTierMemoryTests</c> measures a solve in a child process with promotion switched
+    /// off, so putting this back inline fails on every machine rather than on a slow one.
+    /// </remarks>
+    private static ScalarField2D RestrictedResidual(
+        ScalarField2D potential, ScalarField2D rightHandSide, DirichletMask mask, DirichletMask coarseMask)
+    {
+        var residual = new ScalarField2D(potential.Grid);
+        Residual(potential, rightHandSide, mask, residual);
+
+        return Restrict(residual, coarseMask);
     }
 
     /// <summary>

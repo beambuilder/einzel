@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "0.15",
+  "name": "magnetic-sector-180",
+  "description": "Closed form: t = 15 mm / v + pi m / (|q| B). A hard-edge 0.5 T magnet fills x > 0 (a region with no fringe - the sharp cut-off of first-order beam optics). An m/z 100 cation accelerated through 1 kV starts 5 mm in front of the edge going +x, drifts in, turns through a semicircle of radius r = m v / (|q| B) = 91.057 mm, leaves the edge 2r = 182.114 mm away going -x, and drifts 10 mm back to the detector plane x = -10 mm. It is launched away from its detector, which the validator accepts because a magnet can turn an ion round although it does no work on it. The 15 mm of straight flight is taken as an exact field-free drift and the magnet is integrated, so the example checks both that the drift stops at the magnet's face and that the ion lands on that face. With B ignored the ion never comes back. B is declared in millitesla (500 mT) to exercise the unit; the expectation is arithmetic this engine had no part in.",
+  "ion": {
+    "massToCharge": { "value": 100.0, "unit": "Da" },
+    "chargeNumber": 1
+  },
+  "source": {
+    "position": { "value": [-5.0, 0.0, 0.0], "unit": "mm" },
+    "direction": { "value": [1, 0, 0] },
+    "accelerationPotential": { "value": 1000.0, "unit": "V" }
+  },
+  "fields": [
+    {
+      "type": "uniformMagnetic",
+      "fluxDensity": { "value": [0.0, 0.0, 500.0], "unit": "mT" },
+      "region": {
+        "minX": { "value": 0.0, "unit": "mm" },
+        "maxX": { "value": 500.0, "unit": "mm" },
+        "minY": { "value": -500.0, "unit": "mm" },
+        "maxY": { "value": 500.0, "unit": "mm" },
+        "minZ": { "value": -50.0, "unit": "mm" },
+        "maxZ": { "value": 50.0, "unit": "mm" }
+      }
+    }
+  ],
+  "detector": {
+    "planePoint": { "value": [-10.0, 0.0, 0.0], "unit": "mm" },
+    "normal": { "value": [1, 0, 0] }
+  },
+  "transport": {
+    "maximumFlightTime": { "value": 50.0, "unit": "us" },
+    "relativeTolerance": 1e-11
+  }
+}

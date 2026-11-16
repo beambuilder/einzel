@@ -89,7 +89,10 @@ git push origin esibd
 
 If the upstream diff touches the solver-behaviour version, `SPEC.md` or anything
 under `src/Einzel.Fields` or `src/Einzel.Transport`, the reference corpus is
-re-run before the new base is tagged. Open topic branches are rebased on the
+re-run before the new base is tagged. If it touches
+`src/Einzel.Fields/Magnetic`, check that B still has no clock: `TimeShiftedField.Shift`
+hands the magnet on unshifted, and `MagneticFieldHasNoClockTests` fails when that stops
+being true. Open topic branches are rebased on the
 updated `esibd` (or `main`, for upstream work) the same day.
 
 ## Building and testing
@@ -149,6 +152,46 @@ and justified in the commit.
 Newest first. One entry per merged pull request: the finding, the measurement,
 the PR number.
 
+- **One cross-platform shell and an installer, `einzel probe`, a uniform magnetic
+  field, and a fork-marked schema number.** Upstream sync `60af6ec` to `cd1b168`
+  (upstream PRs #66 to #73). What upstream brought: the shell is Avalonia and runs
+  where the engine runs, and the WPF project is gone (#67, #68); a Windows installer,
+  a release workflow, the update check of an installed copy (`Einzel.Update`), a
+  first-lens tutorial and an index of every warning code held to the source by a
+  test (#69); `einzel probe` for the potential and E at a point or along a line and
+  `export --composite` for the summed field (#70); a uniform magnetic field element
+  with the v x B force in the single-ion integrator, three closed-form examples and
+  a refusal on every path that cannot honour B (#71, upstream schema 0.15); a V-cycle
+  that releases its residual arrays earlier, stated at 135.25 bytes a plane node
+  where it was 143.25 (#72); endcap holes in the Paul trap template (#73). Ten
+  conflict hunks in seven files, each kept on both sides; in `DormandPrince54.Step`
+  the fork's edge landing (the two stages at c = 1 one ulp before the edge) and
+  upstream's magnet rule (every stage reads B from the side of a magnet face the
+  step started on) are independent and now both apply. **The schema number is
+  `0.15-esibd.2`**: upstream's number, then the count of the fork's additions on top
+  of it (1 the waveform object, 2 `transport.edges`), because the fork's 0.15 and
+  upstream's 0.15 had come to mean different things. 0.14, 0.15 with either meaning
+  and the fork's 0.16 still read; an upstream build refuses the new number at
+  `/schemaVersion` (Amendment 71,
+  [model format](model-format.md#versioning)). Three places where the two trees
+  met without a textual conflict, fixed here: `DrivenMagnetizedField` forwards
+  `NextEdgeAfter`, without which a rectangular drive beside a magnet reported no
+  edges and flew without landing on them; an `einzel fly` row with a birth time on
+  a model with a magnet was refused as "a time-shifted sequence leg" and now flies,
+  the drive shifted to the row's birth and the magnet put back around it
+  (`TimeShiftedField.Shift`; B has no clock); and `fly.integrator-failures` has its
+  entry in [warning codes](warning-codes.md). `MagnetWithDrivenFieldTests`,
+  `MagneticFieldHasNoClockTests` (fails the day a magnetic field gains a time
+  argument, which `Shift` would pass on unshifted) and `ForkSchemaVersionTests`
+  pin them: fourteen mutations, each caught. Two fork tests that named the
+  exception a quadro-logarithmic field throws on its axis follow upstream's
+  new `PointRefusedException`. Suite: 2464 tests before, 2705 after, 0
+  failures, 1 skipped. Three upstream tests are sensitive to load on the
+  development machine and can fail a single run: two live-set memory tests
+  new in #72 (1.02 limit, 1.02 to 1.05 seen) and the wall-clock
+  `SweepSolveCostTests`. No field solve changed and
+  `SolverBehaviourVersion` stays 2. `einzel probe` and `export --composite`
+  do not read the field cache, so a probe of a volume model solves again.
 - **A study's memory is billed per evaluation in flight, and a point that
   re-weights the nominal channels is not multiplied by it.** Upstream sync
   `de73ec8` to `60af6ec` (upstream PRs #64 and #65). #64 multiplies a study's

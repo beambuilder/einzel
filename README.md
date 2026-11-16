@@ -7,7 +7,7 @@ filters, ion funnels, travelling-wave guides, multipole guides, linear and 3-D i
 orthogonal accelerators, reflectrons and multi-reflection time-of-flight analysers —
 across nine decades of pressure, from a single ion in vacuum to a density field in a
 millibar of gas. It is a C# engine with a scriptable command line, a Python extension
-surface, a live-session server for AI agents, and a Windows viewport.
+surface, a live-session server for AI agents, and a windowed viewport.
 
 **Two ideas shape everything else.** It is *open*, so a student, a collaborator, or a
 reviewer can run the same model without a license or a seat. And it is designed *from the
@@ -17,12 +17,26 @@ instruction rather than a complaint.
 
 ## Status
 
-**Version 26.1.0.** Portable builds carry their own runtime: unpack and run, no installer
-and no updater. Or build from source, below. Versions are `YY.feature.patch` - two-digit
-year, a feature number, a patch number - and `release-notes/` explains the scheme and
-carries the notes for each release.
-The engine, the command line, the extension surface, the live-session server and part of
-the Windows shell are built and tested. See [`SPEC.md`](SPEC.md) for every requirement's
+**Version 26.1.0 is the version in the tree, and there is no public release yet**, so today the way to
+get Einzel is to build it from source, below. When a release is published on
+[GitHub Releases](https://github.com/maccoss/einzel/releases) it will offer:
+
+- **Windows: an installer**, `MacCossLab.Einzel-stable-Setup.exe`. Per-user, no administrator rights,
+  .NET included. It is **not code-signed yet, so SmartScreen warns on first run: click More info, then
+  Run anyway.** It installs into `%LocalAppData%\MacCossLab.Einzel\current`, adds Start menu and desktop
+  shortcuts to the window, and puts `einzel` on your user PATH for terminals opened afterwards. The window
+  checks for a newer release once when it starts and offers it; nothing is downloaded without a click, and
+  the command line never contacts the network. Uninstall from *Settings > Apps*.
+- **Every platform: one portable archive** (Windows, Linux and macOS, x64 and arm64), holding `einzel`,
+  `einzel-mcp` and `einzel-shell`. The archives are **framework-dependent**: install the .NET 10 runtime
+  first (check with `dotnet --list-runtimes` for `Microsoft.NETCore.App 10.x`). On Linux this is the way
+  to install; there is no installer and no updater there.
+
+[`docs/install.md`](docs/install.md) has the details. Versions are `YY.feature.patch` - two-digit year, a
+feature number, a patch number - and `release-notes/` explains the scheme and carries the notes for each
+release.
+The engine, the command line, the extension surface, the live-session server and the
+cross-platform shell are built and tested. See [`SPEC.md`](SPEC.md) for every requirement's
 status with the measurement behind it, and for what is being worked on next.
 
 ## Build and run
@@ -40,8 +54,10 @@ dotnet test
 The command line lands in `src/Einzel.Cli/bin/Release/net10.0/einzel` (`einzel.exe` on
 Windows). Put that directory on your `PATH`, or run it by full path.
 
-Everything except the Windows shell builds and runs on Linux and Windows alike, and
-continuous integration builds both on every change.
+Everything builds and runs on Linux and Windows, and continuous integration builds and
+tests both on every change. The shell (`src/Einzel.Shell`, `einzel-shell`) is Avalonia on
+plain `net10.0`, so it is not tied to Windows; the test CI runs on Windows and Linux only, so macOS is untested.
+A first walk through the tools is in [`docs/tutorial-first-lens.md`](docs/tutorial-first-lens.md).
 
 ## Five minutes
 
@@ -75,21 +91,21 @@ bounds, `einzel new --from-template quadrupole` starts a different device, and
 
 ```bash
 einzel --help          # every command
-einzel templates       # 19 device templates
-einzel examples        # 39 reference models, each checked against a closed form
+einzel templates       # the shipped device templates
+einzel examples        # reference models, each checked against a closed form
 einzel doctor          # what this installation can and cannot do
 ```
 
 ## Three surfaces, not a stack
 
-The command line, the live-session server and the Windows shell are peers. All three drive
+The command line, the live-session server and the shell are peers. All three drive
 the same command objects, so nothing exists in one that cannot be reached from another.
 
 | | |
 | --- | --- |
 | `einzel` | the primary surface: JSON on every verb, results on stdout and diagnostics on stderr, a distinct exit code per failure class, no network call in any path |
 | `einzel-mcp` | a Model Context Protocol server for an agent working alongside a person on one model, with a shared attributed journal and undo |
-| `einzel-shell` | a Windows viewport over the same model: parameter tree with live validation, 3-D geometry and field, and a journal that records each action as the `einzel` command that would reproduce it |
+| `einzel-shell` | a cross-platform window (Avalonia) over the same model: a parameter tree edited through the shared journal with undo, a 3-D viewport you can orbit, pan and zoom, panels for results, regime, sequence, project and extensions, and a journal that records each action as the `einzel` command that would reproduce it |
 
 ## What is in the box
 
@@ -106,8 +122,11 @@ anything; direct-sum and particle-in-cell space charge. Which description applie
 computed and reported, not assumed.
 
 **Devices as data.** A device is a JSON document, not a class: parameters with units and
-bounds, expressions checked dimensionally, electrodes as shapes. Nineteen templates ship,
-from an einzel lens to a curved C-trap to the published Astral analyser.
+bounds, expressions checked dimensionally, electrodes as shapes. Templates ship for the
+einzel lens, quadrupole and multipole guides, ion funnels (including the PNNL one), a
+travelling-wave guide, Paul, Kingdon, rectilinear and linear ion traps (2-D and 3-D, and the Stellar's), a curved
+C-trap, an orbital analyser, planar and Astral-style multi-reflection analysers (full size and one fifth), and
+the timsTOF-style mobility tunnel, front end and tandem (`einzel templates` lists them).
 
 **Analysis.** Arrival-time peaks, resolving power, transmission itemised by the surface
 each ion struck, emittance, turn-around time, secular frequency spectra. Tolerance Monte
@@ -133,6 +152,9 @@ for the bare number, which is deliberate.
 | | |
 | --- | --- |
 | [`SPEC.md`](SPEC.md) | the living specification: every requirement, its status, the evidence, and what to do next |
+| [`docs/tutorial-first-lens.md`](docs/tutorial-first-lens.md) | a first model, start to finish |
+| [`docs/coming-from-simion.md`](docs/coming-from-simion.md) | for someone who knows SIMION: what maps to what |
+| [`docs/warning-codes.md`](docs/warning-codes.md) | what each warning and error code means and what to do about it |
 | [`docs/`](docs/README.md) | architecture, model format, device templates, numerics, pressure, rendering, extensions, the CLI, and the lessons from bugs that presented as physics |
 | [`einzel-software-spec-r06.html`](einzel-software-spec-r06.html) | the original design document, kept unchanged as the record of intent |
 

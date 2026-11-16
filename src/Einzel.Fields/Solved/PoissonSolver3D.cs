@@ -510,13 +510,39 @@ public static class PoissonSolver3D
             return;
         }
 
-        var residual = new ScalarField3D(grid);
-        Residual(potential, rightHandSide, mask, residual);
+        Prolong(Correction(potential, rightHandSide, mask, coarsen, work, depth), potential, mask);
 
-        var coarseGrid = grid.Coarsen();
+        for (var sweep = 0; sweep < PostSmooth; sweep++)
+        {
+            Smooth(potential, rightHandSide, mask);
+        }
+
+        work.Sweeps += PostSmooth;
+    }
+
+    /// <summary>
+    /// The coarse-grid correction for one level of <see cref="Cycle"/>, in a frame of its own.
+    /// </summary>
+    /// <remarks>
+    /// A frame of its own so the coarse level's arrays are gone by the time this level
+    /// prolongs and smooths, whichever tier of the JIT is running; see
+    /// <see cref="PoissonSolver2D"/>'s <c>Correction</c>. The frame that matters for the peak is
+    /// <see cref="RestrictedResidual"/>'s, which makes the fine residual dead before the
+    /// recursion starts: inlined back, a first-tier sphere reads 47.94 bytes a node against
+    /// 45.25, while inlining this one back changes nothing. <c>FirstTierMemoryTests</c> guards it.
+    /// </remarks>
+    private static ScalarField3D Correction(
+        ScalarField3D potential,
+        ScalarField3D rightHandSide,
+        DirichletMask3D mask,
+        Func<Grid3D, DirichletMask3D>? coarsen,
+        CycleWork work,
+        int depth)
+    {
+        var coarseGrid = mask.Grid.Coarsen();
         var coarseMask = coarsen?.Invoke(coarseGrid) ?? Project(mask, coarseGrid);
 
-        var coarseResidual = Restrict(residual, coarseGrid, coarseMask);
+        var coarseResidual = RestrictedResidual(potential, rightHandSide, mask, coarseGrid, coarseMask);
         var correction = new ScalarField3D(coarseGrid);
 
         Cycle(
@@ -527,14 +553,21 @@ public static class PoissonSolver3D
             work,
             depth + 1);
 
-        Prolong(correction, potential, mask);
+        return correction;
+    }
 
-        for (var sweep = 0; sweep < PostSmooth; sweep++)
-        {
-            Smooth(potential, rightHandSide, mask);
-        }
+    /// <summary>The fine residual restricted onto the coarse grid, the fine residual dead on return.</summary>
+    private static ScalarField3D RestrictedResidual(
+        ScalarField3D potential,
+        ScalarField3D rightHandSide,
+        DirichletMask3D mask,
+        Grid3D coarseGrid,
+        DirichletMask3D coarseMask)
+    {
+        var residual = new ScalarField3D(mask.Grid);
+        Residual(potential, rightHandSide, mask, residual);
 
-        work.Sweeps += PostSmooth;
+        return Restrict(residual, coarseGrid, coarseMask);
     }
 
     private static void Smooth(ScalarField3D potential, ScalarField3D rightHandSide, DirichletMask3D mask)

@@ -279,6 +279,18 @@ public enum CompiledFieldKind
     Solved2D,
 
     /// <summary>
+    /// A uniform magnetic flux density, optionally bounded to a hard-edge box: the
+    /// velocity-dependent half of the Lorentz force.
+    /// </summary>
+    /// <remarks>
+    /// Named for the field rather than for any device - a sector, a Wien filter and a
+    /// Penning cell are all this element beside others, which is invariant 2. It adds no
+    /// electric field and no potential, and only single-ion trajectory integration honours
+    /// it; every other transport path refuses a model that declares one.
+    /// </remarks>
+    UniformMagnetic,
+
+    /// <summary>
     /// The same, in three dimensions, for a device with no symmetry to exploit.
     /// </summary>
     Solved3D,
@@ -532,6 +544,9 @@ public sealed record CompiledField
 
     /// <summary>Uniform only: the field vector, in volts per metre.</summary>
     public Vec3 Field { get; init; }
+
+    /// <summary>Uniform magnetic only: the flux density B, in tesla.</summary>
+    public Vec3 FluxDensity { get; init; }
 
     /// <summary>Half-space only: a point on the boundary plane, in metres.</summary>
     public Vec3 PlanePoint { get; init; }

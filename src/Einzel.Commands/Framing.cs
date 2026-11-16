@@ -22,9 +22,10 @@ namespace Einzel.Commands;
 /// version framed half the diagonal of the bounding box, which is the same whatever the view
 /// and so never jumps when the camera turns - and put a 767 mm by 30 mm mirror pair in the
 /// middle third of the picture, because a long thin instrument's diagonal is its length and
-/// its screen height was sized to that too. The window offers named views rather than free
-/// rotation, so nothing is gained by being turn-invariant, and the WPF viewport fits its
-/// projected extent. So the box is measured in the view's own coordinates.
+/// its screen height was sized to that too. The window frames one view rather than every
+/// view at once - a named view and Fit frame what that view sees, and an orbit keeps the
+/// scale it was given rather than refitting - so nothing is gained by being turn-invariant.
+/// The box is measured in the view's own coordinates.
 /// </para>
 /// </remarks>
 public sealed record Framing(

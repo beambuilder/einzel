@@ -262,6 +262,7 @@ public sealed class CostAndProvenanceTests : IDisposable
         // in the part it did not.
         Assert.Equal(0, Run("init", _root).ExitCode);
         Assert.Equal(0, Run("ext", "register", "shortest", "--project", _root).ExitCode);
+        ExtensionRoom.Give(_root, "shortest");
 
         var model = Path.Combine(_root, "models", "quad.json");
         Assert.Equal(0, Run("new", model, "--from-template", "quadrupole").ExitCode);

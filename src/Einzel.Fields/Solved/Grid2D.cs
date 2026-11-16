@@ -138,8 +138,20 @@ public sealed class Grid2D
         var countY = intervalsY ?? (int)BitOperations.RoundUpToPowerOf2(
             (uint)Math.Max(2, (int)Math.Ceiling((maxY - minY) / spacingX)));
 
-        return new Grid2D(minX, minY, spacingX, (maxY - minY) / countY, intervalsX + 1, countY + 1);
+        return new Grid2D(minX, minY, spacingX, (maxY - minY) / countY, intervalsX + 1, countY + 1)
+        {
+            _declaredMaxX = maxX,
+            _declaredMaxY = maxY,
+        };
     }
+
+    // The far corner as the box declared it. The last node sits at min + intervals * spacing,
+    // which is min + fl(max - min) and can land an ulp short of max (a box from -12.7 mm to
+    // 0.3 mm does). A point exactly on the declared face is in the domain - the face node holds a
+    // solved value and the interpolant's stencil is clamped there - so containment reaches
+    // whichever of the two is further out. NaN, which compares false, when not built from a box.
+    private double _declaredMaxX = double.NaN;
+    private double _declaredMaxY = double.NaN;
 
     /// <summary>x of node 0, in metres.</summary>
     public double OriginX { get; }
@@ -212,8 +224,15 @@ public sealed class Grid2D
     /// <param name="x">x, in metres.</param>
     /// <param name="y">y, in metres.</param>
     /// <returns><see langword="true"/> when inside or on the boundary.</returns>
+    /// <remarks>
+    /// For a grid built by <see cref="OverBox(double, double, double, double, int, int?)"/> the far
+    /// boundary is the declared face or the last node, whichever is further out: the two can
+    /// differ by the rounding of one subtraction and one addition, and a point on the declared
+    /// face must not read as outside the domain it bounds.
+    /// </remarks>
     public bool Contains(double x, double y) =>
-        x >= OriginX && x <= MaxX && y >= OriginY && y <= MaxY;
+        x >= OriginX && (x <= MaxX || x <= _declaredMaxX)
+        && y >= OriginY && (y <= MaxY || y <= _declaredMaxY);
 
     /// <summary>Whether this grid can be coarsened by a further factor of two.</summary>
     public bool CanCoarsen => (CountX - 1) % 2 == 0 && (CountY - 1) % 2 == 0

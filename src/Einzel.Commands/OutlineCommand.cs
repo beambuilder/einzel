@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Einzel.Core.Model;
 using Einzel.Core.Units;
 using Einzel.Io;
@@ -295,12 +297,16 @@ public static class OutlineCommand
 
         var unit = string.IsNullOrWhiteSpace(parameter.Unit) ? string.Empty : $" {parameter.Unit}";
 
+        // Invariant, and said so at the site rather than left to the build flag: the CLI runs
+        // globalization-invariant, but the shells turn that off because a window cannot run
+        // without it, and there a German locale printed this as "0,1 to 20 kV" beside a box
+        // that parses "0.1" and refuses "0,1".
         return (parameter.Minimum, parameter.Maximum) switch
         {
             (null, null) => null,
-            ({ } low, null) => $"at least {low:G6}{unit}",
-            (null, { } high) => $"at most {high:G6}{unit}",
-            ({ } low, { } high) => $"{low:G6} to {high:G6}{unit}",
+            ({ } low, null) => string.Create(CultureInfo.InvariantCulture, $"at least {low:G6}{unit}"),
+            (null, { } high) => string.Create(CultureInfo.InvariantCulture, $"at most {high:G6}{unit}"),
+            ({ } low, { } high) => string.Create(CultureInfo.InvariantCulture, $"{low:G6} to {high:G6}{unit}"),
         };
     }
 }

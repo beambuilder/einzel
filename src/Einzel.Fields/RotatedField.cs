@@ -67,10 +67,16 @@ public sealed class RotatedField(
     /// </summary>
     public double Slope => _sin / _cos;
 
-    // World to the unrotated frame: rotate by minus the tilt about the axis. The same
-    // convention and the same arithmetic as Electrode3D.ToLocal, so a rotated field and a
-    // tilted box agree about which way a positive angle turns.
-    private Vec3 ToLocal(in Vec3 p)
+    /// <summary>A point in the world, in the unrotated field's frame.</summary>
+    /// <param name="p">The point, in metres.</param>
+    /// <returns>Where the unrotated field is asked about it.</returns>
+    /// <remarks>
+    /// Rotate by minus the tilt about the axis. The same convention and the same arithmetic as
+    /// Electrode3D.ToLocal, so a rotated field and a tilted box agree about which way a positive
+    /// angle turns. Public so that a caller asking whether a point is inside the unrotated
+    /// field's domain asks it of the very point this field evaluates there.
+    /// </remarks>
+    public Vec3 ToLocal(in Vec3 p)
     {
         if (!_rotates)
         {
@@ -83,6 +89,20 @@ public sealed class RotatedField(
             centreX + (dx * _cos) - (dz * _sin),
             p.Y,
             centreZ + (dx * _sin) + (dz * _cos));
+    }
+
+    /// <summary>A point in the unrotated field's frame, placed in the world.</summary>
+    /// <param name="p">The point, in metres.</param>
+    /// <returns>The world point <see cref="ToLocal"/> maps to <paramref name="p"/>.</returns>
+    public Vec3 FromLocal(in Vec3 p)
+    {
+        if (!_rotates)
+        {
+            return p;
+        }
+
+        var offset = ToWorld(new Vec3(p.X - centreX, p.Y, p.Z - centreZ));
+        return new Vec3(centreX + offset.X, offset.Y, centreZ + offset.Z);
     }
 
     // The inverse rotation, applied to a vector rather than a point.

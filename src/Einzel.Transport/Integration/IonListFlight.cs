@@ -51,7 +51,8 @@ public sealed record IonFlight
 /// <c>tob</c>): the row sees every drive and switch as they stand at its birth plus its own
 /// flight time. A row born at 0 flies the field itself, unwrapped, so it is the flight a
 /// single-ion run makes to the bit. A static field has no clock to shift and is flown as it
-/// is.
+/// is. A magnet beside a driven field is not shifted either (B has no clock): the
+/// drive is shifted and the magnet put back around it (<see cref="TimeShiftedField.Shift"/>).
 /// </para>
 /// <para>
 /// <b>One integration at the model's tolerance by default</b>, which is the ladder's first
@@ -144,7 +145,7 @@ public static class IonListFlight
         Func<TrajectoryRecorder>? record)
     {
         var flown = row.BirthTimeSeconds > 0.0 && field is ITimeVaryingField driven
-            ? new TimeShiftedField(driven, row.BirthTimeSeconds)
+            ? TimeShiftedField.Shift(driven, row.BirthTimeSeconds)
             : field;
 
         var seed = unchecked(gasSeed + index);

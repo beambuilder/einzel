@@ -1352,7 +1352,9 @@ public static class RunCommand
             // the result re-attaches to whatever else still matches.
             ModelPath = RunManifest.Portable(
                 Path.GetRelativePath(project.Root, validation.ModelPath)),
-            SchemaVersion = ModelJson.Parse(File.ReadAllText(validation.ModelPath)).SchemaVersion,
+            // From the read the run was made from, not a fresh one: see Execute. A valid
+            // outcome parsed the document, so it carries the version.
+            SchemaVersion = validation.SchemaVersion!,
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
             Solves = Fields.Solved.SolveHash.Of(model),
@@ -1612,7 +1614,9 @@ public static class RunCommand
             InputHashes = RunInputs.Checked(inputHashes, project.Root),
             ModelPath = RunManifest.Portable(
                 Path.GetRelativePath(project.Root, validation.ModelPath)),
-            SchemaVersion = ModelJson.Parse(File.ReadAllText(validation.ModelPath)).SchemaVersion,
+            // From the read the run was made from, not a fresh one: see Execute. A valid
+            // outcome parsed the document, so it carries the version.
+            SchemaVersion = validation.SchemaVersion!,
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
             Solves = Fields.Solved.SolveHash.Of(model),
@@ -1887,7 +1891,9 @@ public static class RunCommand
             // the result re-attaches to whatever else still matches.
             ModelPath = RunManifest.Portable(
                 Path.GetRelativePath(project.Root, validation.ModelPath)),
-            SchemaVersion = ModelJson.Parse(File.ReadAllText(validation.ModelPath)).SchemaVersion,
+            // From the read the run was made from, not a fresh one: see Execute. A valid
+            // outcome parsed the document, so it carries the version.
+            SchemaVersion = validation.SchemaVersion!,
             EngineVersion = EngineBuild.Version,
             SolverBehaviourVersion = EngineBuild.SolverBehaviourVersion,
             Solves = Fields.Solved.SolveHash.Of(model),
@@ -2127,6 +2133,18 @@ public static class RunCommand
     /// <exception cref="FileNotFoundException">The model file does not exist.</exception>
     public static ValidateOutcome Validate(string modelPath)
     {
+        var (full, text) = Read(modelPath);
+
+        return Validate(full, text);
+    }
+
+    /// <summary>Reads a model document once, as everything about one run must be of one text.</summary>
+    /// <param name="modelPath">Path to the model file.</param>
+    /// <returns>The full path, and the text as read.</returns>
+    /// <exception cref="ArgumentException"><paramref name="modelPath"/> is null or blank.</exception>
+    /// <exception cref="FileNotFoundException">The model file does not exist.</exception>
+    private static (string Full, string Text) Read(string modelPath)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
 
         var full = Path.GetFullPath(modelPath);
@@ -2136,7 +2154,12 @@ public static class RunCommand
             throw new FileNotFoundException($"model file not found: {full}", full);
         }
 
-        var text = File.ReadAllText(full);
+        return (full, File.ReadAllText(full));
+    }
+
+    /// <summary>Validates a model document already read.</summary>
+    private static ValidateOutcome Validate(string full, string text)
+    {
         var hash = ContentHash.OfText(text);
 
         ModelDocument document;
@@ -2197,14 +2220,20 @@ public static class RunCommand
     {
         ArgumentNullException.ThrowIfNull(project);
 
-        var validation = Validate(modelPath);
+        // ONE READ FOR THE WHOLE RUN. The file was read to validate and hash it, read again to
+        // compile what was run, and read a third time when the manifest was written, for its
+        // schema version - so an edit landing during a run gave a manifest whose hash was of
+        // one document beside a run of another, which is PRJ-3 broken at its root, and an
+        // edit that left the model invalid failed a run that had finished.
+        var (full, text) = Read(modelPath);
+        var validation = Validate(full, text);
 
         if (!validation.Valid)
         {
             return (null, validation);
         }
 
-        var document = ModelJson.Parse(File.ReadAllText(validation.ModelPath));
+        var document = ModelJson.Parse(text);
         var inputHashes = RunInputs.Capture(document, validation.ModelPath, project.Root);
         var model = ModelValidator.Validate(
             document, null, Path.GetDirectoryName(validation.ModelPath)).Model!;

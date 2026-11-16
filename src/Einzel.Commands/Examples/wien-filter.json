@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "0.15",
+  "name": "wien-filter",
+  "description": "Closed form: x(t) = v_d t + ((v0 - v_d)/w) sin(w t), solved for x = L. Crossed fields - 50 kV/m along +y and 0.5 T along +z - pass an ion moving along +x at v_d = E/B = 100 km/s undeflected, whatever its mass. This one is 20% too fast (m/z 100 accelerated through 7462.274 V, so v0 = 120 km/s): the magnetic push q v B outweighs the electric one q E, and the ion gyrates at w = |q| B / m about the E x B drift, arriving at the plane x = 50 mm after 0.4171350 us, 0.837 mm toward -y. With B ignored the electric field is transverse, x advances at v0, and the ion arrives at L / v0 = 0.4166667 us - 0.11% early, eleven hundred times the tolerance. The expectation is a root of the closed-form trajectory, found by Newton's method outside this engine. B is declared in gauss (5000 G) to exercise the unit.",
+  "ion": {
+    "massToCharge": { "value": 100.0, "unit": "Da" },
+    "chargeNumber": 1
+  },
+  "source": {
+    "position": { "value": [0.0, 0.0, 0.0], "unit": "mm" },
+    "direction": { "value": [1, 0, 0] },
+    "accelerationPotential": { "value": 7462.27416035578, "unit": "V" }
+  },
+  "fields": [
+    {
+      "type": "uniform",
+      "field": { "value": [0.0, 50000.0, 0.0], "unit": "V/m" }
+    },
+    {
+      "type": "uniformMagnetic",
+      "fluxDensity": { "value": [0.0, 0.0, 5000.0], "unit": "G" }
+    }
+  ],
+  "detector": {
+    "planePoint": { "value": [50.0, 0.0, 0.0], "unit": "mm" },
+    "normal": { "value": [-1, 0, 0] }
+  },
+  "transport": {
+    "maximumFlightTime": { "value": 10.0, "unit": "us" },
+    "relativeTolerance": 1e-11
+  }
+}

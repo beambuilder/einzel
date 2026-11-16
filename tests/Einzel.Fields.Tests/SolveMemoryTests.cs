@@ -78,6 +78,119 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// A rediscretized solve that builds no coarse level holds the bottom solve's scratch over
+    /// the whole fine grid, and is charged it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A sphere smaller than two cells stops the descent before it starts, so the V-cycle is the
+    /// bottom solve on the fine grid, and <c>SolveCoarsest</c> allocates a residual the size of
+    /// that grid for it: 46.5 bytes a node with the billed cut arms, where the deep grid's
+    /// formula, which has no bottom term worth having, gave 38.5. One cycle is enough, because
+    /// there is no coarse mask for a second cycle to find already built.
+    /// </para>
+    /// <para>
+    /// <b>Driven through <see cref="PoissonSolver3D.Solve"/> with the hierarchy forced</b>, at
+    /// one cell size with the box doubled, rather than through a template: a rediscretized solve
+    /// with no coarse level is chosen by the solver only below twenty thousand nodes, too small
+    /// to measure, while the arithmetic is the same on any grid with the same descent.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ARediscretizedSolveWithNoCoarseLevelIsChargedItsBottomScratch()
+    {
+        var (predicted, measured, levels, _, _) = DirectSlope(
+            length => Ball(length, radius: 0.0016, cell: 0.001), 0.016, 0.032, cycles: 1, source: false);
+
+        Assert.Equal(0, levels);
+        Assert.InRange(measured / predicted, 0.90, 1.02);
+    }
+
+    /// <summary>A rediscretized solve one coarse level deep, against its statement.</summary>
+    /// <remarks>
+    /// A sphere three cells across is resolved by one coarsening and not by two. At one level
+    /// the fine restriction holds 17 bytes a coarse node and the bottom 33, so the two instants
+    /// are within two bytes a node of each other and both are worked out.
+    /// </remarks>
+    [Fact]
+    public void ARediscretizedSolveOneLevelDeepHoldsWhatItsStatementSays()
+    {
+        var (predicted, measured, levels, _, _) = DirectSlope(
+            length => Ball(length, radius: 0.0015, cell: 0.0005), 0.016, 0.032, cycles: 2, source: false);
+
+        Assert.Equal(1, levels);
+        Assert.InRange(measured / predicted, 0.90, 1.02);
+    }
+
+    /// <summary>
+    /// A rediscretized solve on a grid thin on two axes, whose levels shrink by much less than an
+    /// eighth, holds every memoised coarse mask from its second cycle on.
+    /// </summary>
+    /// <remarks>
+    /// With no interior electrode the descent goes as far as the grid allows: 8193 by 9 by 9,
+    /// then 4097 by 5 by 5 (0.154 of the fine grid) and 2049 by 3 by 3 (0.034). The coarsener
+    /// keeps both masks for the whole solve, so the fine restriction in the second cycle holds
+    /// the second level's mask as well - 0.30 bytes a node that charging only the masks down to
+    /// the level being restricted onto left out, and which this measures: 43.87 bytes a node
+    /// against 43.87 stated with the real cut arms, and 43.57 without the second mask.
+    /// A Poisson problem with a uniform source, since with no electrode a Laplace problem is
+    /// solved before it starts.
+    /// </remarks>
+    [Fact]
+    public void ARediscretizedSolveOnAThinGridHoldsWhatItsStatementSays()
+    {
+        var (predicted, measured, levels, largePredicted, largeMeasured) = DirectSlope(
+            length => new Geometry3D(0.0, -0.004, -0.004, length, 0.004, 0.004, 0.001, []),
+            4.096, 8.192, cycles: 2, source: true);
+
+        Assert.Equal(2, levels);
+        Assert.InRange(measured / predicted, 0.90, 1.02);
+
+        // And to a tenth of a byte, which this geometry can be held to: a grid with no conductor
+        // has no cut arms to bill, and idle both builds read the same bytes a node to the
+        // hundredth. Charging the masks only down to the level being restricted onto read 0.30
+        // over. Asked of the larger build alone rather than of the slope, because a reading can
+        // only miss a peak and read low, and a slope turns a low reading of the smaller build
+        // into a high one: under load the smaller read 43.63 once and the slope 44.12 against a
+        // build that held 43.88. At 663 thousand nodes the build's fixed allocations are under a
+        // hundredth of a byte a node.
+        Assert.True(
+            largeMeasured <= largePredicted + 0.15,
+            $"the larger build read {largeMeasured:F2} B/node against a prediction of {largePredicted:F2}: something the cycle holds is not charged");
+    }
+
+    /// <summary>
+    /// The rediscretized statement's arithmetic at every depth, worked out here from node counts.
+    /// </summary>
+    [Fact]
+    public void TheRediscretizedStatementChargesEveryMaskAndTheBottom()
+    {
+        const double fixedPart = 9 + 5.5 + 24;
+
+        // No coarse level: the fixed part and the bottom's scratch over the fine grid.
+        var flat = new Grid3D(0, 0, 0, 1, 1, 1, 33, 33, 33);
+        Assert.Equal(fixedPart + 8, SolveMemoryModel.VolumeRediscretizedPeakOn(flat, []), 12);
+
+        // 8193 by 9 by 9, two levels: the fine restriction holds the fine residual, the first
+        // level's restricted residual, and both masks.
+        var thin = new Grid3D(0, 0, 0, 1, 1, 1, 8193, 9, 9);
+        var first = thin.Coarsen();
+        var second = first.Coarsen();
+        var r1 = (double)first.NodeCount / thin.NodeCount;
+        var r2 = (double)second.NodeCount / thin.NodeCount;
+        var restriction = 8 + (8 * r1);
+        var bottom = (16 * (r1 + r2)) + (8 * r2);
+
+        Assert.Equal(
+            fixedPart + (9 * (r1 + r2)) + Math.Max(restriction, bottom),
+            SolveMemoryModel.VolumeRediscretizedPeakOn(thin, [first, second]),
+            12);
+
+        // A deep grid's constant: the fine restriction and every mask of a series of eighths.
+        Assert.Equal(fixedPart + 8 + 1 + (9.0 / 7.0), SolveMemoryModel.VolumeRediscretizedPeak, 12);
+    }
+
+    /// <summary>
     /// A second basis channel costs one kept potential, not a second geometry.
     /// </summary>
     /// <remarks>
@@ -215,8 +328,9 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     /// <para>
     /// <b>How low depends on how loaded the machine is, so the lower edge is 0.85.</b> The plane
     /// spends most of a build smoothing its fine level, and its coarse levels exist only during
-    /// each cycle's descent. A sampler reads 143.3 to 143.9 when it catches the copy, about 135
-    /// when it catches a descent but not the copy, and about 126.6 when it sees only the fine
+    /// each cycle's descent. A sampler reads 135.4 to 135.7 when it catches the copy - the
+    /// 143.3 to 143.9 recorded here before was first-tier code keeping the V-cycle's fine
+    /// residual alive, see <c>SolveMemoryModel.PlanePeak</c> - and about 126.6 when it sees only the fine
     /// level and the first coarse mask - which a four-core CI runner did in two builds of three,
     /// reading 0.884. The upper edge, which is what guards against under-billing, is unchanged.
     /// </para>
@@ -244,8 +358,9 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
             $"plane {planLarge.Nodes:N0} nodes: predicted {predicted:F1} B/node, measured {measured:F1} "
             + $"({planSmall.Nodes:N0} nodes: {peakSmall / planSmall.Nodes:F1})");
 
-        // 143.3 when a sample catches the transient, 135 when it catches only a descent, 126.6
-        // when it sees only the fine level.
+        // 135.4 when a sample catches the transient, in every tier of the JIT since the V-cycle's
+        // descent has frames of its own (143.4 while first-tier code kept the fine residual, which
+        // the upper edge now fails); 126.6 when it sees only the fine level.
         Assert.InRange(measured / predicted, 0.85, 1.02);
     }
 
@@ -283,7 +398,11 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
             + $"(predicted {(planTwo.PeakBytes - planOne.PeakBytes) / planOne.Nodes:F1})");
 
         // A kept mask is 73; the plane's own transient can be caught in one build and missed
-        // in the other, which is worth about 8 either way.
+        // in the other. The "about 8 either way" this allowed for was mostly the first build in
+        // a process running first-tier code that kept the V-cycle residual (one channel 143.6
+        // and two 135.6, a second channel costing -8.0); with the descent in frames of its own
+        // both builds read the optimized figure and the second costs 8.0. The band is left as
+        // it was until runners have shown it can narrow.
         Assert.InRange(extra, -10.0, 30.0);
     }
 
@@ -291,7 +410,7 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     /// Four round rods in a 16 mm box; driven, the y pair carries an RF tap as well, which makes
     /// a second spatial pattern.
     /// </summary>
-    private static CompiledSolvedField Rods(double cell, bool driven = false)
+    internal static CompiledSolvedField Rods(double cell, bool driven = false)
     {
         var tap = driven ? [new CompiledTap(0, 50.0, 0.0)] : Array.Empty<CompiledTap>();
 
@@ -349,6 +468,97 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// A rediscretized solve, forced, at two sizes of one geometry, against the statement for
+    /// the levels the solver says it descends through.
+    /// </summary>
+    private (double Predicted, double Measured, int Levels, double LargePredicted, double LargeMeasured) DirectSlope(
+        Func<double, Geometry3D> geometry, double small, double large, int cycles, bool source)
+    {
+        (double Stated, double Real, long Nodes, int Levels) Plan(Geometry3D g)
+        {
+            var grid = GeometryBuilder3D.BuildGrid(g);
+            var mask = GeometryBuilder3D.BuildMask(g, grid);
+            var levels = PoissonSolver3D.RediscretizedLevels(grid, mask.SmallestFeature, mask.InteriorFixedCount > 0);
+            var stated = SolveMemoryModel.VolumeRediscretizedPeakOn(grid, levels) * grid.NodeCount;
+            var real = stated - (SolveMemoryModel.VolumeCutLinks * grid.NodeCount) + (mask.Cuts?.Bytes ?? 0);
+
+            return (stated, real, grid.NodeCount, levels.Count);
+        }
+
+        object Solve(Geometry3D g, Action<SolveReport>? report = null)
+        {
+            var grid = GeometryBuilder3D.BuildGrid(g);
+            var mask = GeometryBuilder3D.BuildMask(g, grid);
+            ScalarField3D? rhs = null;
+
+            if (source)
+            {
+                rhs = new ScalarField3D(grid);
+
+                for (var k = 0; k < grid.CountZ; k++)
+                {
+                    for (var j = 0; j < grid.CountY; j++)
+                    {
+                        for (var i = 0; i < grid.CountX; i++)
+                        {
+                            rhs[i, j, k] = 1.0;
+                        }
+                    }
+                }
+            }
+
+            var (potential, solved) = PoissonSolver3D.Solve(
+                mask, 1e-14, cycles, GeometryBuilder3D.Coarsener(g), source: rhs, galerkin: false);
+
+            report?.Invoke(solved);
+
+            return potential;
+        }
+
+        var gSmall = geometry(small);
+        var gLarge = geometry(large);
+        var planSmall = Plan(gSmall);
+        var planLarge = Plan(gLarge);
+
+        // Once each, unmeasured: the descent the solver takes, and a first call's allocations
+        // kept out of the first reading.
+        var solvedLevels = -1;
+        Solve(gSmall);
+        Solve(gLarge, r => solvedLevels = r.Levels);
+
+        var peakSmall = PeakLive(() => Solve(gSmall));
+        var peakLarge = PeakLive(() => Solve(gLarge));
+
+        var nodes = (double)(planLarge.Nodes - planSmall.Nodes);
+        var billed = (planLarge.Stated - planSmall.Stated) / nodes;
+        var predicted = (planLarge.Real - planSmall.Real) / nodes;
+        var measured = (peakLarge - peakSmall) / nodes;
+
+        output.WriteLine(
+            $"{planSmall.Nodes:N0} -> {planLarge.Nodes:N0} nodes, {planLarge.Levels} coarse level(s): "
+            + $"billed {billed:F2} B/node, predicted with the real cut arms {predicted:F2}, measured {measured:F2} "
+            + $"(peaks {peakSmall / planSmall.Nodes:F2} and {peakLarge / planLarge.Nodes:F2} B/node of each build)");
+
+        Assert.Equal(planLarge.Levels, solvedLevels);
+        Assert.Equal(planSmall.Levels, planLarge.Levels);
+
+        return (predicted, measured, planLarge.Levels, planLarge.Real / planLarge.Nodes, peakLarge / planLarge.Nodes);
+    }
+
+    /// <summary>A sphere at the centre of a cube, at one cell size.</summary>
+    private static Geometry3D Ball(double length, double radius, double cell) => new(
+        -0.5 * length, -0.5 * length, -0.5 * length, 0.5 * length, 0.5 * length, 0.5 * length, cell,
+        [
+            new CompiledElectrode3D
+            {
+                Name = "ball",
+                Shape = Electrode3DShape.Sphere,
+                Radius = radius,
+                Potential = 100.0,
+            },
+        ]);
+
+    /// <summary>
     /// The statement's peak with this geometry's cut arms in place of the billed allowance.
     /// </summary>
     /// <remarks>
@@ -356,7 +566,7 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     /// 1.6 to 1.9, and two slabs less. Over the rediscretized hierarchy's 51 that is 7 percent
     /// of the band, spent before a build is sampled.
     /// </remarks>
-    private static double WithRealCutArms(Geometry3D geometry, SolveMemory plan)
+    internal static double WithRealCutArms(Geometry3D geometry, SolveMemory plan)
     {
         var cuts = GeometryBuilder3D.BuildMask(geometry, GeometryBuilder3D.BuildGrid(geometry)).Cuts;
 
@@ -400,7 +610,7 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     /// collection it just finished has no such window.
     /// </para>
     /// </remarks>
-    private static double PeakLive(Func<object> build)
+    internal static double PeakLive(Func<object> build)
     {
         static long Live()
         {
@@ -508,7 +718,7 @@ public sealed class SolveMemoryTests(ITestOutputHelper output)
     };
 
     /// <summary>A 3 mm sphere in a 20 mm box: coarsens far enough that the cheap hierarchy wins.</summary>
-    private static Geometry3D Sphere(double cell) => new(
+    internal static Geometry3D Sphere(double cell) => new(
         -0.010, -0.010, -0.010, 0.010, 0.010, 0.010, cell,
         [
             new CompiledElectrode3D

@@ -1,17 +1,27 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The WPF shell's tests target net10.0-windows and a solution-wide `dotnet test` walks
-    past them on Linux, so what they check is checked on one platform. These target plain
-    net10.0 and run on both, which is the point of the shell they cover.
+    These target plain net10.0 and run on both CI runners, which is the point of the shell
+    they cover. The WPF shell's tests targeted net10.0-windows and a solution-wide
+    `dotnet test` walked past them on Linux, so what they checked was checked on one
+    platform - a cross-platform claim checked only on Windows is one nobody is checking.
 
     Nothing here touches a window. What is testable without one is the part that carries
-    the decisions: where the camera goes, how often a watched run is sampled, and which
-    frame a finished run is left showing.
+    the decisions: where the camera goes, how often a watched run is sampled, which frame a
+    finished run is left showing, and everything the session and the view models decide -
+    what an edit does, what it refuses, and what reaches the journal.
   -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!--
+      Off, as it is in the shell. A window cannot run globalization-invariant, so the shell
+      is the one process where the host's locale reaches number formatting and parsing - and
+      a test of what a person types has to be run where that is true, or a decimal comma
+      cannot be tested at all.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +37,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Einzel.Shell\Einzel.Shell.csproj" />
+    <!-- To make projects the way a person does, with `einzel init` and `einzel new`. -->
+    <ProjectReference Include="..\..\src\Einzel.Cli\Einzel.Cli.csproj" />
   </ItemGroup>
 
 </Project>

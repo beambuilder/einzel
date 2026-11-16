@@ -193,29 +193,38 @@ public static class ModelSchema
     /// <remarks>
     /// 0.3 adds the source cloud, 0.5 the mutual Coulomb force, 0.6 the model-level
     /// sequence, 0.8 a tilt on a cross-section's extrusion axis, 0.9 the polygon
-    /// electrode. All additive, so every
+    /// electrode, 0.15 the uniform magnetic field. All additive, so every
     /// earlier document still reads - but a document whose ions push on each other
     /// genuinely is not a 0.4 document, and saying so is cheaper than an older build
     /// reading it, ignoring the field it does not know, and reporting a different flight
     /// with no indication that anything was dropped. A tilted extrusion axis is the same
     /// case in a sharper form: an older build would solve the untilted cross-section and
-    /// report a converging analyser as a parallel one. 0.15 lets a drive's waveform be an
-    /// object (an expression of the phase, a sampled period, a harmonic series); a 0.14
-    /// build would refuse such a document rather than misread it, and every 0.14 document
-    /// reads unchanged. 0.16 adds <c>transport.edges</c>; a document without it flies as
-    /// it did under 0.15, to the bit.
+    /// report a converging analyser as a parallel one.
+    /// <para>
+    /// <b>The part after the hyphen is the fork's.</b> The number is upstream's, then
+    /// <c>-esibd.N</c> for the N additions this fork (<c>beambuilder/einzel</c>) has made to
+    /// the format on top of it: 1 lets a drive's waveform be an object (an expression of the
+    /// phase, a sampled period, a harmonic series), 2 adds <c>transport.edges</c>. An
+    /// upstream sync moves the part before the hyphen, a fork addition the part after, and
+    /// neither can collide with a number the other tree will use. Before the scheme the fork
+    /// wrote its first addition as 0.15 and its second as 0.16; upstream then used 0.15 for
+    /// the magnetic field. Both numbers stay in <see cref="SupportedVersions"/>, and a
+    /// document stamped 0.15 reads whichever of the two it holds, because no feature is
+    /// switched by the number and the reader refuses a key it does not know.
+    /// </para>
     /// </remarks>
-    public const string CurrentVersion = "0.16";
+    public const string CurrentVersion = "0.15-esibd.2";
 
     /// <summary>Versions this build can read.</summary>
     /// <remarks>
     /// Membership, not ordering: a version is supported because it is in this list and a
     /// test asserts that every entry actually reads. So <c>0.10</c> follows <c>0.9</c> even
-    /// though it sorts before it as text, and nothing here compares two versions.
+    /// though it sorts before it as text, and nothing here compares two versions. The
+    /// fork-marked number is one more string in the list, never parsed.
     /// </remarks>
     public static IReadOnlyList<string> SupportedVersions { get; } =
         ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12",
-         "0.13", "0.14", "0.15", "0.16"];
+         "0.13", "0.14", "0.15", "0.16", "0.15-esibd.2"];
 }
 
 /// <summary>The ion being tracked.</summary>
@@ -477,8 +486,9 @@ public sealed record GasPressureFieldDocument
 public sealed record FieldDocument
 {
     /// <summary>
-    /// One of <c>fieldFree</c>, <c>uniform</c>, <c>halfSpaceUniform</c>, or
-    /// <c>solved2d</c>.
+    /// One of <c>fieldFree</c>, <c>uniform</c>, <c>halfSpaceUniform</c>,
+    /// <c>idealQuadrupoleRf</c>, <c>quadroLogarithmic</c>, <c>uniformMagnetic</c>,
+    /// <c>solved2d</c> or <c>solved3d</c>.
     /// </summary>
     public string? Type { get; init; }
 
@@ -498,6 +508,25 @@ public sealed record FieldDocument
 
     /// <summary>Uniform only: the field vector.</summary>
     public VectorValue? Field { get; init; }
+
+    /// <summary>
+    /// Uniform magnetic only: the magnetic flux density B, with a unit of flux density -
+    /// <c>T</c>, <c>mT</c>, <c>uT</c>, <c>G</c> or <c>kG</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The B of <c>F = q (E + v x B)</c>. A positive ion moving along +x in a B along +z is
+    /// pushed toward -y, and turns clockwise seen from +z: the right-hand rule, with the
+    /// charge's sign carried by the ion.
+    /// </para>
+    /// <para>
+    /// Applied by single-ion trajectory integration only. A model declaring one is refused
+    /// when it also asks for space charge, a diffusive transport mode or phase, or a phase
+    /// that changes B - each of those paths would otherwise fly as though the magnet were
+    /// not there.
+    /// </para>
+    /// </remarks>
+    public VectorValue? FluxDensity { get; init; }
 
     /// <summary>Half-space only: a point on the boundary plane.</summary>
     public VectorValue? PlanePoint { get; init; }

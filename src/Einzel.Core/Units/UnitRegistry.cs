@@ -150,6 +150,18 @@ public static class UnitRegistry
         Add("V/m^2", 1.0, Dimension.ElectricFieldGradient);
         Add("V/mm^2", 1e6, Dimension.ElectricFieldGradient);
 
+        // Magnetic flux density. Gauss is the CGS unit and still how a bench magnet and a
+        // Hall probe are quoted, so it is offered rather than left for someone to convert:
+        // 1 G is exactly 1e-4 T. "G" collides with nothing here (giga appears only inside
+        // GHz and GeV-style compound symbols, never alone).
+        var flux = Dimension.MagneticFluxDensity;
+        Add("T", 1.0, flux);
+        Add("mT", 1e-3, flux);
+        Add("uT", 1e-6, flux);
+        Add("µT", 1e-6, flux);
+        Add("G", 1e-4, flux);
+        Add("kG", 1e-1, flux);
+
         Add("m^2/(V s)", 1.0, Dimension.Mobility);
         Add("cm^2/(V s)", 1e-4, Dimension.Mobility);
 

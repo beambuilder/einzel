@@ -367,10 +367,11 @@ public sealed class IonListFlightTests(ITestOutputHelper output) : IDisposable
         var examples = Path.Combine(RepositoryRoot(), "src", "Einzel.Commands", "Examples");
         var trap = Compile(File.ReadAllText(Path.Combine(examples, "orbital-trap-frequency.json")), examples);
 
-        // On the quadro-logarithmic field's axis, where its potential has no value.
+        // On the quadro-logarithmic field's axis, where its potential has no value. The field
+        // throws its own refusal of a point, an ArgumentOutOfRangeException by inheritance.
         var onAxis = trap with { SourcePosition = new Vec3(0.001, 0.0, 0.0), Cloud = new IonCloudSettings { Ions = 3 } };
 
-        var failure = Assert.Throws<ArgumentOutOfRangeException>(() => FiguresOfMerit.FlyCloud(onAxis));
+        var failure = Assert.Throws<PointRefusedException>(() => FiguresOfMerit.FlyCloud(onAxis));
 
         output.WriteLine(failure.Message);
         Assert.Contains("QuadroLogarithmicField", failure.StackTrace, StringComparison.Ordinal);

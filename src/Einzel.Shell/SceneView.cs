@@ -65,6 +65,11 @@ public sealed class SceneView : OpenGlControlBase
 
     private IReadOnlyList<PictureLayer> _picture = [];
     private ViewportOutcome? _pending;
+    private ViewportOutcome? _replacement;
+
+    // Read on the UI thread by the see-through toggle and replaced on the render thread when
+    // an edit redraws the scene, so every read sees one whole scene or the other.
+    private volatile ViewportOutcome? _scene;
 
     private GL? _gl;
     private uint _program;
@@ -90,7 +95,7 @@ public sealed class SceneView : OpenGlControlBase
     /// The same matrix the render pass hands the GPU, so a ruler laid out from it measures the
     /// picture it is drawn over rather than a second account of the camera.
     /// </remarks>
-    public double[]? CurrentMatrix(double aspect) => _camera?.Framing.Matrix(aspect);
+    public double[]? CurrentMatrix(double aspect) => _camera?.Matrix(aspect);
 
     /// <summary>The composed picture the viewport is drawing, layer by layer.</summary>
     /// <remarks>
@@ -102,11 +107,49 @@ public sealed class SceneView : OpenGlControlBase
 
     /// <summary>What to draw, as the command layer measured it.</summary>
     /// <remarks>
-    /// Set before the control is first realized. A viewport that changed scene mid-flight
-    /// would have to tear down its buffers on the render thread, which is the next piece
-    /// of work rather than this one.
+    /// Set before the control is first realized; <see cref="Replace"/> changes it after.
     /// </remarks>
-    public ViewportOutcome? Scene { get; init; }
+    public ViewportOutcome? Scene
+    {
+        get => _scene;
+        init => _scene = value;
+    }
+
+    /// <summary>Draws a different scene in place of the one on screen.</summary>
+    /// <param name="scene">The model as the command layer measured it after an edit.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="scene"/> is null.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>For an edit, which changes everything a watch does not.</b> A parameter moves an
+    /// electrode, so the meshes, the field and the paths are all new, and every buffer is
+    /// released and uploaded again - on the render thread, because that is where the GL
+    /// context is. This only hands the scene over and asks for a redraw.
+    /// </para>
+    /// <para>
+    /// <b>A watched frame still waiting is dropped</b>: it is a frame of the model as it was
+    /// before the edit, and drawing its packet over the new geometry would put an instant of
+    /// one instrument inside another.
+    /// </para>
+    /// <para>
+    /// <b>The angle and the zoom are kept, and the frame is refitted to the new scene.</b>
+    /// Somebody zoomed in on a slit to see what an edit does to it wants to stay on the slit,
+    /// so the zoom and pan carry over as a scale and shift of the fit; the fit itself does
+    /// not, since an edit that doubles a drift length would otherwise put half the instrument
+    /// off screen. The ruler drawn over the viewport is what says the scale moved.
+    /// </para>
+    /// </remarks>
+    public void Replace(ViewportOutcome scene)
+    {
+        ArgumentNullException.ThrowIfNull(scene);
+
+        lock (_gate)
+        {
+            _replacement = scene;
+            _pending = null;
+        }
+
+        RequestNextFrameRendering();
+    }
 
     /// <summary>How opaque the conductors are, from zero to one.</summary>
     /// <remarks>
@@ -176,6 +219,52 @@ public sealed class SceneView : OpenGlControlBase
         }
     }
 
+    /// <summary>Turns the instrument in place by a mouse drag.</summary>
+    /// <param name="azimuth">Degrees about the vertical.</param>
+    /// <param name="elevation">Degrees of tilt.</param>
+    /// <remarks>
+    /// The arithmetic is <see cref="ViewportCamera.Orbit"/>'s, where it is tested; this only
+    /// keeps the named view in step, so an edit's rebuild starts from where the camera is.
+    /// </remarks>
+    public void Orbit(double azimuth, double elevation) =>
+        Moved(camera =>
+        {
+            camera.Orbit(azimuth, elevation);
+            _view = camera.View;
+        });
+
+    /// <summary>Moves the picture across the screen, in clip coordinates.</summary>
+    /// <param name="clipX">How far across.</param>
+    /// <param name="clipY">How far up.</param>
+    public void PanBy(double clipX, double clipY) => Moved(camera => camera.PanBy(clipX, clipY));
+
+    /// <summary>Zooms about a point on the screen, in clip coordinates.</summary>
+    /// <param name="factor">Above one zooms in.</param>
+    /// <param name="clipX">The cursor across.</param>
+    /// <param name="clipY">The cursor up.</param>
+    public void ZoomAbout(double factor, double clipX, double clipY) =>
+        Moved(camera => camera.ZoomAbout(factor, clipX, clipY));
+
+    /// <summary>Turns to a view and fits it exactly, leaving nothing of the mouse behind.</summary>
+    /// <param name="view">Azimuth and elevation, in degrees.</param>
+    public void Fit((double Azimuth, double Elevation) view)
+    {
+        _view = view;
+        Moved(camera => camera.Fit(view));
+    }
+
+    private void Moved(Action<ViewportCamera> move)
+    {
+        if (_camera is not { } camera)
+        {
+            return;
+        }
+
+        move(camera);
+        FramingChanged?.Invoke(this, EventArgs.Empty);
+        RequestNextFrameRendering();
+    }
+
     /// <summary>Shows a newer frame of a run that is still going.</summary>
     /// <param name="frame">The run as it stands.</param>
     /// <remarks>
@@ -239,6 +328,7 @@ public sealed class SceneView : OpenGlControlBase
         }
 
         ViewportOutcome? arrived;
+        ViewportOutcome? replaced;
 
         lock (_gate)
         {
@@ -246,6 +336,15 @@ public sealed class SceneView : OpenGlControlBase
             // drop the last one.
             arrived = _pending;
             _pending = null;
+            replaced = _replacement;
+            _replacement = null;
+        }
+
+        // The scene before the frame: a frame posted after a replacement is a frame of the
+        // new scene, and taking it into the old one's camera would be lost on the rebuild.
+        if (replaced is { } scene)
+        {
+            Rebuild(api, scene);
         }
 
         if (arrived is { } frame)
@@ -273,7 +372,7 @@ public sealed class SceneView : OpenGlControlBase
         // Rebuilt per frame because it depends on the window's shape; the expensive half,
         // measuring the instrument, was done once.
         var mvp = _camera is { } camera
-            ? camera.Framing.Project((double)width / height)
+            ? camera.Project((double)width / height)
             : Framing.Identity();
 
         fixed (float* m = mvp)
@@ -386,6 +485,38 @@ public sealed class SceneView : OpenGlControlBase
             api.DeleteVertexArray(line.Vao);
             api.DeleteBuffer(line.Vbo);
         }
+    }
+
+    /// <summary>Releases everything uploaded and uploads a new scene in its place.</summary>
+    private void Rebuild(GL api, ViewportOutcome scene)
+    {
+        foreach (var layer in _uploaded)
+        {
+            Release(api, layer);
+        }
+
+        _uploaded.Clear();
+
+        _scene = scene;
+
+        var picture = ViewportPicture.Compose(scene, ConductorOpacity);
+
+        foreach (var layer in picture)
+        {
+            _uploaded.Add(Upload(api, layer));
+        }
+
+        _picture = picture;
+
+        var camera = new ViewportCamera(scene, _view);
+
+        if (_camera is { } previous)
+        {
+            camera.KeepZoomFrom(previous);
+        }
+
+        _camera = camera;
+        FramingChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Takes in a frame of a run that is still going.</summary>

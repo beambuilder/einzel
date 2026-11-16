@@ -1,11 +1,67 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:presentation="clr-namespace:Einzel.Shell.Presentation"
         xmlns:shell="clr-namespace:Einzel.Shell"
         x:Class="Einzel.Shell.MainWindow"
-        Width="1200" Height="760"
+        Width="1500" Height="860"
         Title="Einzel">
 
+  <Window.Resources>
+    <!-- A line of text in a list: a warning, a containment gap, a project's contents. -->
+    <DataTemplate x:Key="Note" x:DataType="x:String">
+      <SelectableTextBlock Text="{Binding}" FontSize="10" Foreground="#B8B8B8"
+                           TextWrapping="Wrap" Margin="0,1,0,2" />
+    </DataTemplate>
+  </Window.Resources>
+
+  <Window.Styles>
+    <Style Selector="TabItem">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="MinHeight" Value="34" />
+    </Style>
+    <Style Selector="TextBlock.head">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="Foreground" Value="#9A9A9A" />
+    </Style>
+    <Style Selector="TextBlock.cell">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="Foreground" Value="#D8D8D8" />
+      <Setter Property="FontFamily" Value="Consolas,Menlo,monospace" />
+      <Setter Property="Margin" Value="0,1" />
+    </Style>
+    <Style Selector="Grid.violated">
+      <Setter Property="Background" Value="#3E2C1C" />
+    </Style>
+    <Style Selector="TextBlock.state">
+      <Setter Property="Foreground" Value="#9A9A9A" />
+    </Style>
+    <Style Selector="TextBlock.state.bad">
+      <Setter Property="Foreground" Value="#E07070" />
+    </Style>
+    <Style Selector="TextBlock.state.warn">
+      <Setter Property="Foreground" Value="#E0B060" />
+    </Style>
+    <Style Selector="TextBlock.state.good">
+      <Setter Property="Foreground" Value="#70C080" />
+    </Style>
+    <Style Selector="TextBlock.licence">
+      <Setter Property="Foreground" Value="#B8B8B8" />
+    </Style>
+    <Style Selector="TextBlock.licence.undeclared">
+      <Setter Property="Foreground" Value="#E07060" />
+      <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+  </Window.Styles>
+
   <DockPanel>
+
+    <!--
+      A newer release, offered and never imposed (UPD-3, UPD-4): hidden unless an installed
+      copy's one launch-time check found something, and nothing is downloaded until a button
+      here is pressed. Its decisions are Einzel.Update's UpdateWorkflow.
+    -->
+    <shell:UpdateNoticeBar x:Name="UpdateNotice" DockPanel.Dock="Top" />
 
     <Border DockPanel.Dock="Top" Background="#1B1B1B" Padding="10,6">
       <TextBlock x:Name="Heading" FontSize="13" Foreground="#E8E8E8" />
@@ -19,10 +75,30 @@
     -->
     <Border DockPanel.Dock="Top" Background="#242424" Padding="8,5">
       <StackPanel Orientation="Horizontal" Spacing="6">
+        <!--
+          A model can be opened or started from the window itself. Before these existed a
+          shell started without an argument could only tell somebody to restart it with one,
+          which is not a window anybody who did not write it can use. Opening is recorded as
+          `einzel validate`, creating as the `einzel new` line that would make the same file.
+        -->
+        <Button x:Name="OpenModel" Content="Open..." MinWidth="70"
+                ToolTip.Tip="Open a model document" />
+        <Button x:Name="NewModel" Content="New..." MinWidth="64"
+                ToolTip.Tip="Start a model from a shipped device template or example (einzel new)">
+          <Button.Flyout>
+            <MenuFlyout Placement="BottomEdgeAlignedLeft">
+              <MenuItem x:Name="NewFromTemplate" Header="From template" />
+              <MenuItem x:Name="NewFromExample" Header="From example" />
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+        <Border Width="1" Background="#3A3A3A" Margin="6,0" />
         <Button x:Name="ViewIso" Content="Iso" MinWidth="64" />
         <Button x:Name="ViewSide" Content="Side" MinWidth="64" />
         <Button x:Name="ViewTop" Content="Top" MinWidth="64" />
         <Button x:Name="ViewFront" Content="Front" MinWidth="64" />
+        <Button x:Name="ViewFit" Content="Fit" MinWidth="52"
+                ToolTip.Tip="Fit the instrument to the window at this angle, undoing any zoom and pan" />
         <Border Width="1" Background="#3A3A3A" Margin="6,0" />
         <ToggleButton x:Name="Transparent" Content="See through metal" MinWidth="150" />
         <Border Width="1" Background="#3A3A3A" Margin="6,0" />
@@ -32,6 +108,25 @@
           as the command a person could have typed, and an agent can call the same one.
         -->
         <Button x:Name="WatchRun" Content="Watch run" MinWidth="110" />
+        <!--
+          A watch is the one action here measured in minutes, so it is the one that needs a
+          way out. Stopping is cooperative - a density step is not interruptible part way, so
+          what this does is decline to take the next one - and what it drew is KEPT, because
+          the packet on screen is where the run had got to and is the reason somebody pressed
+          it. Clearing the viewport would throw away the only thing the watch produced. A full
+          run and a regime walk cannot be stopped part way - their command objects take no
+          cancellation - so this button is for the watch alone rather than one that would
+          appear to stop them and not.
+        -->
+        <Button x:Name="StopRun" Content="Stop" MinWidth="60" IsEnabled="False"
+                ToolTip.Tip="Stop the watched run after the current step, keeping what has been drawn" />
+        <Border Width="1" Background="#3A3A3A" Margin="6,0" />
+        <!--
+          The gestures said once, where they are used. They worked in the WPF viewport and
+          nothing there said so; a gesture nobody knows about is not a capability.
+        -->
+        <TextBlock Text="drag to turn  ·  right-drag or Shift-drag to move  ·  wheel to zoom  ·  double-click to fit"
+                   FontSize="11" Foreground="#8A8A8A" VerticalAlignment="Center" />
       </StackPanel>
     </Border>
 
@@ -48,7 +143,7 @@
       `einzel outline`: a window that read the model itself would grow its own idea of what
       a model means, and the two would come to disagree.
     -->
-    <Grid ColumnDefinitions="360,4,*">
+    <Grid ColumnDefinitions="360,4,*,4,400">
 
       <!--
         An ItemsControl rather than a DataGrid, which in Avalonia is a separate package. A
@@ -58,27 +153,63 @@
       -->
       <DockPanel Grid.Column="0" Background="#181818">
         <Border DockPanel.Dock="Top" Background="#242424" Padding="8,5">
-          <Grid ColumnDefinitions="*,90,60">
+          <Grid ColumnDefinitions="*,100,60">
             <TextBlock Grid.Column="0" Text="Parameter" FontSize="11" Foreground="#9A9A9A" />
             <TextBlock Grid.Column="1" Text="Value" FontSize="11" Foreground="#9A9A9A" HorizontalAlignment="Right" />
             <TextBlock Grid.Column="2" Text="Unit" FontSize="11" Foreground="#9A9A9A" Margin="8,0,0,0" />
           </Grid>
         </Border>
+
+        <!--
+          Whether the model validates, under the tree and never behind a control. Section 16
+          asks for live validation, and a person who has to open something to learn that
+          their last edit made the model invalid is a person who will not. The edit still
+          applies - taint, never block - so the tree stands with the complaint against it.
+        -->
+        <Border x:Name="ValidationBar" DockPanel.Dock="Bottom" Background="#242424" Padding="8,6">
+          <SelectableTextBlock x:Name="Validation" FontSize="11" Foreground="#C8C8C8" TextWrapping="Wrap" />
+        </Border>
+
         <ScrollViewer>
           <ItemsControl x:Name="Parameters">
             <ItemsControl.ItemTemplate>
               <!-- Compiled bindings need the type named, which is the point of them. -->
-              <DataTemplate x:DataType="shell:ParameterRow">
-                <Grid ColumnDefinitions="*,90,60" Margin="8,3">
-                  <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12"
-                             Foreground="#E0E0E0" ToolTip.Tip="{Binding Description}" />
-                  <!-- Right-aligned and tabular, because a column of numbers is read down. -->
-                  <TextBlock Grid.Column="1" Text="{Binding Shown}" FontSize="12"
-                             Foreground="#C8D8E8" HorizontalAlignment="Right"
+              <DataTemplate x:DataType="presentation:ParameterRow">
+                <StackPanel Margin="8,3" Spacing="1">
+                  <Grid ColumnDefinitions="*,100,60">
+                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12"
+                               Foreground="#E0E0E0" VerticalAlignment="Center"
+                               ToolTip.Tip="{Binding Description}" />
+                    <!--
+                      One-way on purpose: Shown has no setter, and a typed value is not the
+                      model's value until the journal has taken it. The window commits on
+                      Enter or on leaving the box, through the tree, and the row is then
+                      re-read rather than trusted - an edit moves every derived parameter
+                      that depends on it, which is why a model has a parameter surface.
+                    -->
+                    <!--
+                      Named for a screen reader by the parameter it changes, with its unit and
+                      bounds as help: the label beside the box is not associated with it, so
+                      without this a person tabbing through the tree hears a list of numbers.
+                    -->
+                    <TextBox Grid.Column="1" Text="{Binding Shown, Mode=OneWay}"
+                             IsVisible="{Binding Editable}"
+                             AutomationProperties.Name="{Binding Name}"
+                             AutomationProperties.HelpText="{Binding Help}"
+                             FontSize="12" MinHeight="24" Padding="6,2"
+                             HorizontalContentAlignment="Right" VerticalContentAlignment="Center"
                              FontFamily="Consolas,Menlo,monospace" />
-                  <TextBlock Grid.Column="2" Text="{Binding Unit}" FontSize="12"
-                             Foreground="#8A8A8A" Margin="8,0,0,0" />
-                </Grid>
+                    <!-- A derived value is its expression's, so there is no box to type in. -->
+                    <TextBlock Grid.Column="1" Text="derived" IsVisible="{Binding !Editable}"
+                               FontSize="11" FontStyle="Italic" Foreground="#8A8A8A"
+                               HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="{Binding Unit}" FontSize="12"
+                               Foreground="#8A8A8A" Margin="8,0,0,0" VerticalAlignment="Center" />
+                  </Grid>
+                  <TextBlock Text="{Binding Detail}" FontSize="10" Foreground="#7E8A96"
+                             TextWrapping="Wrap"
+                             IsVisible="{Binding Detail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
@@ -87,7 +218,411 @@
 
       <GridSplitter Grid.Column="1" Background="#3A3A3A" />
 
-      <Panel x:Name="ViewportHost" Grid.Column="2" Background="White" />
+      <DockPanel Grid.Column="2" Background="White">
+      <!--
+        The scales the colors mean. A picture colored by a quantity needs them: GRD-1's
+        argument applied to a drawing, since a color is the one place a reader cannot
+        recompute the number for themselves.
+
+        What each row says is ViewportPicture.Scales' decision, not this window's - the
+        potential ramp is symmetric about earth rather than stretched across the observed
+        range, and a legend that worked that out for itself would be a second copy of a rule
+        the picture already applies. Rows appear only where they mean something, so a
+        diffusive model shows no energy scale.
+      -->
+      <ItemsControl x:Name="Legend" DockPanel.Dock="Bottom" Margin="10,6" IsVisible="False">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="shell:LegendRow">
+            <Grid ColumnDefinitions="78,Auto,*,Auto" Margin="0,2">
+              <TextBlock Grid.Column="0" Text="{Binding Quantity}" FontSize="11"
+                         Foreground="#707880" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Text="{Binding Low}" FontSize="11"
+                         Foreground="#303840" VerticalAlignment="Center" Margin="0,0,6,0" />
+              <Border Grid.Column="2" Height="11" BorderThickness="1" BorderBrush="#C9CFD4"
+                      Background="{Binding Swatch}" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="3" Text="{Binding High}" FontSize="11"
+                         Foreground="#303840" VerticalAlignment="Center" Margin="6,0,0,0" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <Panel x:Name="ViewportHost" />
+    </DockPanel>
+
+      <GridSplitter Grid.Column="3" Background="#3A3A3A" />
+
+      <!--
+        One tab per question. Each answers a different one and a person asks them one at a
+        time; side by side they would each be too narrow to carry an envelope, which is
+        exactly what section 16 forbids putting behind a disclosure control.
+      -->
+      <TabControl x:Name="Panels" Grid.Column="4" Background="#181818" Padding="0">
+
+        <!--
+          The journal, which is MCP-1's payoff: a person can see what an agent did to their
+          model, by name, and undo it. The commands beneath are Amendment 25 - every action
+          here readable as something that could have been typed, and selectable so it can be
+          handed to an agent as it stands.
+        -->
+        <TabItem Header="Journal" FontSize="14">
+          <DockPanel Margin="8,6">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+              <Button x:Name="UndoButton" Content="Undo last edit" FontSize="12" IsEnabled="False" />
+            </StackPanel>
+
+            <TextBlock DockPanel.Dock="Top" Text="What has happened" FontSize="11"
+                       Foreground="#9A9A9A" Margin="0,0,0,4" />
+            <Border DockPanel.Dock="Top" Background="#202020" Height="210" Margin="0,0,0,10">
+              <ScrollViewer>
+                <ItemsControl x:Name="JournalList">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                      <SelectableTextBlock Text="{Binding}" FontSize="11" Foreground="#D8D8D8"
+                                           TextWrapping="Wrap" Margin="6,2" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Border>
+
+            <TextBlock DockPanel.Dock="Top" Text="As commands" FontSize="11"
+                       Foreground="#9A9A9A" Margin="0,0,0,4" />
+            <Border Background="#202020">
+              <ScrollViewer>
+                <ItemsControl x:Name="CommandList">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                      <SelectableTextBlock Text="{Binding}" FontSize="11" Foreground="#C8D8E8"
+                                           FontFamily="Consolas,Menlo,monospace"
+                                           TextWrapping="Wrap" Margin="6,2" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Border>
+          </DockPanel>
+        </TabItem>
+
+
+        <!--
+          Results by accuracy class (section 12's T, S and B). The layout IS the requirement:
+          uncertainty, evidence and warnings sit on lines under the value and never behind a
+          disclosure control, which is the rule in section 16 most easily broken by somebody
+          who has not read section 4 - a value is small and an envelope is bulky, and hiding
+          the bulk is the natural thing to do.
+        -->
+        <TabItem Header="Results">
+          <DockPanel Margin="8,6">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+              <Button x:Name="ResultsRun" Content="Run" FontSize="12"
+                      ToolTip.Tip="einzel run - writes a manifest and a result" />
+              <Button x:Name="ResultsPreview" Content="Preview" FontSize="12"
+                      ToolTip.Tip="einzel preview - cheaper, writes nothing, permanently marked" />
+            </StackPanel>
+
+            <!--
+              GRD-5's taint, where it cannot be missed. A preview number that looks like a
+              run number is the failure the tier exists to prevent.
+            -->
+            <Border DockPanel.Dock="Top" x:Name="ResultsTaint" Background="#4A3B12"
+                    Padding="6,4" Margin="0,0,0,6" IsVisible="False">
+              <TextBlock Text="PREVIEW TIER - these numbers are not a run" FontSize="11"
+                         FontWeight="Bold" Foreground="#F0DFA8" TextWrapping="Wrap" />
+            </Border>
+
+            <SelectableTextBlock DockPanel.Dock="Top" x:Name="ResultsStatus" FontSize="11"
+                                 Foreground="#9A9A9A" TextWrapping="Wrap" Margin="0,0,0,6" />
+
+            <ScrollViewer DockPanel.Dock="Bottom" MaxHeight="140" Margin="0,6,0,0">
+              <ItemsControl x:Name="ResultsWarnings" ItemTemplate="{StaticResource Note}" />
+            </ScrollViewer>
+
+            <ScrollViewer>
+              <ItemsControl x:Name="ResultsList">
+                <ItemsControl.DataTemplates>
+                  <DataTemplate x:DataType="presentation:FigureClassHeader">
+                    <Border Background="#2A2F36" Padding="6,3" Margin="0,8,0,2">
+                      <TextBlock FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Foreground="#E0E0E0">
+                        <Run Text="Class " /><Run Text="{Binding Class}" />
+                        <Run Text=" - " /><Run Text="{Binding What}" Foreground="#9A9A9A" FontWeight="Normal" />
+                      </TextBlock>
+                    </Border>
+                  </DataTemplate>
+                  <DataTemplate x:DataType="presentation:FigureRow">
+                    <Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="6,2,2,6">
+                      <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Name}" FontSize="11"
+                                 FontWeight="Bold" Foreground="#E0E0E0" TextWrapping="Wrap"
+                                 ToolTip.Tip="{Binding Description}" />
+                      <SelectableTextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Value}"
+                                           FontSize="11" Foreground="#C8D8E8"
+                                           FontFamily="Consolas,Menlo,monospace" />
+                      <!-- The interval, or the reason there is no value. Never hidden. -->
+                      <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Uncertainty}"
+                                 FontSize="10" Foreground="#9A9A9A" TextWrapping="Wrap" />
+                      <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Evidence}"
+                                 FontSize="10" Foreground="#7E8A96" TextWrapping="Wrap"
+                                 IsVisible="{Binding Evidence, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                      <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Warnings}"
+                                 FontSize="10" Foreground="#E08A70" TextWrapping="Wrap"
+                                 IsVisible="{Binding Warnings, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.DataTemplates>
+              </ItemsControl>
+            </ScrollViewer>
+          </DockPanel>
+        </TabItem>
+
+        <!--
+          The regime inspector. The excursions are the point rather than the table: a run
+          already reports these numbers, and does it at the worst place anywhere in the gas,
+          which is right for a warning and tells nobody what to change.
+        -->
+        <TabItem Header="Regime">
+          <DockPanel Margin="8,6">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+              <Button x:Name="RegimeInspect" Content="Inspect" FontSize="12"
+                      ToolTip.Tip="Walk the path and read the dimensionless numbers at each step" />
+            </StackPanel>
+
+            <SelectableTextBlock DockPanel.Dock="Top" x:Name="RegimeStatus" FontSize="11"
+                                 Foreground="#9A9A9A" TextWrapping="Wrap" Margin="0,0,0,6" />
+
+            <TextBlock DockPanel.Dock="Top" Text="Outside validity" FontSize="11"
+                       FontWeight="Bold" Foreground="#E0E0E0" Margin="0,0,0,2" />
+            <ScrollViewer DockPanel.Dock="Top" MaxHeight="150" Margin="0,0,0,8">
+              <ItemsControl x:Name="ExcursionList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="presentation:ExcursionRow">
+                    <StackPanel Margin="0,2,0,4">
+                      <TextBlock FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Foreground="#E0E0E0">
+                        <Run Text="{Binding Code}" /><Run Text="  " />
+                        <Run Text="{Binding Where}" Foreground="#E07070" />
+                      </TextBlock>
+                      <TextBlock Text="{Binding Message}" FontSize="10" Foreground="#9A9A9A" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+
+            <ScrollViewer DockPanel.Dock="Bottom" MaxHeight="110" Margin="0,6,0,0">
+              <ItemsControl x:Name="RegimeWarnings" ItemTemplate="{StaticResource Note}" />
+            </ScrollViewer>
+
+            <!--
+              The table scrolls sideways rather than squeezing eight columns into the panel,
+              and its header scrolls with it so a column is never read under the wrong name.
+              A violated row is shaded, which is the highlight section 16 asks for - on the
+              row, because a violated point is not a worse point but one where the
+              description in use does not apply.
+            -->
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+              <StackPanel>
+                <Grid ColumnDefinitions="56,60,66,62,64,58,62,58" Margin="0,0,0,2">
+                  <TextBlock Grid.Column="0" Text="t/us" Classes="head" />
+                  <TextBlock Grid.Column="1" Text="x/mm" Classes="head" />
+                  <TextBlock Grid.Column="2" Text="v m/s" Classes="head" />
+                  <TextBlock Grid.Column="3" Text="mbar" Classes="head" />
+                  <TextBlock Grid.Column="4" Text="mfp/mm" Classes="head" />
+                  <TextBlock Grid.Column="5" Text="Kn" Classes="head" />
+                  <TextBlock Grid.Column="6" Text="per cycle" Classes="head" />
+                  <TextBlock Grid.Column="7" Text="E/N Td" Classes="head" />
+                </Grid>
+                <ItemsControl x:Name="RegimeGrid">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="presentation:RegimeRow">
+                      <Grid ColumnDefinitions="56,60,66,62,64,58,62,58"
+                            Classes.violated="{Binding Violated}"
+                            ToolTip.Tip="{Binding Violations}">
+                        <TextBlock Grid.Column="0" Text="{Binding Time}" Classes="cell" />
+                        <TextBlock Grid.Column="1" Text="{Binding Position}" Classes="cell" />
+                        <TextBlock Grid.Column="2" Text="{Binding Speed}" Classes="cell" />
+                        <TextBlock Grid.Column="3" Text="{Binding Pressure}" Classes="cell" />
+                        <TextBlock Grid.Column="4" Text="{Binding MeanFreePath}" Classes="cell" />
+                        <TextBlock Grid.Column="5" Text="{Binding Knudsen}" Classes="cell" />
+                        <TextBlock Grid.Column="6" Text="{Binding PerCycle}" Classes="cell" />
+                        <TextBlock Grid.Column="7" Text="{Binding ReducedField}" Classes="cell" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </DockPanel>
+        </TabItem>
+
+        <!--
+          The sequence editor. It shows the declared timeline and does not yet edit it: a
+          sequence is a block in the model document, so editing one is editing the document
+          and goes through the same journal every other change does. What is missing is the
+          input surface rather than the path underneath it.
+        -->
+        <TabItem Header="Sequence">
+          <DockPanel Margin="8,6">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+              <Button x:Name="SequenceRead" Content="Read" FontSize="12"
+                      ToolTip.Tip="Read the declared timeline from the model" />
+            </StackPanel>
+
+            <SelectableTextBlock DockPanel.Dock="Top" x:Name="SequenceStatus" FontSize="11"
+                                 Foreground="#9A9A9A" TextWrapping="Wrap" Margin="0,0,0,6" />
+
+            <ScrollViewer DockPanel.Dock="Bottom" MaxHeight="130" Margin="0,6,0,0">
+              <ItemsControl x:Name="SequenceWarnings" ItemTemplate="{StaticResource Note}" />
+            </ScrollViewer>
+
+            <!--
+              A phase drawn as a bar proportional to its duration. Equal rows would hide the
+              shape of a pulsed extraction, which is a hold of a microsecond beside a flight
+              of a hundred - and the shape is the thing a timeline is for.
+            -->
+            <ScrollViewer>
+              <ItemsControl x:Name="PhaseList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="presentation:PhaseRow">
+                    <StackPanel Margin="0,4,0,6">
+                      <TextBlock FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Foreground="#E0E0E0">
+                        <Run Text="{Binding Name}" /><Run Text="  " />
+                        <Run Text="{Binding Span}" Foreground="#9A9A9A" FontWeight="Normal" />
+                      </TextBlock>
+                      <Border Height="7" Width="{Binding Width}" HorizontalAlignment="Left"
+                              Margin="0,2,0,3" Background="#7FA8D9" CornerRadius="2" />
+                      <TextBlock Text="{Binding Changes}" FontSize="10" Foreground="#B8B8B8" TextWrapping="Wrap" />
+                      <!--
+                        SEQ-1's boundary, marked. A packet crossing between descriptions loses
+                        its velocities one way and has them invented the other, which is the
+                        one thing about a sequence a reader must not miss.
+                      -->
+                      <TextBlock FontSize="10" FontWeight="Bold" Foreground="#E07070"
+                                 TextWrapping="Wrap" IsVisible="{Binding ModeChanged}">
+                        <Run Text="transport mode changes to " /><Run Text="{Binding Mode}" />
+                        <Run Text=" - the packet is converted here (SEQ-1)" />
+                      </TextBlock>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </DockPanel>
+        </TabItem>
+
+        <!--
+          The project view. Section 16 asks for model-drift and engine-drift state, which
+          `einzel verify` computes; what it adds is the model nobody has run, which verify
+          walks the manifests and so cannot see.
+        -->
+        <TabItem Header="Project">
+          <DockPanel Margin="8,6">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+              <Button x:Name="ProjectRead" Content="Read" FontSize="12"
+                      ToolTip.Tip="Re-read the project and the state of each model" />
+            </StackPanel>
+
+            <SelectableTextBlock DockPanel.Dock="Top" x:Name="ProjectStatus" FontSize="11"
+                                 Foreground="#9A9A9A" TextWrapping="Wrap" Margin="0,0,0,6" />
+
+            <ScrollViewer DockPanel.Dock="Bottom" MaxHeight="110" Margin="0,6,0,0">
+              <ItemsControl x:Name="ProjectWarnings" ItemTemplate="{StaticResource Note}" />
+            </ScrollViewer>
+
+            <ItemsControl DockPanel.Dock="Bottom" x:Name="ProjectContents" Margin="0,6,0,0"
+                          ItemTemplate="{StaticResource Note}" />
+
+            <ScrollViewer>
+              <ItemsControl x:Name="ProjectModels">
+                <ItemsControl.ItemTemplate>
+                  <!--
+                    The state word is coloured by severity rather than by being one of four
+                    fixed colours, because "not run" is not a problem - it is where every
+                    model starts - and painting it like "stale" would make a fresh project
+                    look broken.
+                  -->
+                  <DataTemplate x:DataType="presentation:ProjectRow">
+                    <Grid ColumnDefinitions="64,*" Margin="0,3,0,3">
+                      <TextBlock Grid.Column="0" Text="{Binding State}" FontSize="10" FontWeight="Bold"
+                                 Classes="state" Classes.bad="{Binding Bad}"
+                                 Classes.warn="{Binding Warn}" Classes.good="{Binding Good}" />
+                      <StackPanel Grid.Column="1">
+                        <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="#E0E0E0">
+                          <Run Text="{Binding Path}" /><Run Text=" " />
+                          <Run Text="{Binding Mode}" Foreground="#9A9A9A" FontSize="10" />
+                        </TextBlock>
+                        <!-- The open model marked, because the project view is read while editing one. -->
+                        <TextBlock Text="open in this window" FontSize="9" Foreground="#7FA8D9"
+                                   IsVisible="{Binding Open}" />
+                        <TextBlock Text="{Binding Detail}" FontSize="10" Foreground="#B8B8B8" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </DockPanel>
+        </TabItem>
+
+        <!--
+          The extension manager, which is LIC-2's half that a command could not satisfy: a
+          person deciding whether to run third-party code needs its licence and what the
+          sandbox does not enforce before they run it, on the pane and not behind a control.
+        -->
+        <TabItem Header="Extensions">
+          <DockPanel Margin="8,6">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+              <Button x:Name="ExtensionsRead" Content="Read" FontSize="12"
+                      ToolTip.Tip="List the project's extensions" />
+            </StackPanel>
+
+            <SelectableTextBlock DockPanel.Dock="Top" x:Name="ExtensionStatus" FontSize="11"
+                                 Foreground="#9A9A9A" TextWrapping="Wrap" Margin="0,0,0,2" />
+            <SelectableTextBlock DockPanel.Dock="Top" x:Name="ExtensionInterpreter" FontSize="11"
+                                 Foreground="#9A9A9A" TextWrapping="Wrap" Margin="0,0,0,6" />
+
+            <!--
+              The containment gaps sit on the pane rather than behind a control, wrapped
+              rather than clipped: a safety statement cut off mid-word is most of the way to
+              not making it, which is how the WPF pane first showed them.
+            -->
+            <StackPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+              <TextBlock Text="The sandbox does NOT enforce" FontSize="11" FontWeight="SemiBold"
+                         Foreground="#E07060" />
+              <ItemsControl x:Name="ExtensionUnenforced" ItemTemplate="{StaticResource Note}" />
+            </StackPanel>
+
+            <ScrollViewer>
+              <ItemsControl x:Name="ExtensionGrid">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="presentation:ExtensionRow">
+                    <StackPanel Margin="0,4,0,7">
+                      <TextBlock FontSize="11" FontWeight="Bold" TextWrapping="Wrap" Foreground="#E0E0E0">
+                        <Run Text="{Binding Name}" /><Run Text="  " />
+                        <Run Text="{Binding Version}" Foreground="#9A9A9A" FontWeight="Normal" /><Run Text="  " />
+                        <Run Text="{Binding Kind}" Foreground="#9A9A9A" FontWeight="Normal" /><Run Text="  " />
+                        <Run Text="{Binding Trust}" Foreground="#9A9A9A" FontWeight="Normal" />
+                      </TextBlock>
+                      <!--
+                        LIC-2. Red and bold where nothing was declared: the one field on the
+                        row a reader cannot recompute for themselves.
+                      -->
+                      <TextBlock FontSize="10" TextWrapping="Wrap" Margin="0,1,0,0"
+                                 Classes="licence" Classes.undeclared="{Binding !LicenceDeclared}">
+                        <Run Text="licence: " /><Run Text="{Binding Licence}" />
+                      </TextBlock>
+                      <TextBlock Text="{Binding Description}" FontSize="10" Foreground="#9A9A9A" TextWrapping="Wrap" />
+                      <TextBlock FontSize="10" FontWeight="Bold" Foreground="#E07060"
+                                 TextWrapping="Wrap" IsVisible="{Binding !Usable}">
+                        <Run Text="this engine refuses it: " /><Run Text="{Binding Incompatibility}" />
+                      </TextBlock>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </DockPanel>
+        </TabItem>
+
+      </TabControl>
 
     </Grid>
 
