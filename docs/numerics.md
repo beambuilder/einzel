@@ -419,6 +419,13 @@ a cap meant to *be* the edge is an edge profile.
   arms, moved the nearest free node by 2.5 percent of its channel, and moved the ion's flight
   time **4.5e-4**. Cut cells make the answer continuous in where one conductor's surface sits
   **only while its faces are off the node planes**. Not checked; recorded as open.
+  **A second instance, measured as a step**: a bore on the axis of the Paul trap's endcap, swept
+  across a radial node row. The axial potential near the endcap moves 0.215 V of 400 applied for
+  a nanometre of bore at the 0.5 mm row and 1.48 V at the 1.0 mm row, and on the row it equals
+  the limit from below. That is what the mechanism above predicts - arms along the row, from
+  free nodes at the bore's two mouths, cut at the endcap's faces on one side of the row and
+  grazing through the bore on the other - though it was not traced arm by arm. No warning. `PaulTrapEndcapHoleStudy.ABoreFaceOnANodeRowIsAStepNothingWarnsOf` asserts the step,
+  so it fails when this is fixed.
 
 ## Interior electrodes
 

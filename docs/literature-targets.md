@@ -1537,3 +1537,93 @@ fraction of height, plus a low-mass-tail measure, which is what the paper's head
 template with housing, or an `idealQuadrupoleRf` that can stop ions at r0, for the baseline
 curves; **(4)** a uniform-disc entrance in the cloud; **(5)** a rejection radius option. The
 peak shift of the round-rod trailing edge needs only (1) to (3).
+
+## 9. Quadrupole ion trap: three-program comparison (Forbes 1999)
+
+Forbes, Sharifi, Croley, Lausevic and March, "Simulation of ion trajectories in a quadrupole ion
+trap: a comparison of three simulation programs", *J. Mass Spectrom.* **34**, 1219-1239 (1999).
+Full text in `papers/` (gitignored, Wiley). The only cross-code comparison for a quadrupole ion
+trap this project has, and the closest thing to the SIMION tier §19 asks for that is available
+without a licence: the same problem run in ITSIM 4.1 and ISIS (both evaluating the ideal
+quadrupole directly) and SIMION 6.0 (a refined potential array at 0.044 mm per grid unit), with
+the results tabulated.
+
+### What the paper did, and what it states
+
+- **Geometry: the ideal trap only**, r0 = 10 mm, z0 = 7.071 mm, r0² = 2z0². Its SIMION array has
+  holes in both endcaps and an ion gate in front of the entrance, but **no hole radius is
+  stated**, and **no stretched geometry was simulated** - it notes that ITSIM and ISIS can model
+  one. So the paper supplies no provenance for the template's hole radius or stretch, both of
+  which stay unsourced (`device-templates.md`, "Holes in the endcaps").
+- **Single-ion, collision-free comparison** (tables 1 and 2): 1.1 MHz, phase zero, q_z = 0.400,
+  a = 0, m/z 100, start at 0.5 mm on each axis, velocity (0, 200, -100) m/s in (x, y, z), 25 µs.
+  The ring potential is written as `U - V cos(Omega t + phi)`, and the voltages quoted elsewhere
+  (495 V zero-to-peak for q_z = 0.4 at m/z 100; 371.317 V for 0.3) agree with
+  `q_z = 4eV / (m Omega² r0²)`.
+- **Collisional comparisons** (table 3, plates 2-3): one m/z 100 ion at q_z 0.4 in 15 mTorr of
+  helium for 1 ms, Langevin in ISIS and ITSIM (polarisability 0.20495 Å³, 493 K; 149 and 151
+  collisions), hard-sphere in ITSIM (50 Å²) against SIMION's velocity-damping model. Shown as
+  plotted curves only.
+- **Injection** (table 4, table 5, figure 15): sixteen ions captured where SIMION flew them past
+  the entrance endcap, then flown in all three codes for 50 µs at 15 mTorr with a +250 V pulse on
+  the exit endcap; trapping efficiency 62 / 75 / 81 percent (SIMION / ISIS / ITSIM), and the
+  phase-angle trapping windows of figure 15.
+
+### The checkable numbers, and what Einzel gets
+
+Run on the `paul-trap` template scaled whole to r0 = 10 mm (gap, ring and endcap thickness by
+2.5, so the truncation is the shipped one), ring driven as the paper's `-V cos`,
+`PaulTrapForbesComparison.TheSingleIonComparison`:
+
+| | z min / max (mm) | r max (mm) | Ek max (eV) | f_z (kHz) | f_r (kHz) |
+| --- | --- | --- | --- | --- | --- |
+| SIMION (table 2) | -1.0631 / 1.0421 | 1.1477 | 1.6089 | 161.1 | 78.7 |
+| ITSIM (table 2) | -1.0206 / 1.0264 | 1.1475 | 1.5251 | 161.1 | 78.4 |
+| ISIS (table 2) | -1.0100 / 1.0000 | 1.1390 | 1.5298 | 161.0 | 78.4 |
+| Mathieu at q_z = 0.400 | | | | 160.911 | 78.403 |
+| ideal field, integrated here (RK4, 0.5 ns) | -0.5229 / 0.5242 | 0.9119 | 0.5405 | | |
+| **Einzel, solved trap** | **-0.5227 / 0.5242** | **0.9120** | **0.5427** | **161.02** | **78.43** |
+| Einzel, at its own q_eff = 0.40031 (r0_eff 9.9961 mm) | | | | 161.045 predicted | 78.465 predicted |
+
+- **The secular frequencies reproduce.** Einzel's lines are Mathieu's at the q the solved field's
+  curvature implies, to 0.03 kHz (asserted to 0.1 kHz; the whole millisecond is flown once and its
+  first 25 us give the excursions); the truncation makes r0_eff 0.04 percent small, which is worth
+  +0.13 kHz against the nominal q. The three codes agree with each other to 0.1 kHz.
+- **The paper's own frequency claim does not add up**: it states the theoretical axial line as
+  160.91142 kHz and the codes as within 0.01 percent of it, while reporting 161.1, which is
+  0.12 percent above. Einzel's ideal-geometry answer, 161.02, sits between; a 25 µs record cannot
+  resolve either difference (its resolution is 40 kHz) and the paper took its lines from a 1 ms
+  record (figure 13).
+- **The tabulated excursions do not reproduce - and neither does the ideal field.** Integrating
+  the ideal quadrupole directly from table 1's starting point gives half a millimetre of axial
+  excursion and 0.54 eV peak energy; all three codes report about a millimetre and 1.5 eV, and
+  1.15 mm radially against 0.91. Einzel agrees with the ideal field to under a micrometre
+  (worst excursion 0.26 um; asserted under 1 um). With the drive sign flipped the ideal field
+  gives 0.78 mm and 0.85 eV - closer, and still not the table - and Einzel flown with that sign
+  agrees with it too (0.36 um, asserted). So something in table 1 is not what the codes were given (the starting point, the
+  velocity units, or the phase), and the extracted text cannot say which. **Recorded as a
+  disagreement with both sides stated**; it is not tuned away, and the test asserts it stays
+  visible.
+- **What a real trap would have shown**: the same run with holes of 0.175 of the endcap radius
+  in both endcaps (1.49 mm holes at this scale, 4.76 radial spacings of its mesh) and a 0.107 stretch gives
+  f_z = 141.34 kHz and f_r = 69.30 kHz, **12 percent below** the ideal trap's at the same volts
+  - r0_eff 10.63 mm, and both lines are Mathieu's at that radius to 0.02 kHz (asserted to 0.1). None of the three codes as run could see that;
+  SIMION could have, had the paper reported its holed geometry's numbers.
+
+### What is not reproduced, and what is blocked
+
+- **The collisional comparisons** are plotted, not tabulated, apart from the collision counts;
+  the Langevin rate at the stated pressure, polarisability and temperature is a closed form this
+  engine already checks (`pressure.md`), but matching curves read off a plate is not a
+  comparison worth the name.
+- **The injection study** needs ions launched from *outside* the trap through the entrance hole
+  and a pulsed exit endcap. The template now has the hole and a sequence could carry the pulse;
+  what is missing is the ion gate geometry, the hole radius, and the exact starting states, of
+  which table 4 gives sixteen. The sixteen-ion trapping fractions disagree between the codes by
+  19 points and the paper itself warns against reading them, so they would not discriminate
+  anyway.
+- **The stretched-trap and hole numbers** a real instrument needs are not in this paper. What
+  the unsourced 0.175 holes and 0.107 stretch do to the ejection edge is measured in
+  `device-templates.md` ("The edge measured on an ensemble"): the holes move it out 0.0120 of
+  q_eff and the stretch brings back 0.0030 of that. Neither figure is a prediction for a named
+  instrument until the hole radius and the stretch are sourced.

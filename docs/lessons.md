@@ -5633,6 +5633,49 @@ apart.** Both defects are now pinned by tests — written after the window showe
 is the usual order for this class and the reason a GUI change is not finished when its tests
 are green.
 
+## A bisection over a ragged edge turns one flight's last bit into a platform difference
+
+The Paul trap with holes in its endcaps ejected at 759 V on Windows and 762.5 V on Linux. The
+first explanation was the loss criterion, the second was "the last digits belong to the
+platform's arithmetic", and both were written down before the edge had been looked at. Scanned
+in 0.25 V steps it is not an edge: at 200 cycles, amplitudes are held above the first one lost
+across more than two volts. A bisection assumes one crossing. Given several it lands on whichever
+its midpoints meet, and one of its midpoints sat on the last held island - so the verdict of one
+marginal flight, which does turn on the last bit, moved the answer 3.5 V. Every step of a
+bisection is consistent with a single crossing by construction, so the result looked as
+confident as the ideal trap's, which really is one step.
+
+Two rules, and a correction to the first.
+
+**Check that an edge is a step by scanning it, not by bisecting it.** A bisection cannot see
+the thing that invalidates it. `einzel boundary` walks outward from its bracket for this reason;
+a test that calls its own bisection has to do the same, or print the scan beside the bracket.
+
+**Hold long enough that the edge is a step - and if no hold makes it one, publish the strip.**
+The first fix held 800 cycles and reported the edge as "one place". It is not: for two holes the
+strip narrows from 2.25 V to 0.75 V and stays there at 2000 cycles, and inside it the bisected
+bracket moves 1.4 V across integrator tolerances of 1e-8, 1e-9 and 1e-10 while the ideal trap's
+does not move a bit. The number that belongs to the trap is the strip, q_eff 0.917 to 0.920; a
+bracket 0.2 V wide inside it belongs to the tolerance.
+
+**And when two geometries differ by the width of the strip, stop asking one ion.** Whether the
+stretch brings the holed edge back was written down as "not resolved": 0.914-0.916 against
+0.917-0.920, two overlapping strips. The answer was there to be had - 0.0030 of q, separated
+under every control - from a seeded cloud of 200 ions and the amplitude at which half are lost.
+With holes 73 of 1024 flights change sides between tolerances of 1e-8 and 1e-9, and the cloud's
+edge moves under 0.0002: the coin that decided a bisection is one vote. The general form: **a
+quantity decided by a chaotic trajectory is a distribution, and "not resolved" about one sample
+of it is a statement about the method.** Two things the cloud did not make go away, both found
+by its controls: the holed edges fall 0.0006 between 800 and 2000 cycles, so an edge is still an
+edge at a hold; and the bootstrap interval over one cloud was half again narrower than the spread
+between eight clouds, which this project had already found once (a bootstrap over one
+realization is not an error bar in a chaotic ensemble) and met again.
+
+**And that tolerance check had been run and reported clean - through a parameter the function
+ignored.** The flight helper took `relativeTolerance` and handed the integrator a constant, so
+"1e-8 or 1e-10 moves no edge" compared each run with itself. A sensitivity check needs its own
+control: show the knob does something somewhere (here, a looser tolerance takes fewer steps over
+the same flight) before reporting that it does nothing where it matters.
 ## A reading that falls as a process warms up is the JIT tiering up, and a median of it is a vote
 
 `SelfFieldMemoryTests` failed on a Windows CI runner reading 5140, 5139, 5125, 5029 and 4996

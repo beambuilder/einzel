@@ -3231,3 +3231,118 @@ Two findings from Stage 1 that bear on the spec:
   3.1.2, and a doc comment in `Einzel.Render` said a zero normal behaves one way "in either
   window". History is kept where it explains a decision - the Helix section, the globalization
   reversal, the camera defects - and marked as history rather than read as the current state.
+
+- **The Paul trap gets what a real one has - endcap holes and a stretched spacing - and a
+  published three-program comparison; and a review of the first write-up found four of its
+  claims had not been measured.** `paul-trap` takes `endcapEntranceHoleFraction`,
+  `endcapExitHoleFraction` (a bore on each endcap's axis, as a fraction of the endcap's radius so
+  it cannot reach the edge) and `endcapStretchFraction` (both endcaps moved outward, every surface
+  keeping its shape). All default to zero, and at zero the solved field is the earlier
+  template's to the bit.
+
+  | holes 0.175 of the endcap radius (0.595 mm), stretch 0.107 | octupole A4/A2 | r0_eff | ejection edge, q_eff |
+  | --- | --- | --- | --- |
+  | ideal | +0.90 % | 3.9983 mm | 0.9056-0.9058 |
+  | one hole | -0.59 %, hexapole -0.89 % | 4.0086 | 0.910 |
+  | two holes | **-2.10 %** | 4.0189 | **0.917-0.920**, +1.3 % |
+  | two holes and the stretch | -0.50 % | 4.2516 | 0.914-0.916 |
+
+  Those edges are one ion's, bisected; on a cloud of 200 they are 0.9058, 0.9102, 0.9176 and
+  0.9146 (below).
+
+  **One hole opens a hexapole band** at q_eff 0.785-0.790, where an ion held just below has
+  3 beta_z = 1.980 - the order predicted from the broken symmetry - at 20 and 40 cells per r0.
+  **Two holes open the octupole's band at q_eff 0.810, given 800 cycles** (2 beta_z + 2 beta_r =
+  1.979 just below it); 200 cycles show nothing, the ideal trap loses nothing at 2000, and holes
+  plus stretch, with a quarter of the octupole, need 2000. The first draft said the band "does not
+  come back with two holes": a statement about the hold.
+
+  **Forbes et al. 1999 as a test** (`PaulTrapForbesComparison`): one ion in the ideal trap at
+  q_z = 0.400, flown in SIMION, ITSIM and ISIS and tabulated. The secular lines reproduce - 161.02
+  and 78.43 kHz against 161.0-161.1 and 78.4-78.7, asserted inside the published spread. **The
+  tabulated excursions do not, and neither does the ideal field**: about 1.0 mm and 1.5 eV in all
+  three programs, 0.52 mm and 0.54 eV integrating the ideal quadrupole directly from the paper's
+  stated start, which Einzel matches to under 0.4 um. Recorded as a disagreement with the table, not
+  tuned away. Against published numbers, not a licensed SIMION run (SPEC.md Amendment 6, note).
+
+  **The re-measurement story, which is most of what is worth keeping.** The holed edge first
+  came out at 759 V on one platform and 762.5 V on another, and the first suspect was the loss
+  criterion - counting an ion held by where it was at the last instant, which in a holed trap
+  could count one that swung into a bore and back. **It was not that**: the two criteria agree
+  on every flight compared. Scanned in 0.25 V steps instead of bisected, **the holed edge at 200
+  cycles is a ragged strip** - held amplitudes above the first lost one, 759.25 to 762.50 V on
+  that geometry - and the bisection's fifth midpoint, 762.5 V, sat on the last held island, so
+  **one marginal flight was the whole Windows/Linux difference**. Held 800 cycles the strip is
+  under a volt.
+
+  **Then a second review found the write-up of that still claimed too much, in four places.**
+  - **"A tolerance of 1e-8 or 1e-10 moves no edge" compared each run with itself**: the flight
+    helper took `relativeTolerance` and passed the integrator a constant. Wired through, the
+    ideal trap's bracket is identical at all three, and **two holes give 759.38, 758.59 and
+    758.01 V** - q_eff 0.9194, 0.9184, 0.9177. So "held 800 cycles the edge is one place" was
+    wrong too: for two holes it is a strip at 800 and at 2000 cycles (757.50 first lost, 758.25
+    last held, with finer islands above), and what is published is 0.917-0.920, not a 0.2 V
+    bracket. A test now checks the tolerance reaches the integrator, by step count; reverting
+    the wiring fails it.
+  - **The bore was kept off the mesh's node rows by a sixteenth-of-a-cell offset, and the test
+    of it never crossed a row** - its probe declared 0.5 mm and the offset moved the face to
+    0.5125. The offset is gone: it protected only some fractions, **made the geometry depend on
+    the mesh** (the 20- against 40-cell comparison compared bores 6.25 um apart) and jumped the
+    bore from 0 to 12.5 um as the fraction left zero. The bore is exactly the declared hole, and
+    the shipped 0.175 sits 0.24 and 0.48 of a spacing clear of a row at the two meshes. **Crossing
+    a row for real measures a step, not a rounding**: 0.215 V of 400 applied for a nanometre of
+    bore at the 0.5 mm row, 1.48 V at 1.0 mm, and no warning. That is the open single-conductor
+    coincidence (SPEC.md item 11), now with a worked case and a test that fails when it is fixed.
+    With the geometry fixed across meshes the mesh moves the two-hole octupole 9.4e-4, not the
+    6.1e-4 first reported.
+  - **`entranceStop` existed only while the entrance hole was open**, so an ion behind a closed
+    endcap, or leaving through the outer radius, could coast out and read as confined. Flown:
+    released beside the ring at r = 7.5 mm it ends a metre away with a held ion's outcome. Both
+    `entranceStop` and a new `outerStop`, a cell outside the mesh, are always present now and fix
+    no node - the zero-hole field is still the old one to the bit - so every exit is itemised.
+    Whether an ion from inside ever takes the gap is not shown; released in the gap it strikes
+    an endcap.
+  - **"Bit for bit against the pre-change template" was asserted against a document that still
+    carried the new expressions.** The test now rebuilds the old geometry from the old
+    expressions, written out, with the new parameters removed so a leftover reference cannot
+    compile. What it cannot assert is that the transcription is the old file; that was checked
+    once by solving the old file itself.
+
+  **Whether the stretch brings the holed edge back was "not resolved", and the reason was the
+  method.** In effective q the linear boundary is the same for every geometry by construction,
+  so the difference is nonlinear and one ion's fate near the edge is a coin: the two bisected
+  strips are each as wide as the 0.003 between them. Measured instead on a seeded cloud - 200
+  ions from rest in a 0.13 mm ball (the size of a 300 K cloud), each at its own RF phase, the
+  same ions in every geometry; the edge is where the loss fraction crosses 50 percent, with a
+  bootstrap interval:
+
+  | 200 ions, 800 cycles | edge, q_eff [95 %] |
+  | --- | --- |
+  | ideal | 0.9058 [0.9054, 0.9062] |
+  | one hole | 0.9102 [0.9099, 0.9105] |
+  | two holes and the stretch | **0.9146** [0.9144, 0.9148] |
+  | two holes | **0.9176** [0.9174, 0.9179] |
+
+  **The stretch brings the two-holed edge back by 0.0030 of q_eff, a quarter of the 0.0120 the
+  holes moved it**: 0.00299 with a standard error of 0.00006 over eight paired clouds, and 0.0027
+  to 0.0037 under every control - tolerances of 1e-8 and 1e-10, eight clouds, a 2000-cycle hold,
+  40 cells per r0. The ideal trap loses the same ions at every tolerance; with holes 73 of 1024
+  flights change sides and the edge moves under 0.0002. **Two controls found something.** The
+  hold moves both holed edges down by 0.0006 between 800 and 2000 cycles - more than their
+  intervals, and together, so the step is unchanged - and the standard deviation between clouds,
+  0.00015, is half again what the bootstrap implies, so the between-cloud spread is the error
+  bar. **A stretch series at fixed holes** (0, 0.0535, 0.107, 0.160, 0.214) gives 0.9176, 0.9161,
+  0.9146, 0.9132, 0.9123: five separated intervals in order. **And it does not follow the
+  octupole alone**: A4 goes -2.10, -1.10, -0.50, -0.18, -0.23 percent - the test written
+  expecting it to rise at every step failed at the last - while the edge goes on falling with
+  the 12-pole. Twice the shipped stretch recovers under half of what the holes did. `q_eff`
+  takes out the stretch's 11 percent change of scale; the cloud is the same in millimeters and
+  the hold in cycles. Asserted on 64 ions in `PaulTrapEndcapHoleEdge`, with the order as
+  separated intervals.
+
+  **Every number that moved, moved because the bore did** (0.6075 to 0.595 mm): octupole -2.20
+  to -2.10 %, two-hole edge bracket q_eff 0.9180-0.9182 to 0.9183-0.9185, the 200-cycle strip's
+  top 762.50 to 761.50 V, the stretched holed trap's lines in the Forbes run 141.32 and 69.28 to
+  141.34 and 69.30 kHz. Not built: the resonance-ejection scan through the exit hole. Not
+  sourced: the hole size and the stretch, so nothing here predicts a named instrument. Details
+  in `docs/device-templates.md`, `docs/literature-targets.md` section 9, `docs/lessons.md`.

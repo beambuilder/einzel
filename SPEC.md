@@ -1116,6 +1116,25 @@ primary reference, literature regression promoted to the main external check, an
 agreement between an analytic and a solved path substituting for agreement between
 two codes.
 
+**Note, 2026-11-15: one cross-code comparison now exists, against published numbers.**
+The amendment stands - there is still no SIMION licence and no run of SIMION behind
+anything here. What changed is that Forbes et al. (J. Mass Spectrom. 34, 1219, 1999) flew
+one ion through an ideal quadrupole ion trap in three programs, SIMION 6.0 among them, and
+tabulated the results, and that comparison is now a test:
+`PaulTrapForbesComparison.TheSingleIonComparison`, on the `paul-trap` template scaled to
+the paper's r0 = 10 mm at its q_z = 0.400. **What agrees**: the secular frequencies.
+Einzel gives 161.02 kHz axially and 78.43 kHz radially against the three programs' 161.0
+to 161.1 and 78.4 to 78.7, asserted inside the published spread plus one unit in the
+paper's last place. **What does not**: the tabulated excursions and peak kinetic energy
+(about 1.0 mm and 1.5 eV in all three programs) against 0.52 mm and 0.54 eV here - and
+the ideal quadrupole field integrated directly from the paper's stated starting
+conditions gives 0.52 mm and 0.54 eV too, which Einzel matches to under 0.4 micrometres. So
+the paper's table of conditions is not what its codes were given, the test asserts the
+disagreement stays visible, and `docs/literature-targets.md` section 9 records both
+sides. This is a comparison with numbers in print, on one device at one working point;
+it is the nearest thing to §19's cross-code tier available without a licence and is not
+that tier.
+
 ### 7 · §9's source model assumed a beam, and §12 already required otherwise
 
 §9 required a non-zero accelerating potential "or the ion never moves". That is
@@ -3656,6 +3675,14 @@ the UI and render threads.
      or graze on the last bit. Measure how common it is (the funnel's first and last rings have
      it; round-number geometry on round-number meshes will often), then decide whether it wants a
      warning, a fix in the cut links - treating an arm in a face's plane as meeting it - or both.
+     **A second measured instance, 2026-11-15, and it is a step rather than a last-bit coin**:
+     a bore on the axis of the Paul trap's endcap whose face crosses a radial node row moves
+     the axial potential by 0.215 V of 400 applied for a nanometre of bore at the 0.5 mm row
+     and 1.48 V at the 1.0 mm row, with the on-row value equal to the limit from below - so
+     the field is discontinuous in the geometry at every row, not only undetermined on it.
+     Nothing warns. `PaulTrapEndcapHoleStudy.ABoreFaceOnANodeRowIsAStepNothingWarnsOf`
+     asserts the step is there, so it fails the day this is fixed. A worked case to fix
+     against, and a reason to rank the fix above the warning.
 
 
 12. **Distribution, and the trigger is a person rather than a date.** Fourteen of the

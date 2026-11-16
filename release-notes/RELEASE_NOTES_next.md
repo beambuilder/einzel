@@ -127,6 +127,35 @@ become a feature release without being renamed twice.
   and there is no periodic re-check, so an agent running `einzel` sees one version throughout. The
   command line, the MCP server, the portable archives and a source build never check. See
   `docs/install.md`.
+- **The `paul-trap` template has endcap holes and a stretch.** Three new parameters, all zero by
+  default, and at zero the template solves to the field it always had, to the bit:
+  `endcapEntranceHoleFraction` and `endcapExitHoleFraction` cut a bore on the axis of each endcap,
+  as a fraction (at most 0.9) of the endcap's radius, and `endcapStretchFraction` moves both
+  endcaps outward by a fraction of z0. An ion ejected through the exit hole arrives at the
+  detector; one that meets the endcap is itemised on `endcapExit`.
+- **Every way out of the `paul-trap` solve is itemised.** Two grounded stops, `entranceStop` and
+  `outerStop`, are always present and change no field value. An ion that leaves at the entrance
+  end or through the outer radius is now reported as striking one of them, where it could coast
+  out of the domain and be counted as confined.
+- **Know before scanning a hole size**: the bore is exactly the hole declared, and a bore whose
+  radius is a multiple of the radial mesh spacing (0.125 mm as shipped) sits on a step in the
+  solved field - 0.2 V of 400 at 0.5 mm - with no warning. Keep hole radii off those multiples.
+- **With holes, the ejection edge is a strip and not a point.** Two holes of 0.175 of the endcap
+  radius move it out to q_eff 0.917-0.920 (the ideal trap: 0.906); inside that strip held and lost
+  amplitudes interleave, and where a search lands moves with the integrator tolerance. Hold 800
+  cycles or more and scan the edge; do not bisect it. Measurements are in
+  `docs/device-templates.md`.
+- **Measured on a cloud of ions, the stretch brings the holed trap's ejection edge a quarter of
+  the way back.** With 200 ions released in a 0.13 mm ball at random RF phase, half are lost at
+  q_eff 0.9058 in the ideal trap, 0.9176 with two holes and 0.9146 with two holes and a 0.107
+  stretch: the stretch recovers 0.0030 (0.0027 to 0.0037 over tolerance, cloud, hold and mesh)
+  of the 0.0120 the holes cost. Twice that stretch recovers under half. A holed edge quoted
+  finer than 0.0006 belongs to the hold: it falls by that much between 800 and 2000 cycles.
+- **A published three-program comparison is a test.** The single-ion case of Forbes et al. 1999
+  (SIMION, ITSIM, ISIS) runs on `paul-trap`: the secular frequencies agree with all three
+  programs; the tabulated excursions do not, and do not agree with the ideal field either, which
+  is recorded in `docs/literature-targets.md`. This is against published numbers, not a SIMION
+  run.
 
 ## Bug Fixes
 
