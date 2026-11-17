@@ -119,6 +119,7 @@ public static class Program
             "project" => Project(options),
             "estimate" => Estimate(options),
             "solve" => Solve(options),
+            "probe" => Probe(options),
             "run" => Run(options),
             "fly" => Fly(options),
             "sweep" => Sweep(options),
@@ -1110,6 +1111,175 @@ public static class Program
         return (int)(outcome.Converged ? ExitCode.Success : ExitCode.ConvergenceFailure);
     }
 
+
+    private const string ProbeUsage =
+        "usage: einzel probe <model.json> --at-mm x,y,z [--at-us <t>] [--json]\n"
+        + "       einzel probe <model.json> --line-mm x,y,z --to-mm x,y,z [--samples N] [--at-us <t>]\n"
+        + "                                 [--csv <file>] [--dry-run] [--json]\n"
+        + "the potential and electric field of the field a run flies through, at one point or along a\n"
+        + "line (both ends included, N >= 2, 21 by default)\n"
+        + "  --at-mm / --line-mm / --to-mm  coordinates in millimetres: the unit is in the flag's name\n"
+        + "  --at-us  the instant, in microseconds, for a driven or sequenced field (it is the field at\n"
+        + "           t = 0 and says so when not given)\n";
+
+    private static bool TryVec3(string? text, out Core.Geometry.Vec3 value)
+    {
+        value = default;
+
+        if (text is null)
+        {
+            return false;
+        }
+
+        var parts = text.Split(',', StringSplitOptions.TrimEntries);
+
+        if (parts.Length != 3
+            || !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+            || !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y)
+            || !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var z))
+        {
+            return false;
+        }
+
+        value = new Core.Geometry.Vec3(x, y, z);
+        return true;
+    }
+
+    private static int Probe(CommandLine options)
+    {
+        // The bare spellings are refused by name rather than ignored: a number with no unit is the
+        // ambiguity this project refuses everywhere else, and an agent that types --at 5,0,0 has
+        // to be told which unit the flag wants, not given a silent default.
+        foreach (var bare in new[] { "at", "line", "to" })
+        {
+            if (options.Has(bare))
+            {
+                Console.Error.WriteLine(
+                    $"--{bare} has no unit. Say it in the flag's name: --{bare}-mm x,y,z (millimetres).");
+                return (int)ExitCode.ValidationFailure;
+            }
+        }
+
+        var invariant = CultureInfo.InvariantCulture;
+        var hasPoint = options.Has("at-mm");
+        var hasLine = options.Has("line-mm");
+
+        if (options.Positional.Count == 0 || hasPoint == hasLine)
+        {
+            Console.Error.Write(ProbeUsage);
+            return (int)ExitCode.ValidationFailure;
+        }
+
+        if (!TryVec3(options.Value(hasPoint ? "at-mm" : "line-mm"), out var from))
+        {
+            Console.Error.WriteLine(
+                $"--{(hasPoint ? "at-mm" : "line-mm")} takes three numbers, x,y,z, in millimetres (no spaces).");
+            return (int)ExitCode.ValidationFailure;
+        }
+
+        Core.Geometry.Vec3? to = null;
+        var samples = 21;
+
+        if (hasLine)
+        {
+            if (!TryVec3(options.Value("to-mm"), out var end))
+            {
+                Console.Error.WriteLine("--line-mm needs --to-mm x,y,z, the other end, in millimetres.");
+                return (int)ExitCode.ValidationFailure;
+            }
+
+            to = end;
+
+            if (options.Value("samples") is { } asked
+                && !int.TryParse(asked, NumberStyles.Integer, invariant, out samples))
+            {
+                Console.Error.WriteLine($"--samples takes a whole number, and '{asked}' is not one.");
+                return (int)ExitCode.ValidationFailure;
+            }
+        }
+        else if (options.Has("to-mm") || options.Has("samples"))
+        {
+            Console.Error.WriteLine("--to-mm and --samples describe a line; a point takes only --at-mm.");
+            return (int)ExitCode.ValidationFailure;
+        }
+
+        double? at = null;
+
+        if (options.Value("at-us") is { } instant)
+        {
+            if (!double.TryParse(instant, NumberStyles.Float, invariant, out var parsed))
+            {
+                Console.Error.WriteLine($"--at-us takes a time in microseconds, and '{instant}' is not one.");
+                return (int)ExitCode.ValidationFailure;
+            }
+
+            at = parsed;
+        }
+
+        var outcome = ProbeCommand.Execute(options.Positional[0], new ProbeRequest(from, to, samples, at));
+
+        if (options.Value("csv") is { } csv)
+        {
+            var target = Path.GetFullPath(csv);
+
+            if (!options.Has("dry-run"))
+            {
+                File.WriteAllText(target, ProbeCommand.ToCsv(outcome));
+            }
+
+            Console.Error.WriteLine(options.Has("dry-run") ? $"would write {target}" : $"wrote {target}");
+        }
+
+        if (options.Has("json"))
+        {
+            return Emit(outcome);
+        }
+
+        if (outcome.InstantUs is { } t)
+        {
+            Console.Out.WriteLine(string.Create(invariant, $"field at t = {t:G6} us"));
+        }
+
+        // B columns only where the model declares a magnet, which adds no phi and no E.
+        var magnetic = outcome.Samples.Any(s => s.FluxDensityT is not null);
+
+        Console.Out.WriteLine(
+            "  #       x_mm       y_mm       z_mm     phi_V        Ex_V/m        Ey_V/m        Ez_V/m   "
+            + (magnetic ? "      Bx_T          By_T          Bz_T   " : string.Empty) + "status");
+
+        foreach (var s in outcome.Samples)
+        {
+            var phi = s.PotentialV is { } p ? p.ToString("G8", invariant) : "-";
+            var e = s.FieldVPerM;
+            var bt = s.FluxDensityT;
+            var bColumns = !magnetic
+                ? string.Empty
+                : string.Create(
+                    invariant,
+                    $"{(bt is null ? "-" : bt[0].ToString("G6", invariant)),10} "
+                    + $"{(bt is null ? "-" : bt[1].ToString("G6", invariant)),13} "
+                    + $"{(bt is null ? "-" : bt[2].ToString("G6", invariant)),13}   ");
+            var label = s.Status
+                + (s.Conductor is not null && s.Status == ProbeStatus.InsideConductor
+                    ? " (" + s.Conductor + ")"
+                    : string.Empty)
+                + (s.Note is null ? string.Empty : "  " + s.Note);
+
+            Console.Out.WriteLine(string.Create(
+                invariant,
+                $"{s.Index,3} {s.PositionMm[0],10:G6} {s.PositionMm[1],10:G6} {s.PositionMm[2],10:G6} "
+                + $"{phi,12} {(e is null ? "-" : e[0].ToString("G6", invariant)),13} "
+                + $"{(e is null ? "-" : e[1].ToString("G6", invariant)),13} "
+                + $"{(e is null ? "-" : e[2].ToString("G6", invariant)),13}   "
+                + $"{bColumns}{label}"));
+        }
+
+        // GRD-2: warnings reach this surface too.
+        Warn(outcome.Warnings);
+
+        return (int)ExitCode.Success;
+    }
+
     private static int Preview(CommandLine options)
     {
         if (options.Positional.Count == 0)
@@ -1502,10 +1672,13 @@ public static class Program
     {
         if (options.Positional.Count == 0)
         {
-            Console.Error.WriteLine("usage: einzel export <model.json> [--mesh] [--project <dir>] [--dry-run] [--json]");
+            Console.Error.WriteLine("usage: einzel export <model.json> [--mesh | --composite] [--project <dir>] [--dry-run] [--json]");
             Console.Error.WriteLine("writes the solved potential field as VTK ImageData for ParaView");
             Console.Error.WriteLine("  --mesh  write the conductor surfaces as Wavefront OBJ instead,");
             Console.Error.WriteLine("          one named object per electrode, for any 3D renderer");
+            Console.Error.WriteLine("  --composite  sample the field a run flies through (all elements summed) on a");
+            Console.Error.WriteLine("          regular grid and write potential and E together, at one instant:");
+            Console.Error.WriteLine("          [--box-mm x0,y0,z0,x1,y1,z1] [--step-mm s] [--at-us t]");
             return (int)ExitCode.ValidationFailure;
         }
 
@@ -1517,9 +1690,65 @@ public static class Program
         // A mesh and a field volume are different artifacts about the same model, so this
         // is a choice of what to export rather than of how - which is why it is a flag on
         // 'export' and not a verb of its own.
-        var outcome = options.Has("mesh")
-            ? ExportCommand.Mesh(modelPath, layout, dryRun)
-            : ExportCommand.Vtu(modelPath, layout, dryRun);
+        ExportOutcome outcome;
+
+        if (options.Has("composite"))
+        {
+            Core.Geometry.Vec3? boxMin = null;
+            Core.Geometry.Vec3? boxMax = null;
+
+            if (options.Value("box-mm") is { } box)
+            {
+                var parts = box.Split(',', StringSplitOptions.TrimEntries);
+
+                if (parts.Length != 6
+                    || parts.Any(p => !double.TryParse(
+                        p, NumberStyles.Float, CultureInfo.InvariantCulture, out _)))
+                {
+                    Console.Error.WriteLine(
+                        "--box-mm takes six numbers, x0,y0,z0,x1,y1,z1, in millimetres (no spaces).");
+                    return (int)ExitCode.ValidationFailure;
+                }
+
+                var v = parts.Select(p => double.Parse(p, CultureInfo.InvariantCulture)).ToArray();
+                boxMin = new Core.Geometry.Vec3(v[0], v[1], v[2]);
+                boxMax = new Core.Geometry.Vec3(v[3], v[4], v[5]);
+            }
+
+            double? step = null;
+            double? instant = null;
+
+            foreach (var (flag, unit) in new[] { ("step-mm", "millimetres"), ("at-us", "microseconds") })
+            {
+                if (options.Value(flag) is not { } asked)
+                {
+                    continue;
+                }
+
+                if (!double.TryParse(asked, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+                {
+                    Console.Error.WriteLine($"--{flag} takes a number of {unit}, and '{asked}' is not one.");
+                    return (int)ExitCode.ValidationFailure;
+                }
+
+                if (flag == "step-mm")
+                {
+                    step = parsed;
+                }
+                else
+                {
+                    instant = parsed;
+                }
+            }
+
+            outcome = ExportCommand.Composite(modelPath, layout, boxMin, boxMax, step, instant, dryRun);
+        }
+        else
+        {
+            outcome = options.Has("mesh")
+                ? ExportCommand.Mesh(modelPath, layout, dryRun)
+                : ExportCommand.Vtu(modelPath, layout, dryRun);
+        }
 
         if (options.Has("json"))
         {
@@ -1529,6 +1758,11 @@ public static class Program
         foreach (var artifact in outcome.Artifacts)
         {
             Console.Out.WriteLine(outcome.Written ? $"wrote {artifact}" : $"would write {artifact}");
+        }
+
+        if (outcome.Grid is { } grid)
+        {
+            Console.Out.WriteLine(grid);
         }
 
         // The files carry these in their headers; the terminal says them too, on stderr, so
@@ -3185,6 +3419,8 @@ public static class Program
                 --set <name>=<value>    change one, in its own declared unit
           estimate <model.json>         what a run will cost, without running it
           solve <model.json>            solve the fields only, and report how they went
+          probe <model.json>            the potential and field at a point, or along a line
+                --at-mm x,y,z | --line-mm x,y,z --to-mm x,y,z [--samples N] [--at-us t]
           run <model.json> [--vtu]      run a model; --vtu also writes a ParaView trajectory
           fly <model.json> --ions <f>   fly an ion list, one trajectory per row [--ladder] [--vtu]
           preview <model.json>          a fast, deliberately inexact look
@@ -3197,6 +3433,7 @@ public static class Program
           boundary <study.json>         bisect onto a stability boundary (Class B, ACC-6)
           optimise <study.json>         search the declared parameters for a better design
           export <model.json>           write the solved field as VTK ImageData
+                --composite             the summed field and E at one instant, on a grid
           compare <model.json>          run both transport modes and report the disagreement
           render section <model.json>   draw a plane through the instrument as SVG or PDF
           render animation <spec.json>  frames on a declared playback mapping (RND-7)

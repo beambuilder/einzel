@@ -51,6 +51,102 @@ public sealed class ResultsTests(ITestOutputHelper output) : IDisposable
         return path;
     }
 
+    /// <summary>
+    /// A model edited while it runs gives the results of the revision that ran, not a
+    /// mixture, and not a failure.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The results pipeline read the file three times - the run, then the figures, then
+    /// whether it declares a cloud - so an edit landing while the run solved gave a flight
+    /// time of one revision beside figures of another, and an edit that left the model
+    /// invalid failed after the run had finished. Found by a review of the window, where
+    /// results run in the background while a person can type.
+    /// </para>
+    /// <para>
+    /// <b>The edit is made at a known moment rather than after a delay</b>: the run announces
+    /// that it is solving, after its one read, and the test edits from inside that
+    /// announcement. A delay would be a race the test could lose on a fast machine and then
+    /// pass while measuring nothing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AModelEditedWhileItRunsGivesTheResultsOfTheRevisionThatRan()
+    {
+        var model = Example("single-stage-reflectron");
+        var original = File.ReadAllText(model);
+        var outOfBounds = original.Replace("\"value\": 50,", "\"value\": 500,", StringComparison.Ordinal);
+
+        // The edit is asserted to be one, so a replacement that matched nothing cannot leave
+        // the test passing over an unchanged model.
+        Assert.NotEqual(original, outOfBounds);
+
+        var edited = false;
+
+        var outcome = ResultsCommand.Execute(
+            model,
+            progress: new RunProgress(0.0, line =>
+            {
+                if (!edited && line.Contains("solving", StringComparison.Ordinal))
+                {
+                    File.WriteAllText(model, outOfBounds);
+                    edited = true;
+                }
+            }));
+
+        Assert.True(edited, "the run never announced its solve, so nothing was edited during it");
+
+        var figures = outcome.Classes.SelectMany(c => c.Figures).ToList();
+        var flight = Assert.Single(figures, f => f.Name == "flightTime");
+
+        output.WriteLine($"flight time {flight.Measured!.Value} {flight.Measured.Unit}; "
+            + $"{figures.Count(f => f.Measured is not null)} figures reported");
+
+        Assert.NotNull(flight.Measured);
+        Assert.Contains(figures, f => f.Name != "flightTime" && f.Measured is not null);
+    }
+
+    /// <summary>A run's manifest describes the text it ran, however the file moves under it.</summary>
+    /// <remarks>
+    /// A run read its model to validate and hash it, again to compile it, and a third time
+    /// at the end for the manifest's schema version - so a file that stopped parsing during a
+    /// run failed a run that had finished, and a manifest's hash could be of a document other
+    /// than the one that ran (PRJ-3). One read now; the file here is made unparseable while
+    /// the run solves, and the run must still store a manifest whose hash is of the text it
+    /// was given. The end-of-run read lived in three of the run's paths - a sequence that
+    /// changes transport mode, a diffusive run, and a mixture of species - and not in the
+    /// ordinary one, so the reflectron alone passed with the defect in place; the diffusive
+    /// example is what discriminates. No shipped example reaches the other two paths, which
+    /// had the same line and the same one-line fix.
+    /// </remarks>
+    [Theory]
+    [InlineData("single-stage-reflectron")]
+    [InlineData("drift-tube-diffusion")]
+    public void ARunsManifestIsOfTheTextItRan(string example)
+    {
+        var model = Example(example);
+        var original = File.ReadAllText(model);
+        var project = new Einzel.Project.ProjectLayout(_root);
+
+        var (run, validation) = RunCommand.Execute(
+            model,
+            project,
+            exportVtu: false,
+            DateTimeOffset.UtcNow,
+            new RunProgress(0.0, line =>
+            {
+                if (line.Contains("solving", StringComparison.Ordinal))
+                {
+                    File.WriteAllText(model, "{ this stopped being a model while it ran");
+                }
+            }));
+
+        Assert.True(validation.Valid);
+        Assert.NotNull(run);
+        Assert.Equal(Einzel.Project.ContentHash.OfText(original), run.Manifest.ModelHash);
+        Assert.Equal(validation.SchemaVersion, run.Manifest.SchemaVersion);
+    }
+
     /// <summary>§12's order: one packet, then a population, then a boundary.</summary>
     private static readonly string[] OutwardFromTheIon = ["T", "S", "B", "-"];
 

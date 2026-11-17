@@ -94,6 +94,201 @@ public sealed class ViewportCameraTests(ITestOutputHelper output)
         Assert.Equal(first.HalfHeightMm, again.HalfHeightMm, 9);
     }
 
+    /// <summary>A camera nobody has touched draws exactly the fitted frame.</summary>
+    /// <remarks>
+    /// To the bit, because a still of the same view is drawn from <see cref="Framing.Matrix"/>
+    /// and the window and the still must not frame one model differently until somebody moves
+    /// the mouse.
+    /// </remarks>
+    [Fact]
+    public void AnUntouchedCameraDrawsExactlyTheFittedFrame()
+    {
+        var camera = new ViewportCamera(Scene(Box(-1.0, 1.0), density: null), Iso);
+
+        Assert.Equal(camera.Framing.Matrix(1.6), camera.Matrix(1.6));
+    }
+
+    /// <summary>Zooming keeps the point under the cursor where it is, and spreads the rest.</summary>
+    /// <remarks>
+    /// The point zoomed toward is the one pointed at; a zoom about the middle of the screen
+    /// would slide it away under the cursor, which is what makes zooming feel like a fight.
+    /// </remarks>
+    [Fact]
+    public void ZoomingKeepsThePointUnderTheCursorWhereItIs()
+    {
+        var camera = new ViewportCamera(Scene(Box(-1.0, 1.0), density: null), Iso);
+
+        var (px, py) = Clip(camera.Matrix(1.6), (0.5, 0.3, -0.2));
+        var (qx, qy) = Clip(camera.Matrix(1.6), (-0.4, -0.6, 0.7));
+
+        camera.ZoomAbout(2.5, px, py);
+
+        var (px2, py2) = Clip(camera.Matrix(1.6), (0.5, 0.3, -0.2));
+        var (qx2, qy2) = Clip(camera.Matrix(1.6), (-0.4, -0.6, 0.7));
+
+        output.WriteLine($"pointed at ({px:F6}, {py:F6}) -> ({px2:F6}, {py2:F6})");
+
+        Assert.Equal(px, px2, 12);
+        Assert.Equal(py, py2, 12);
+        Assert.Equal(2.5 * (qx - px), qx2 - px2, 12);
+        Assert.Equal(2.5 * (qy - py), qy2 - py2, 12);
+        Assert.Equal(2.5, camera.Zoom, 12);
+    }
+
+    /// <summary>Panning moves every point across the screen by the same amount.</summary>
+    [Fact]
+    public void PanningMovesEveryPointByTheSameAmount()
+    {
+        var camera = new ViewportCamera(Scene(Box(-1.0, 1.0), density: null), Side);
+        var points = new[] { (0.5, 0.3, -0.2), (-1.0, 1.0, 1.0), (0.0, 0.0, 0.0) };
+
+        var before = points.Select(p => Clip(camera.Matrix(1.0), p)).ToList();
+
+        camera.ZoomAbout(3.0, 0.2, -0.1);
+        var zoomed = points.Select(p => Clip(camera.Matrix(1.0), p)).ToList();
+
+        camera.PanBy(0.25, -0.4);
+        var panned = points.Select(p => Clip(camera.Matrix(1.0), p)).ToList();
+
+        for (var i = 0; i < points.Length; i++)
+        {
+            Assert.Equal(zoomed[i].X + 0.25, panned[i].X, 12);
+            Assert.Equal(zoomed[i].Y - 0.4, panned[i].Y, 12);
+        }
+
+        Assert.NotEqual(before[0], panned[0]);
+    }
+
+    /// <summary>
+    /// An orbit turns the instrument in place at the size it was, and loses none of it to the
+    /// near or far plane.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On a rod a hundred millimetres long and two across, because that is the shape a refit
+    /// would mistreat: seen side-on it fills the width, and refitted end-on it is two
+    /// millimetres across and would fill the screen. Turned by the mouse it must stay the
+    /// size it was, which is what "turning it" means to the person holding it.
+    /// </para>
+    /// <para>
+    /// The control is <see cref="ViewportCamera.Turn"/> to the same angle, which does refit,
+    /// so the test would pass vacuously if the two happened to agree.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnOrbitTurnsInPlaceAtTheSizeItWas()
+    {
+        var scene = Scene(Rod(), density: null);
+        var camera = new ViewportCamera(scene, Side);
+        var side = camera.Framing;
+
+        var refitted = new ViewportCamera(scene, Side).Turn(Front);
+
+        Assert.True(
+            refitted.HalfWidthMm < 0.1 * side.HalfWidthMm,
+            $"the control: a refit end-on is {refitted.HalfWidthMm:F3} mm across against {side.HalfWidthMm:F3}");
+
+        for (var step = 1; step <= 6; step++)
+        {
+            var turned = camera.Orbit(15.0, 7.0);
+
+            Assert.Equal(side.HalfWidthMm, turned.HalfWidthMm, 12);
+            Assert.Equal(side.HalfHeightMm, turned.HalfHeightMm, 12);
+            Assert.Equal(side.CenterMm, turned.CenterMm);
+
+            var matrix = camera.Matrix(1.6);
+
+            foreach (var corner in RodCorners())
+            {
+                var z = (matrix[2] * corner.X) + (matrix[6] * corner.Y) + (matrix[10] * corner.Z) + matrix[14];
+
+                Assert.InRange(z, -1.0, 1.0);
+            }
+        }
+
+        output.WriteLine($"after the orbit: azimuth {camera.View.Azimuth}, elevation {camera.View.Elevation}");
+
+        Assert.Equal((90.0, 42.0), camera.View);
+    }
+
+    /// <summary>Tilting stops at straight up and straight down.</summary>
+    [Fact]
+    public void TiltingStopsAtTheVertical()
+    {
+        var camera = new ViewportCamera(Scene(Box(-1.0, 1.0), density: null), Side);
+
+        camera.Orbit(0.0, 400.0);
+        Assert.Equal(90.0, camera.View.Elevation);
+
+        camera.Orbit(0.0, -1000.0);
+        Assert.Equal(-90.0, camera.View.Elevation);
+
+        camera.Orbit(370.0, 0.0);
+        Assert.Equal(10.0, camera.View.Azimuth, 12);
+    }
+
+    /// <summary>A fit, or a named view, leaves nothing of the mouse behind.</summary>
+    /// <remarks>
+    /// Compared with a camera opened at that view and never touched, to the bit: a named view
+    /// is exact, and one that kept a little of an earlier zoom would be a different picture
+    /// every time it was pressed.
+    /// </remarks>
+    [Fact]
+    public void AFitLeavesNothingOfTheMouseBehind()
+    {
+        var scene = Scene(Rod(), density: null);
+        var camera = new ViewportCamera(scene, Iso);
+
+        camera.Orbit(33.0, -12.0);
+        camera.ZoomAbout(4.0, 0.3, 0.2);
+        camera.PanBy(-0.5, 0.1);
+
+        camera.Fit(Front);
+
+        Assert.Equal(new ViewportCamera(scene, Front).Matrix(1.6), camera.Matrix(1.6));
+        Assert.Equal(1.0, camera.Zoom);
+
+        camera.ZoomAbout(2.0, 0.0, 0.0);
+        camera.Fit();
+
+        Assert.Equal(new ViewportCamera(scene, Front).Matrix(1.6), camera.Matrix(1.6));
+    }
+
+    /// <summary>An edit's new camera keeps where the person was looking.</summary>
+    [Fact]
+    public void AnEditKeepsTheZoom()
+    {
+        var scene = Scene(Box(-1.0, 1.0), density: null);
+        var before = new ViewportCamera(scene, Side);
+
+        before.ZoomAbout(5.0, 0.4, -0.3);
+
+        var after = new ViewportCamera(scene, Side);
+        after.KeepZoomFrom(before);
+
+        Assert.Equal(before.Matrix(1.2), after.Matrix(1.2));
+        Assert.Equal(5.0, after.Zoom, 12);
+    }
+
+    private static (double X, double Y) Clip(double[] m, (double X, double Y, double Z) p) =>
+        ((m[0] * p.X) + (m[4] * p.Y) + (m[8] * p.Z) + m[12],
+         (m[1] * p.X) + (m[5] * p.Y) + (m[9] * p.Z) + m[13]);
+
+    private static (double X, double Y, double Z)[] RodCorners() =>
+    [
+        (-50.0, -1.0, -1.0), (50.0, -1.0, -1.0), (50.0, 1.0, -1.0), (-50.0, 1.0, -1.0),
+        (-50.0, -1.0, 1.0), (50.0, -1.0, 1.0), (50.0, 1.0, 1.0), (-50.0, 1.0, 1.0),
+    ];
+
+    private static ConductorSurface Rod() =>
+        new(
+            Name: "rod",
+            PotentialVolts: 0.0,
+            DriveAmplitudeVolts: 0.0,
+            VerticesMm: [.. RodCorners().SelectMany(c => new[] { c.X, c.Y, c.Z })],
+            Normals: [.. Enumerable.Repeat(0.0, 24)],
+            Triangles: [0, 1, 2, 0, 2, 3]);
+
     private static DensityShell Shell(double low, double high) =>
         new(
             DensityPerCubicMetre: 1e10,

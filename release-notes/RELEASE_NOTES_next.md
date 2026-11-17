@@ -3,7 +3,7 @@
 Draft. Append as things land; this file is renamed at release time, so a planned patch can
 become a feature release without being renamed twice.
 
-## What is new
+## New Features
 
 - **`compact-astral-3d`**: the published Astral analyzer at one fifth of its size, as a whole
   three-dimensional instrument - both converging mirrors, the foil, the drift and its reversal.
@@ -55,8 +55,109 @@ become a feature release without being renamed twice.
   straight-on view it is an L-shaped scale bar. `--no-scale` leaves it out of a still, whose
   `--json` result reports the arm length and the corner. A picture too small to hold the ruler
   gets none.
+- **The cross-platform shell edits a model.** `einzel-shell` on Windows, Linux and macOS
+  was a viewer: its parameter list could not be changed. Each free parameter is now a box -
+  Enter or leaving the box applies it, Escape puts it back - and a derived one shows its
+  expression and what that comes to. An edit is recorded in the session journal under your
+  name and redraws the viewport; a value outside its declared bounds still applies, with the
+  complaint shown in red under the tree and the last picture kept until the model validates
+  again; **Undo last edit** reverses it. A new Journal tab lists what has happened, by whom,
+  and every action as the `einzel` command that would repeat it, ready to copy. A watched run
+  is recorded there too.
+- **The cross-platform shell has every panel the Windows one has.** Results by accuracy
+  class, the regime along the path, the sequence timeline, the project's models and their
+  state, and the extensions with their licences are tabs beside the journal. **Run** and
+  **Inspect** work in the background, so the window keeps answering during a long run. The
+  viewport turns, moves and zooms with the mouse: drag to turn, right-drag or Shift-drag to
+  move, the wheel to zoom toward the cursor, and double-click or **Fit** to fit it again. The
+  named views still fit exactly.
+- **There is one shell now, and it runs everywhere.** The Windows-only shell has been
+  removed. Everything it did the cross-platform one does, and `einzel-shell` is published for
+  Windows and Linux alike. If you were running the Windows build, the replacement opens the
+  same models, writes the same journal and has views the old one did not - a scale ruler in
+  the viewport, undo on the model tree, and panels that keep answering while a run is going.
+- **Stop a watched run.** A watch is the one thing in the window measured in minutes, and
+  until now the only ways out were to wait or to close the application. **Stop** ends it after
+  the current step and **keeps the packet on screen**, because that is where the run had got
+  to and is the reason you pressed it; the status line says the run is partial rather than the
+  picture being taken away to say so. A full run and a regime walk cannot be stopped part
+  way - their command objects take no cancellation - so the button is the watch's alone.
+- **A legend under the viewport, saying what the colours mean.** Trajectories are coloured by
+  energy and the field by potential, with the ends and their units written out. The potential
+  scale is symmetric about earth rather than stretched across what happens to be in the
+  picture, so an earthed electrode is always the neutral colour. Rows appear only where they
+  mean something: a model that computes a density has no energy scale, and a geometry entirely
+  at earth has no legend at all.
+- **`einzel run --progress <seconds>`** reports where a long run has got to on the diagnostic
+  stream, thirty seconds by default, and leaves `results/<name>.progress.json` behind. The
+  checkpoint is removed when the run writes its answer, so finding one means the run did not
+  finish. Reporting is asserted not to change the answer.
+- **`einzel report`** renders a project's runs as one self-contained page, with `--json`
+  carrying the same account. It reads a checkpoint, so an interrupted run is reported with the
+  phases that completed rather than as a run that stored nothing.
+- **Imported gas files and study files are recorded in run manifests.** `verify` detects
+  changed, missing or retargeted inputs and no longer certifies legacy manifests that did not
+  record them.
+- **Collisions and direct or particle-in-cell space charge apply during the trajectory legs of
+  mixed-mode sequences.** Conductor detection is preserved through time shifts, collision
+  diagnostics propagate, and empty packets no longer reseed or crash the printer.
+- **`--vtu` on a sequenced run writes the density** it ended with, where it ended in the
+  diffusive description, with the run's caveats and their severities in the file's own header.
+- **A volume solve's conductor mask is built by asking each electrode only about the nodes and
+  links its bounding box reaches.** Every electrode used to be tested against every node and
+  link, about half a billion closed-form entry tests per mask on `astral-3d`'s ion-foil solve
+  (1.1 million nodes, 86 electrodes). In Release that mask takes 0.15 s where it took 10.3 s,
+  and `einzel solve` on the template takes 11.0 s where it took 20.6 s, with every reported
+  figure unchanged. The mask is bit-identical to the unculled one on every shipped volume
+  template and the corpus's 3-D example, at the shipped mesh and at every coarse level; the
+  test suite repeats that comparison on every change, except that `linear-ion-trap-3d` is
+  compared at twice its shipped cell there, because its unculled reference alone took over
+  two and a half minutes on the Windows CI runner.
+- **Diffusion coefficient and face-operator buffers are reused**, separately per species. A
+  513 x 65 rebuild allocates about 3.4 kB instead of 7.47 MB in a warmed probe; operator
+  values are bit-identical. An allocation reduction, not a claimed end-to-end speedup.
+- **A Windows installer.** Each release now carries `MacCossLab.Einzel-stable-Setup.exe`, built by
+  Velopack as LabOps is: a per-user install with no administrator rights and the .NET runtime
+  included, into `%LocalAppData%\MacCossLab.Einzel\current`, with Start menu and desktop shortcuts to
+  the window and `einzel` added to your user PATH (removed again on uninstall, with every other PATH
+  entry left as it was). It is not code-signed yet, so SmartScreen warns on first run (More info,
+  Run anyway). An installed window checks GitHub once when it starts and, if a newer release exists,
+  shows a bar offering **Download and restart**, **Download only**, **Skip this version** and **Not
+  now**; nothing is downloaded until one is pressed, a restart is refused while a run is in progress,
+  and there is no periodic re-check, so an agent running `einzel` sees one version throughout. The
+  command line, the MCP server, the portable archives and a source build never check. See
+  `docs/install.md`.
+- **The `paul-trap` template has endcap holes and a stretch.** Three new parameters, all zero by
+  default, and at zero the template solves to the field it always had, to the bit:
+  `endcapEntranceHoleFraction` and `endcapExitHoleFraction` cut a bore on the axis of each endcap,
+  as a fraction (at most 0.9) of the endcap's radius, and `endcapStretchFraction` moves both
+  endcaps outward by a fraction of z0. An ion ejected through the exit hole arrives at the
+  detector; one that meets the endcap is itemised on `endcapExit`.
+- **Every way out of the `paul-trap` solve is itemised.** Two grounded stops, `entranceStop` and
+  `outerStop`, are always present and change no field value. An ion that leaves at the entrance
+  end or through the outer radius is now reported as striking one of them, where it could coast
+  out of the domain and be counted as confined.
+- **Know before scanning a hole size**: the bore is exactly the hole declared, and a bore whose
+  radius is a multiple of the radial mesh spacing (0.125 mm as shipped) sits on a step in the
+  solved field - 0.2 V of 400 at 0.5 mm - with no warning. Keep hole radii off those multiples.
+- **With holes, the ejection edge is a strip and not a point.** Two holes of 0.175 of the endcap
+  radius move it out to q_eff 0.917-0.920 (the ideal trap: 0.906); inside that strip held and lost
+  amplitudes interleave, and where a search lands moves with the integrator tolerance. Hold 800
+  cycles or more and scan the edge; do not bisect it. Measurements are in
+  `docs/device-templates.md`.
+- **Measured on a cloud of ions, the stretch brings the holed trap's ejection edge a quarter of
+  the way back.** With 200 ions released in a 0.13 mm ball at random RF phase, half are lost at
+  q_eff 0.9058 in the ideal trap, 0.9176 with two holes and 0.9146 with two holes and a 0.107
+  stretch: the stretch recovers 0.0030 (0.0027 to 0.0037 over tolerance, cloud, hold and mesh)
+  of the 0.0120 the holes cost. Twice that stretch recovers under half. A holed edge quoted
+  finer than 0.0006 belongs to the hold: it falls by that much between 800 and 2000 cycles.
+- **A published three-program comparison is a test.** The single-ion case of Forbes et al. 1999
+  (SIMION, ITSIM, ISIS) runs on `paul-trap`: the secular frequencies agree with all three
+  programs; the tabulated excursions do not, and do not agree with the ideal field either, which
+  is recorded in `docs/literature-targets.md`. This is against published numbers, not a SIMION
+  run.
 
-## Fixed
+## Bug Fixes
 
 - **Two unnamed electrodes in a driven or sequenced solve were solved at the same potential.**
   Every unnamed electrode was called `electrode`, and a driven or sequenced geometry is solved
@@ -145,12 +246,52 @@ become a feature release without being renamed twice.
   `SYSTEMROOT` on Windows - the path of the Windows directory, and nothing else - and nothing
   anywhere else. CI never saw it because the Windows runner's Python is 3.12, which uses
   `BCryptGenRandom` and starts with an empty environment.
+- **The shell's numbers no longer follow the desktop's locale.** On a computer set to a
+  language that writes a decimal comma, parameter bounds read `0,1 to 20 kV` beside a box
+  that accepts `0.1` and refuses `0,1`, and so would warnings. The shell now writes every
+  number with a point, as model files are.
+- **A sequence whose phases all name a transport mode the model does not** was flown in the
+  model's, with the timeline ignored and exit 0. The fork now asks for the set of modes the
+  run uses rather than whether two adjacent phases differ.
+- **A sequenced run writes a result document beside its manifest.** Three of the four run
+  paths already did; that one stored provenance and no answer, and it is the path every
+  mobility study takes. Its manifest recorded absolute artifact paths and now records
+  portable ones.
+- **Arrival figures for a continuous population require the collected ions to reach a
+  millionth of those launched**, and are absent with `sequence.nothing-eluted` below that.
+  Scharfetter-Gummel's flux across a collecting face behind a barrier is the Boltzmann factor
+  of that barrier, so a held packet emitted values hundreds of orders below one ion from its
+  first step - and a mean and a spread were being reported over 7.74e-245 of them.
+- **Ponderomotive caches are invalidated from their defining RF state**, not spatial probes,
+  and quiver amplitudes are positive for either charge sign.
+
+## Breaking Changes
+
+- **A diffusive detector must coincide with a supported grid face, and one that does not is
+  refused.** Its position was previously ignored - the collecting face was chosen from its
+  normal alone - so a document could name a plane the solver did not use. **This is a
+  breaking change for existing diffusive models**, which are refused at run time rather than
+  silently collected at a different plane. Align the detector with the corresponding
+  `densityGrid` boundary, or move that boundary to the detector. Three corpus examples were
+  corrected to the faces the solver already used, and their numbers are unchanged. **Three
+  shipped templates instead had their grid moved to the declared detector**, so their tracked
+  region and their figures change: `tims-analyzer`, `tims-front-end` and `tims-tandem`. On the
+  front end, `maxX` moves from `tunnelLength + exitLength` (15 mm) to `+ detectorPad` (12 mm),
+  and the elution peak moves from 20.9878 V to 21.1843 V with the resolving power going 7.481
+  to 7.674. Re-measure any figure taken from those templates.
+- **Unsupported RF spectra in the diffusive effective-field path are rejected** instead of
+  applying one frequency to all components. Inactive generators no longer set the averaging
+  period; trajectory RF support is unchanged.
+- **The solver-behaviour version is advanced to 2**, so older numerical results are not
+  reported current after these corrections. The package version is unchanged.
 
 ## Known limits
 
 Carried forward from v26.1.0 until they change:
 
-- **The Windows shell is partial**: seven of the eleven views in the specification exist.
+- **The shell is partial**: nine of the eleven views in the specification exist. The
+  figure composer and scrubbing on the animation timeline are not built. There is one
+  shell now - the Windows-only one has been removed - and it runs where the engine runs.
 - **A still cannot check the window's own GPU path**, and it does not draw the name of a
   validity violation as text: the codes are in the file's text chunks and on stderr.
 - **No installer and no updater.** The assets are portable: unpack and run.

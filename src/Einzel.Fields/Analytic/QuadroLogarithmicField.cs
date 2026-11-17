@@ -146,8 +146,7 @@ public sealed class QuadroLogarithmicField : IElectrostaticField
 
         if (!(radial > 0.0))
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(position),
+            throw new PointRefusedException(
                 "the quadro-logarithmic field is singular on its axis, where the central "
                 + "electrode is: a point there has no potential rather than a large one");
         }

@@ -290,6 +290,11 @@ public static class DriftDiffusion
 
         var at = fieldAt?.Invoke(0.0) ?? field;
 
+        // B is applied by single-ion trajectory integration alone; dropping it here would
+        // fly the model as though the magnet were absent, with nothing to say so.
+        Einzel.Fields.Magnetic.MagneticRefusal.ThrowIfMagnetic(field, "the drift-diffusion solve");
+        Einzel.Fields.Magnetic.MagneticRefusal.ThrowIfMagnetic(at, "the drift-diffusion solve");
+
         // The well is the expensive half of a cycle average and, in an elution scan, the
         // half that cannot have changed: the ramp walks the DC gradient down and holds
         // every RF amplitude. Kept per node across the steps of a ramp and checked at a

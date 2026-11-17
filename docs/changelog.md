@@ -3054,3 +3054,295 @@ Two findings from Stage 1 that bear on the spec:
   recorded rather than fixed: a trajectory model whose sequence enters a `diffusion` phase is billed
   nothing for its density, because the estimate asks the model's own mode. SPEC.md GRD-8 and item
   10; `docs/cli.md`, `docs/lessons.md`, `tools/memory-harness/README.md`.
+
+- **The cross-platform shell edits a model, through the journal, and the Windows one is being
+  retired.** Decided 2026-11-09: the Avalonia shell survives and `Einzel.Wpf` is deleted once
+  nothing is left that only it has (SPEC.md Amendment 53, item 5). The first two of four steps:
+
+  **The session and six view models moved to plain `net10.0`**, into
+  `src/Einzel.Shell/Presentation/`. They held no WPF type - `Einzel.Commands` and
+  `System.ComponentModel` were their only references - so the move was a namespace. The WPF
+  project compiles them from there rather than keeping a copy, so the two windows run one
+  source until WPF goes, and an Avalonia type creeping into one of them would fail the WPF
+  build. Two WPF test classes moved with the code they test and now run on Linux.
+
+  **The Avalonia window had been going around the session.** It called `ViewportCommand` and
+  `OutlineCommand` itself: the right picture, and nothing behind it - no journal, so nothing a
+  person did could be undone or seen by an agent on the same model, and no record of the
+  commands, so the one window meant to run everywhere was the one surface whose actions could
+  not be read back as something to type (Amendment 25). Now every action goes through
+  `ShellSession`, a watch included (`WatchAsync` takes the window's own progress listener).
+
+  **The model tree edits.** The rules a person meets at the keyboard are in
+  `ModelTreeViewModel.Commit`, where they are tested without a window: a box left as it was
+  records nothing (commit is on lost focus, so tabbing through the tree would otherwise write
+  an entry per row); numbers parse invariantly, so `4,5` is refused rather than read as 45; a
+  derived parameter is refused by name; out of bounds applies and the tree stands with the
+  complaint against it. Each rule was broken on purpose and fails its own test. In the window,
+  an edit re-reads the tree, which replaces every row - and the box committed with Enter then
+  loses focus on its way out, carrying the value just applied against a row still showing the
+  old one; committing that would journal the same edit twice, so a row the tree no longer
+  holds is ignored. **Checked in a live window through UI Automation**: one edit, one journal
+  entry under `human:<user>`, the derived gradient moving with it, the viewport redrawn; 500 mm
+  against a 200 mm bound applied with the red line naming the bound and the last picture kept;
+  undo back to the value before. The WPF shell's view model could always undo and nothing in
+  its window called it; the Avalonia one has the button.
+
+  **The viewport takes a new scene.** `SceneView.Scene` was init-only, recorded as "the next
+  piece of work"; `Replace` hands a scene to the render thread, which releases every buffer
+  and uploads the new layers, drops a watched frame of the old instrument, keeps the named
+  view and refits the frame. Redraws are numbered so the slower of two quick edits cannot land
+  last.
+
+  **The shell process formatted numbers in the desktop's locale.** It turns globalization back
+  on because a window needs it, and that turned the locale on too: `OutlineCommand.BoundsText`
+  printed `0,1 to 20 kV` under a German desktop, beside a box that refuses `0,1`. Fixed there,
+  and then at the level it belongs: about 265 interpolated strings below the shell format a
+  number without naming a culture, because in the CLI - globalization-invariant by build
+  setting - none is needed. `Program.UseInvariantNumbers` makes the current culture invariant
+  on every thread at startup and keeps the culture data, which is what the CLI's setting was
+  doing for it. **The analyzer for this never fired, for two reasons**: CA1305 is silent
+  wherever globalization-invariant mode is on, which is every assembly here, and it does not
+  look inside interpolated strings. Building the libraries with the mode off found two sites,
+  both in the scan's out-of-bounds warning, fixed too. The shell's tests now run with
+  globalization on, as the shell does, so a decimal comma can be tested at all - and turning
+  it on immediately flagged a culture-sensitive `ToString` in an existing shell test.
+
+  **A review found the redraw racing itself.** Each edit started its own solve, and the stale
+  ones stood down only after they had paid for themselves; a watch could start while an edit's
+  redraw was still computing and draw its packet over the old geometry. `Coalescing` now runs
+  the redraw one at a time and folds requests made meanwhile into one more run - live, three
+  quick edits gave two redraws with the window answering in under a millisecond throughout -
+  and Watch run is enabled only while the viewport shows the document as it stands. The value
+  boxes are named for their parameters, with unit and bounds as help text, for a screen reader.
+
+  Left for the next two steps, in SPEC.md item 5: results, regime, sequence, project and
+  extension panels as tabs; orbit, pan and zoom, which Helix gave the WPF viewport for nothing;
+  then deleting `Einzel.Wpf`. Details in `docs/shell.md`, "The session moved, and the window
+  stopped going around it".
+
+- **The cross-platform shell has every panel the Windows one has, and the viewport turns,
+  moves and zooms.** Step 3 of retiring WPF (SPEC.md item 5). Results, regime, sequence,
+  project and extensions are tabs beside the journal, over the view models they had in WPF.
+
+  **Results and regime run the model, so they run in the background.** The WPF shell ran both
+  on its UI thread behind a wait cursor - minutes of a frozen window on a volume model.
+  `ShellSession.ResultsAsync` and `RegimeAsync` record the command and reconcile the journal on
+  the caller's thread, as `ViewportAsync` does, and the view models' `RefreshAsync` fill their
+  lists back on it. A refusal comes back as a status line; an edit made while one runs is noted
+  rather than prevented. The cheap three read when their tab first opens, because each read is
+  journalled and a journal that opens with five unasked reads buries the asked ones.
+
+  **Orbit, pan and zoom live in `ViewportCamera`, where they are tested.** Zoom and pan are a
+  scale and shift in clip space after the fitted frame, so an untouched camera is bit-identical
+  to a still and the ruler stays true when zoomed. An orbit keeps the scale and centre rather
+  than refitting, because a refit makes a 100 mm rod turned end-on fill the screen; named views
+  and Fit refit exactly; an edit keeps the zoom. Five of six mutations each fail their own
+  test. **The sixth survived because the code was redundant**: widening the depth to the scene's
+  reach can never matter, since the frame's depth is twice its largest half-extent and a box
+  fits in a sphere of the square root of three times that - so it was deleted, not kept
+  untested. **The live window caught what no test could**: dragging right turned the
+  instrument the wrong way, measured as a plate's near corner moving 53 pixels left; it now
+  follows the cursor, and Iso restores it to the pixel. Checked by posting mouse messages to
+  the window, which reach the same input path a mouse does, since this session has no input
+  desktop.
+
+  **A review found a run could mix two revisions of its model, below the window.** The results
+  command read the file three times, and a run three more - to validate and hash it, to
+  compile it, and at the end for the manifest's schema version - so an edit landing mid-run
+  gave a manifest whose hash was of one document beside a run of another (PRJ-3), and an edit
+  that left the model invalid failed a run that had finished. Each reads once now, and results
+  refuse a run whose manifest hash is not of the text they read. Tested by editing from inside
+  the run's "solving" announcement, which lands after its read at a known moment; the
+  diffusive example discriminates, since the end-of-run read was in the diffusive, sequenced
+  and multi-species paths and not the ordinary one. In the window the tree closes while results
+  or the regime run, a full run re-reads the project view, and an edit afterwards marks what
+  they show as of the earlier model.
+
+  Left: step 4, deleting `Einzel.Wpf`. Details in `docs/shell.md`, "The five panels, and the two
+  that run the model" and "Orbit, pan and zoom".
+
+- **One shell, and the question to ask before deleting a project.** Step 4 of retiring WPF
+  (SPEC.md Amendment 53, item 5): `Einzel.Wpf` and `Einzel.Wpf.Tests` are gone, 3,575 lines,
+  2,819 of them the window. What it leaves is **no `net10.0-windows` target anywhere in the
+  solution, no skipped test project, and `HelixToolkit.Wpf.SharpDX` out of
+  `Directory.Packages.props`** - the bet Amendment 26 took knowingly on a library archived
+  since December 2020, called in by a question it was not taken on. The suite is **1,795 tests,
+  0 failures, 0 skipped**, every one of them run on both CI runners; `einzel-shell` now
+  publishes for `linux-x64` as well as `win-x64`.
+
+  **The question before deleting a project is not whether its code is still wanted but
+  whether anything it asserted is asserted nowhere else.** Most of `Einzel.Wpf.Tests` was
+  covered - the view models had moved to `Presentation/` with their tests, and the watch is
+  `WatchedRunTests` on both runners. **Three were not, and they were about a type that is
+  still live**: they were written against `Einzel.Wpf.ColourRamp`, a *copy*, and what they
+  were really about is `Einzel.Commands.ColorRamp`, which the port had left with no tests at
+  all. `ColorRampTests` in `Einzel.Cli.Tests` now points them at the live type - WCAG
+  contrast above 3.0 for both ramps against the viewport ground, Rec. 709 luminance monotone
+  over 65 samples (which is what stops viridis being "improved" into a rainbow later), and a
+  degenerate energy range giving the middle of the ramp rather than a division by zero, with
+  a spread range as the control. Two mutations fail them. **A test that only ever ran against
+  a copy was testing the copy**, and deleting the copy is when that becomes visible.
+
+  **The boundary test keeps the deleted names.** `ShellBoundaryTests` had become a `[Theory]`
+  over two shells with a `windowsOnly` arm; it is one case again, and `ShellNames` still
+  carries `Einzel.Wpf` and `einzel-shell-wpf`, because **a rule forbidding a reference to a
+  shell should keep forbidding one that was deliberately removed** - the cheapest way for a
+  deletion to be undone is for somebody to add the reference back, and removing the names
+  would make the test quietly narrower than the rule it enforces.
+
+  **And the claim that nothing was left that only the WPF shell had was wrong twice over**,
+  which a review of the deletion found. The WPF toolbar also carried a **Stop** button for a
+  watched run, and a **colour legend** under the viewport saying what energy and potential
+  the colours stood for. **Neither is a §16 view and neither had a test**, which is exactly
+  how they were missed: the comparison was drawn up by walking the eleven required views and
+  the deleted project's tests. **A list drawn up from a requirements document does not cover
+  what a window grew that no requirement asked for.**
+
+  **Stop is cooperative and keeps what it drew.** A density step is not interruptible part
+  way, so stopping declines to take the next one and the run ends where it stands; the packet
+  on screen is where the run had got to and is the reason somebody pressed it, so the status
+  says the run is partial rather than the drawing being taken away to say so. **The token has
+  to reach the listener, not only `Task.Run`** - `Task.Run`'s token decides whether the work
+  ever starts and is never consulted again once it has, so a watch cancelled a second in would
+  run to completion with a Stop button doing nothing visible for twenty minutes. The run
+  offers to be interrupted at one place, when it asks the listener whether it wants a frame,
+  so `ShellSession.WatchAsync` wraps whatever listener it is given rather than asking each
+  caller to remember. The regression test asserts the **step count** against the same run
+  unstopped, because a token reaching only `Task.Run` passes any assertion about the exception
+  alone, and it fails with the wrapper removed.
+
+  **The legend is GRD-1 applied to a drawing**: a colour standing for a number is the one
+  place a reader cannot recompute it. `ViewportPicture.Scales` decides the rows in the command
+  layer, because **the ends are not the observed range** - the potential ramp is symmetric
+  about earth, so a lens holding 0 and 500 V is drawn on a ramp running -500 to +500, and the
+  WPF window kept that rule in a comment in its own code-behind. Five mutations fail the five
+  tests. It also exposed a wrinkle rather than creating one: the equipotentials anchor on the
+  solved field's extremes and the metal on the peak each electrode reaches, and contour levels
+  chosen inside the domain generally do not reach the electrodes - so there is **one row per
+  span actually drawn**, collapsing to one `potential` row where the two agree to a rounding.
+  Whether the two layers should share a span is a separate question about the picture, and
+  changing it would move every still, so it is recorded rather than done under a legend fix.
+
+  Eleven documentation sites were corrected with it, and the shape of what was wrong is worth
+  keeping: nearly all of it was **present tense about a thing that had become history**.
+  `docs/shell.md` opened "WPF on Windows", `docs/architecture.md` said invariant 1 forbids
+  referencing `Einzel.Wpf`, the §16 register row credited the 3-D viewport to Helix Toolkit
+  3.1.2, and a doc comment in `Einzel.Render` said a zero normal behaves one way "in either
+  window". History is kept where it explains a decision - the Helix section, the globalization
+  reversal, the camera defects - and marked as history rather than read as the current state.
+
+- **The Paul trap gets what a real one has - endcap holes and a stretched spacing - and a
+  published three-program comparison; and a review of the first write-up found four of its
+  claims had not been measured.** `paul-trap` takes `endcapEntranceHoleFraction`,
+  `endcapExitHoleFraction` (a bore on each endcap's axis, as a fraction of the endcap's radius so
+  it cannot reach the edge) and `endcapStretchFraction` (both endcaps moved outward, every surface
+  keeping its shape). All default to zero, and at zero the solved field is the earlier
+  template's to the bit.
+
+  | holes 0.175 of the endcap radius (0.595 mm), stretch 0.107 | octupole A4/A2 | r0_eff | ejection edge, q_eff |
+  | --- | --- | --- | --- |
+  | ideal | +0.90 % | 3.9983 mm | 0.9056-0.9058 |
+  | one hole | -0.59 %, hexapole -0.89 % | 4.0086 | 0.910 |
+  | two holes | **-2.10 %** | 4.0189 | **0.917-0.920**, +1.3 % |
+  | two holes and the stretch | -0.50 % | 4.2516 | 0.914-0.916 |
+
+  Those edges are one ion's, bisected; on a cloud of 200 they are 0.9058, 0.9102, 0.9176 and
+  0.9146 (below).
+
+  **One hole opens a hexapole band** at q_eff 0.785-0.790, where an ion held just below has
+  3 beta_z = 1.980 - the order predicted from the broken symmetry - at 20 and 40 cells per r0.
+  **Two holes open the octupole's band at q_eff 0.810, given 800 cycles** (2 beta_z + 2 beta_r =
+  1.979 just below it); 200 cycles show nothing, the ideal trap loses nothing at 2000, and holes
+  plus stretch, with a quarter of the octupole, need 2000. The first draft said the band "does not
+  come back with two holes": a statement about the hold.
+
+  **Forbes et al. 1999 as a test** (`PaulTrapForbesComparison`): one ion in the ideal trap at
+  q_z = 0.400, flown in SIMION, ITSIM and ISIS and tabulated. The secular lines reproduce - 161.02
+  and 78.43 kHz against 161.0-161.1 and 78.4-78.7, asserted inside the published spread. **The
+  tabulated excursions do not, and neither does the ideal field**: about 1.0 mm and 1.5 eV in all
+  three programs, 0.52 mm and 0.54 eV integrating the ideal quadrupole directly from the paper's
+  stated start, which Einzel matches to under 0.4 um. Recorded as a disagreement with the table, not
+  tuned away. Against published numbers, not a licensed SIMION run (SPEC.md Amendment 6, note).
+
+  **The re-measurement story, which is most of what is worth keeping.** The holed edge first
+  came out at 759 V on one platform and 762.5 V on another, and the first suspect was the loss
+  criterion - counting an ion held by where it was at the last instant, which in a holed trap
+  could count one that swung into a bore and back. **It was not that**: the two criteria agree
+  on every flight compared. Scanned in 0.25 V steps instead of bisected, **the holed edge at 200
+  cycles is a ragged strip** - held amplitudes above the first lost one, 759.25 to 762.50 V on
+  that geometry - and the bisection's fifth midpoint, 762.5 V, sat on the last held island, so
+  **one marginal flight was the whole Windows/Linux difference**. Held 800 cycles the strip is
+  under a volt.
+
+  **Then a second review found the write-up of that still claimed too much, in four places.**
+  - **"A tolerance of 1e-8 or 1e-10 moves no edge" compared each run with itself**: the flight
+    helper took `relativeTolerance` and passed the integrator a constant. Wired through, the
+    ideal trap's bracket is identical at all three, and **two holes give 759.38, 758.59 and
+    758.01 V** - q_eff 0.9194, 0.9184, 0.9177. So "held 800 cycles the edge is one place" was
+    wrong too: for two holes it is a strip at 800 and at 2000 cycles (757.50 first lost, 758.25
+    last held, with finer islands above), and what is published is 0.917-0.920, not a 0.2 V
+    bracket. A test now checks the tolerance reaches the integrator, by step count; reverting
+    the wiring fails it.
+  - **The bore was kept off the mesh's node rows by a sixteenth-of-a-cell offset, and the test
+    of it never crossed a row** - its probe declared 0.5 mm and the offset moved the face to
+    0.5125. The offset is gone: it protected only some fractions, **made the geometry depend on
+    the mesh** (the 20- against 40-cell comparison compared bores 6.25 um apart) and jumped the
+    bore from 0 to 12.5 um as the fraction left zero. The bore is exactly the declared hole, and
+    the shipped 0.175 sits 0.24 and 0.48 of a spacing clear of a row at the two meshes. **Crossing
+    a row for real measures a step, not a rounding**: 0.215 V of 400 applied for a nanometre of
+    bore at the 0.5 mm row, 1.48 V at 1.0 mm, and no warning. That is the open single-conductor
+    coincidence (SPEC.md item 11), now with a worked case and a test that fails when it is fixed.
+    With the geometry fixed across meshes the mesh moves the two-hole octupole 9.4e-4, not the
+    6.1e-4 first reported.
+  - **`entranceStop` existed only while the entrance hole was open**, so an ion behind a closed
+    endcap, or leaving through the outer radius, could coast out and read as confined. Flown:
+    released beside the ring at r = 7.5 mm it ends a metre away with a held ion's outcome. Both
+    `entranceStop` and a new `outerStop`, a cell outside the mesh, are always present now and fix
+    no node - the zero-hole field is still the old one to the bit - so every exit is itemised.
+    Whether an ion from inside ever takes the gap is not shown; released in the gap it strikes
+    an endcap.
+  - **"Bit for bit against the pre-change template" was asserted against a document that still
+    carried the new expressions.** The test now rebuilds the old geometry from the old
+    expressions, written out, with the new parameters removed so a leftover reference cannot
+    compile. What it cannot assert is that the transcription is the old file; that was checked
+    once by solving the old file itself.
+
+  **Whether the stretch brings the holed edge back was "not resolved", and the reason was the
+  method.** In effective q the linear boundary is the same for every geometry by construction,
+  so the difference is nonlinear and one ion's fate near the edge is a coin: the two bisected
+  strips are each as wide as the 0.003 between them. Measured instead on a seeded cloud - 200
+  ions from rest in a 0.13 mm ball (the size of a 300 K cloud), each at its own RF phase, the
+  same ions in every geometry; the edge is where the loss fraction crosses 50 percent, with a
+  bootstrap interval:
+
+  | 200 ions, 800 cycles | edge, q_eff [95 %] |
+  | --- | --- |
+  | ideal | 0.9058 [0.9054, 0.9062] |
+  | one hole | 0.9102 [0.9099, 0.9105] |
+  | two holes and the stretch | **0.9146** [0.9144, 0.9148] |
+  | two holes | **0.9176** [0.9174, 0.9179] |
+
+  **The stretch brings the two-holed edge back by 0.0030 of q_eff, a quarter of the 0.0120 the
+  holes moved it**: 0.00299 with a standard error of 0.00006 over eight paired clouds, and 0.0027
+  to 0.0037 under every control - tolerances of 1e-8 and 1e-10, eight clouds, a 2000-cycle hold,
+  40 cells per r0. The ideal trap loses the same ions at every tolerance; with holes 73 of 1024
+  flights change sides and the edge moves under 0.0002. **Two controls found something.** The
+  hold moves both holed edges down by 0.0006 between 800 and 2000 cycles - more than their
+  intervals, and together, so the step is unchanged - and the standard deviation between clouds,
+  0.00015, is half again what the bootstrap implies, so the between-cloud spread is the error
+  bar. **A stretch series at fixed holes** (0, 0.0535, 0.107, 0.160, 0.214) gives 0.9176, 0.9161,
+  0.9146, 0.9132, 0.9123: five separated intervals in order. **And it does not follow the
+  octupole alone**: A4 goes -2.10, -1.10, -0.50, -0.18, -0.23 percent - the test written
+  expecting it to rise at every step failed at the last - while the edge goes on falling with
+  the 12-pole. Twice the shipped stretch recovers under half of what the holes did. `q_eff`
+  takes out the stretch's 11 percent change of scale; the cloud is the same in millimeters and
+  the hold in cycles. Asserted on 64 ions in `PaulTrapEndcapHoleEdge`, with the order as
+  separated intervals.
+
+  **Every number that moved, moved because the bore did** (0.6075 to 0.595 mm): octupole -2.20
+  to -2.10 %, two-hole edge bracket q_eff 0.9180-0.9182 to 0.9183-0.9185, the 200-cycle strip's
+  top 762.50 to 761.50 V, the stretched holed trap's lines in the Forbes run 141.32 and 69.28 to
+  141.34 and 69.30 kHz. Not built: the resonance-ejection scan through the exit hole. Not
+  sourced: the hole size and the stretch, so nothing here predicts a named instrument. Details
+  in `docs/device-templates.md`, `docs/literature-targets.md` section 9, `docs/lessons.md`.

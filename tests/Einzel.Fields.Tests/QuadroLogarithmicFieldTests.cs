@@ -410,7 +410,7 @@ public sealed class QuadroLogarithmicFieldTests(ITestOutputHelper output)
         var field = Field();
         var onAxis = new Vec3(1e-3, 0.0, 0.0);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => field.PotentialAt(in onAxis));
-        Assert.Throws<ArgumentOutOfRangeException>(() => field.ElectricFieldAt(in onAxis));
+        Assert.Throws<PointRefusedException>(() => field.PotentialAt(in onAxis));
+        Assert.Throws<PointRefusedException>(() => field.ElectricFieldAt(in onAxis));
     }
 }

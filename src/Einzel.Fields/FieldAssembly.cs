@@ -177,23 +177,15 @@ public sealed class SuperposedField : IElectrostaticField, IConductorBounded
     /// </remarks>
     public double SignedDistanceToDiscontinuity(in Vec3 position)
     {
-        var nearest = double.PositiveInfinity;
-        var sign = 1;
+        var composed = double.PositiveInfinity;
 
         foreach (var element in _elements)
         {
-            var distance = element.SignedDistanceToDiscontinuity(in position);
-
-            if (!double.IsFinite(distance))
-            {
-                continue;
-            }
-
-            nearest = Math.Min(nearest, Math.Abs(distance));
-            sign *= distance < 0.0 ? -1 : 1;
+            composed = DiscontinuityDistance.Combine(
+                composed, element.SignedDistanceToDiscontinuity(in position));
         }
 
-        return double.IsPositiveInfinity(nearest) ? double.PositiveInfinity : nearest * sign;
+        return composed;
     }
 }
 
@@ -312,11 +304,39 @@ public static class FieldAssembly
         plan?.CheckElements(model);
 
         var elements = new List<IElectrostaticField>(model.Fields.Count);
+        var magnets = new List<Magnetic.IMagneticField>();
         var warnings = new List<Core.Results.ValidityWarning>();
 
         for (var index = 0; index < model.Fields.Count; index++)
         {
             var element = model.Fields[index];
+
+            if (element.Kind == CompiledFieldKind.UniformMagnetic)
+            {
+                // A magnetic element adds no electric field and no potential, so it joins a
+                // list of its own and the electric sum is exactly what it would have been
+                // without it. Collected here and combined once at the end.
+                var uniform = new Magnetic.UniformMagneticField(element.FluxDensity);
+
+                if (element.Region is { } edge)
+                {
+                    magnets.Add(new Magnetic.BoundedMagneticField(uniform, edge));
+                    warnings.Add(new Core.Results.ValidityWarning(
+                        "field.magnet-hard-edge",
+                        $"field element {index} is a magnetic field bounded by a hard edge: B is "
+                        + $"{element.FluxDensity.Length:G4} T inside the region and exactly zero outside, "
+                        + "with no fringe field. That is the sharp cut-off of first-order beam optics - "
+                        + "the field integral is right when the box is placed at the effective field "
+                        + "boundary, and the focusing a real fringe adds at an inclined edge is absent",
+                        Core.Results.WarningSeverity.Provenance));
+                }
+                else
+                {
+                    magnets.Add(uniform);
+                }
+
+                continue;
+            }
 
             if (element.Region is { } bounded)
             {
@@ -410,6 +430,18 @@ public static class FieldAssembly
                 new DrivenSuperposedField(elements),
             _ => (IElectrostaticField)new SuperposedField(elements),
         };
+
+        // Only when a magnet is declared, so every model without one is handed the electric
+        // field it always was - the same object - and flies bit-identically. With one, the
+        // integrator finds IMagneticField on the field it was handed and applies v x B; every
+        // path that cannot is refused by the validator before this is reached, and by
+        // MagneticRefusal if it is reached another way.
+        if (magnets.Count > 0)
+        {
+            field = Magnetic.MagnetizedField.Around(
+                field,
+                magnets.Count == 1 ? magnets[0] : new Magnetic.SuperposedMagneticField(magnets));
+        }
 
         return (field, warnings);
     }

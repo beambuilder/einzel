@@ -58,7 +58,7 @@ from the register means nothing.
 ```
 Einzel.Core  Fields  Transport  Analysis  Library  Sweeps
 Einzel.Io  Project  Extensions  Render  Commands  Cli
-Einzel.Mcp  Wpf
+Einzel.Mcp  Shell  Wpf
 ```
 
 ### What does not
@@ -70,14 +70,17 @@ Einzel.Update       release check, staging, version policy (all of UPD, DST)
 
 The second is load-bearing for requirements that are otherwise met on paper:
 without `Einzel.Update`, GRD-11's defect taint has no published floor to compare a
-version against, and none of §18 can be exercised. The shell exists with nine of
-§16's eleven views (see [the shell section](#the-shell-and-the-rest-of-16)); its
-two missing views are the extension manager pane and the update notice, the latter
-waiting on `Einzel.Update`.
+version against, and none of §18 can be exercised. The shell exists with eight of
+§16's eleven views built and two partly built - the sequence editor shows a timeline
+without editing it, and the animation timeline has no scrubbing - while the update notice
+waits on `Einzel.Update` (see [the shell section](#the-shell-and-the-rest-of-16)).
 
-`Einzel.Wpf` is a **deliverable rather than a permission**, and the Windows GUI
-capability was part of why the toolchain is C# - a rationale r06 never records. See
-[the shell section](#the-shell-and-the-rest-of-16) and Amendment 25.
+The shell is a **deliverable rather than a permission**, and the Windows GUI capability was
+part of why the toolchain is C# - a rationale r06 never records. It is `Einzel.Shell` on
+Avalonia, plain `net10.0`, and it runs where the engine runs. There was a second shell on
+WPF; the Avalonia one was built beside it, carried every view across, and the WPF project
+was deleted on 2026-11-09, taking Helix Toolkit and SharpDX out of the dependency graph
+with it. See [the shell section](#the-shell-and-the-rest-of-16) and Amendments 25 and 53.
 
 ---
 
@@ -154,6 +157,48 @@ Einzel. **That, rather than a date, is the trigger.**
 ---
 
 ## Amendments to the specification
+
+### 71 - The fork marks its schema numbers, because two trees handed out 0.15
+
+**AGT-1, PRJ-3.** The fork numbered its additions to the model format in upstream's series:
+0.15 for a drive's waveform as an object (Amendment 65), 0.16 for `transport.edges`
+(Amendments 67 and 69). Upstream then merged a uniform magnetic field (`19486e2`, upstream PR
+#71) and called it 0.15. One number meant two things, and the next upstream addition would have
+been a second 0.16. Nothing misread a file - the version is checked as a member of
+`ModelSchema.SupportedVersions` and switches no feature, and the reader refuses a key it does
+not know - but a number that cannot say which tree's format a file is in has stopped being a
+version.
+
+The number this build writes is upstream's followed by the fork's own count:
+`0.15-esibd.2`. The part before the hyphen is the upstream schema the fork is merged with and
+moves only in an upstream sync. The part after counts the fork's additions on top of it and
+moves only when the fork adds to the format: 1 is the waveform object, 2 is `transport.edges`.
+Neither tree can produce a number the other will use. `SupportedVersions` keeps every upstream
+number to 0.15, the fork's 0.16, and the new one; a document stamped 0.15 may be an upstream
+magnet or a fork waveform object and reads as either, and 0.16 reads as it did.
+`0.15-esibd.1` was never written by any build and is not in the list. The number stays a
+string: nothing parses it or orders two of them (searched: the validator's membership test is
+the only reader, and the schema writer, the manifest, `outline` and `AGENTS.md` copy it).
+A hyphen, not a plus sign: Einzel's JSON writer escapes a plus, and a written file carries
+the number as the plain text a search finds.
+
+What changes for a user: a model written by this build is refused by an upstream build at
+`/schemaVersion`, where before it was refused at the first fork key (`waveform` as an object,
+`edges`) or, with neither, read. A model's hash in a manifest covers its text, so restamping a
+file changes the hash and not the flight; the field cache is not keyed on the schema version
+and every cached solve is still found. `SolverBehaviourVersion` stays 2.
+
+`ForkSchemaVersionTests` pins it. A plain 0.14 document, an upstream 0.15 magnet, a fork 0.15
+waveform object, a 0.16 document with `edges` and a current one with all three validate; the
+row for 0.16 fails when 0.16 leaves the list. The build writes `0.15-esibd.2` (fails when
+`CurrentVersion` is put back to 0.16). `0.17`, `0.15-esibd.1`, `0.15-esibd.3`, `0.16-esibd.2`,
+a bare `0.15-esibd` and `0.15` with a trailing space are refused at `/schemaVersion` (four of
+the six are accepted by a validator that lets any `-esibd` suffix through). Upstream's own
+`EveryVersionThisBuildClaimsToReadDoesRead` reads the three fork entries as it reads the rest.
+
+Amendment numbers are a second series the two trees share. Upstream stands at 57 and the fork
+uses 58 to 71; upstream's next amendment will be a second 58. Decided 2026-11-16: no
+renumbering until that happens.
 
 ### 70 - A study's memory is one rule: the solves at once, the memo, and the rest per evaluation in flight
 
@@ -878,19 +923,49 @@ field as equipotentials - at 2,167 lines, of which the physics is zero. No assem
 the shell changed. The one file ported verbatim from `Einzel.Wpf` was the color ramp, and
 only its namespace differed.
 
-**The WPF shell is untouched and still builds.** Its assembly was renamed
-`einzel-shell-wpf`, because two projects producing one assembly identity is a latent
-collision and it had already made the boundary test ambiguous about which shell it had
-found. Which of the two is the survivor is not settled here: what is settled is that the
-cross-platform one exists, its claim to run anywhere is *checked* rather than asserted, and
-nothing was lost to get it.
+**The two ran side by side for four changes, and then the WPF one was deleted.** While both
+existed its assembly was renamed `einzel-shell-wpf`, because two projects producing one
+assembly identity is a latent collision and it had already made the boundary test ambiguous
+about which shell it had found. **Settled on 2026-11-09: the Avalonia shell survives.**
+Keeping both meant writing every future view twice, and the WPF one carried the SharpDX
+backend Amendment 26 took knowingly and which has been archived since 2020. The port ran in
+four steps - the session and view models moved to plain `net10.0`, the model tree made
+editable through the journal, the remaining panels as tabs, then the deletion - and all
+four are done.
+
+**The claim that nothing was left that only the WPF shell had was wrong twice over**, which a
+review of the deletion found. It had been drawn up by walking §16's eleven views and the
+deleted project's tests; the WPF toolbar also carried a **Stop** button for a watched run and
+a **colour legend** under the viewport, neither of them a §16 view and neither of them tested.
+Both are built now - the stop cooperative, keeping what it drew, with the token reaching the
+listener the run asks at every step rather than only `Task.Run`; the legend from
+`ViewportPicture.Scales` in the command layer, since the potential ramp's ends are symmetric
+about earth rather than the observed range. The lesson is the comparison rather than the two
+features: **a list drawn up from a requirements document does not cover what a window grew
+that no requirement asked for.**
+
+**The deletion is 3,575 lines**, 2,819 of them the window and 756 its tests. What it leaves:
+one shell, no `net10.0-windows` target anywhere in the solution, no skipped test project, and
+`HelixToolkit.Wpf.SharpDX` out of `Directory.Packages.props`. **Before deleting a project the
+question is not whether its code is still wanted but whether anything it asserted is asserted
+nowhere else**, and three of its tests were not: they were written against a *copy* of the
+color ramp, and what they were really about is `Einzel.Commands.ColorRamp`, which the port had
+left with no tests of its own. They are `ColorRampTests` in `Einzel.Cli.Tests` now, pointed at
+the live type - WCAG contrast above 3.0 for both ramps against the viewport ground, Rec. 709
+luminance monotone over 65 samples, and a degenerate energy range giving the middle of the ramp
+rather than a division by zero - and two mutations fail them. The boundary test's `[Theory]`
+over both shells collapses back to one case, and the names of the deleted projects are kept in
+it, because a test that forbids a reference to an assembly should keep forbidding one that was
+deliberately removed.
 
 **Three things are genuinely different rather than merely ported.**
 
 **The invariant is now tested from a test project that runs on Linux.** `Einzel.Wpf.Tests`
-is Windows-only, so the shell's own tests only ever ran on one platform;
-`Einzel.Shell.Tests` targets plain `net10.0` and its eleven tests run on both runners. A
-cross-platform claim checked only on Windows is a cross-platform claim nobody is checking.
+was Windows-only, so the shell's own tests only ever ran on one platform;
+`Einzel.Shell.Tests` targets plain `net10.0` and runs on both runners. A cross-platform
+claim checked only on Windows is a cross-platform claim nobody is checking. With the WPF
+project gone there is no skipped test project at all: 1,795 tests, every one of them run on
+both.
 
 **ANGLE hands back an OpenGL ES context on Windows, and a `#version 330 core` shader does
 not fail loudly there - Avalonia silently disables the control.** So the shader body is
@@ -905,9 +980,12 @@ it into a build failure rather than a note, which is the guard working, and cent
 transitive pinning names the fixed 0.95.1 once for every project. LIC-1 is clear -
 Avalonia and Silk.NET are both MIT, verified in their nuspecs rather than assumed.
 
-**What is not carried across**: the journal, results by accuracy class, the regime
-inspector, the sequence editor, the project view and the extension manager. Each is
-presentation over a command that already works, which is the same observation
+**What was not carried across at first**: results by accuracy class, the regime inspector, the
+sequence editor, the project view, the extension manager, the journal, an editable model tree,
+and the mouse gestures Helix gave the WPF viewport - and, found late, a Stop control on a
+watched run and a legend saying what the viewport's colours mean. **All of it was carried
+across before the deletion.** Each was presentation over a command
+that already worked, which is the same observation
 `docs/shell.md` makes about the WPF shell's own remaining rows - and is the evidence for
 AGT-2 that matters, since it means the second window is a drawing exercise rather than a
 capability exercise.
@@ -1604,6 +1682,25 @@ primary reference, literature regression promoted to the main external check, an
 agreement between an analytic and a solved path substituting for agreement between
 two codes.
 
+**Note, 2026-11-15: one cross-code comparison now exists, against published numbers.**
+The amendment stands - there is still no SIMION licence and no run of SIMION behind
+anything here. What changed is that Forbes et al. (J. Mass Spectrom. 34, 1219, 1999) flew
+one ion through an ideal quadrupole ion trap in three programs, SIMION 6.0 among them, and
+tabulated the results, and that comparison is now a test:
+`PaulTrapForbesComparison.TheSingleIonComparison`, on the `paul-trap` template scaled to
+the paper's r0 = 10 mm at its q_z = 0.400. **What agrees**: the secular frequencies.
+Einzel gives 161.02 kHz axially and 78.43 kHz radially against the three programs' 161.0
+to 161.1 and 78.4 to 78.7, asserted inside the published spread plus one unit in the
+paper's last place. **What does not**: the tabulated excursions and peak kinetic energy
+(about 1.0 mm and 1.5 eV in all three programs) against 0.52 mm and 0.54 eV here - and
+the ideal quadrupole field integrated directly from the paper's stated starting
+conditions gives 0.52 mm and 0.54 eV too, which Einzel matches to under 0.4 micrometres. So
+the paper's table of conditions is not what its codes were given, the test asserts the
+disagreement stays visible, and `docs/literature-targets.md` section 9 records both
+sides. This is a comparison with numbers in print, on one device at one working point;
+it is the nearest thing to §19's cross-code tier available without a licence and is not
+that tier.
+
 ### 7 · §9's source model assumed a beam, and §12 already required otherwise
 
 §9 required a non-zero accelerating potential "or the ion never moves". That is
@@ -2025,7 +2122,7 @@ to notice.
 **What makes deferring it cheap is architectural rather than optimistic**, which is the
 part that has to stay true for the position to hold:
 
-- **Invariant 1** — no UI type below the shell. Every assembly above `Einzel.Wpf`
+- **Invariant 1** — no UI type below the shell. Every assembly above `Einzel.Shell`
   builds and runs on Linux, and CI runs there from the first commit. `Einzel.Render`
   produces a publication figure headlessly with no display, no window manager and no
   font server (RND-1).
@@ -2679,11 +2776,20 @@ finds a decision taken with open eyes rather than a name that has quietly stoppe
 what it did. The exit, if it is ever needed, is bounded by the same boundary: replacing a
 viewport backend touches the shell and nothing else.
 
-**A second, smaller finding in the same place: WPF cannot run in globalization-invariant
+**The bet was called, and by a different question than the one it was taken on.** The
+failure mode this amendment insured against - an unmaintained library breaking the window -
+never arrived; what arrived was a user asking for the shell to run outside Windows.
+Avalonia is a 2-D toolkit, so the viewport had to be written rather than configured, and
+when the WPF project was deleted on 2026-11-09 the archived dependency left the graph with
+it. The exit cost exactly what this paragraph predicted: the shell and nothing else.
+Amendment 53.
+
+**A second, smaller finding in the same place: WPF could not run in globalization-invariant
 mode.** `Directory.Build.props` sets `InvariantGlobalization` for the whole solution, for
 CLI-5's deterministic output; WPF's font cache constructs `new CultureInfo("en")` while
-measuring the first line of text and the window dies before it is shown. The shell
-reverses the setting, and what it was protecting is unaffected — this codebase achieves
+measuring the first line of text and the window died before it was shown. The Avalonia
+shell reverses the setting too, for the ordinary reason rather than that one - text layout
+and number entry in a window are locale-facing - and what it was protecting is unaffected — this codebase achieves
 locale-independence by passing `CultureInfo.InvariantCulture` explicitly at every
 formatting and parsing site, and the build flag was the belt to those braces. The parse is
 the one that matters: a value typed into the model tree is read invariantly whatever the
@@ -2713,7 +2819,7 @@ requirement rather than two because of AGT-2, and Amendment 25 strengthens it: e
 shell action should be *expressible* as a CLI invocation and journalled as one, so a
 human's session hands over to an agent and back in the same vocabulary.
 
-**Seven of the eleven views exist**, and the window opens on a model: `einzel-shell
+**Eight of the eleven views exist**, and the window opens on a model: `einzel-shell
 models/reflectron.json` gives a parameter tree, a trajectory bundle coloured by energy over
 the drawn instrument and field, the journal, results grouped by §12's accuracy class, the
 regime along the path, and the declared timeline. `ShellSession` holds one model, the shared journal, and every
@@ -2733,20 +2839,21 @@ whole purpose is showing GRD-1 envelopes revealed that only one of fourteen figu
 one — see Amendment 28. A requirement can be honoured everywhere it is exercised and still
 be unmet where nothing has asked.
 
-**And the shell compiles on Linux**, which was an open bet and is now measured rather than
-assumed: `EnableWindowsTargeting` is enough, XAML markup compilation included. It does not
-run there and is not meant to. Only `Einzel.Wpf.Tests` is Windows-only, and on another host
-it builds as an ordinary `net10.0` assembly with no sources, so a solution-wide
-`dotnet test` walks past it.
+**The shell runs where the engine runs.** `Einzel.Shell` is §16's views on Avalonia and an
+OpenGL viewport, targeting plain `net10.0` and referencing `Einzel.Commands` and nothing
+else - so a user who asked for the platform outside Windows gets a window there. The views:
+the 3-D viewport with orbit, pan and zoom, the model tree - edited through the shared
+journal, validated as it is typed, and undone from a button the WPF shell never had - the
+field, a live run watched while it steps, the journal, results by accuracy class and the
+regime inspector (both run in the background, where WPF froze its window for the length of
+the run), the sequence editor, the project view and the extension manager.
 
-**There are two shells now, and the second one runs where the engine runs.** `Einzel.Shell`
-is the same §16 views on Avalonia and an OpenGL viewport, targeting plain `net10.0` and
-referencing `Einzel.Commands` and nothing else - so a user who asked for the platform
-outside Windows gets a window there, and the WPF shell is untouched. **Four of the eleven
-views are across**: the 3-D viewport, the model tree, the field as equipotentials, and a
-live run watched while it steps. The other seven are presentation over commands that
-already work, which is the same thing this section says about the WPF shell's own remaining
-rows.
+**There were two shells, and the WPF one was deleted on 2026-11-09** (Amendment 53) once
+every view was across. What that leaves: no `net10.0-windows` target anywhere in the
+solution, no skipped test project, and Helix Toolkit and SharpDX out of the dependency
+graph. `Einzel.Shell.Tests` targets plain `net10.0` and runs on both CI runners, which is
+the claim a cross-platform shell has to make and which, while its tests were Windows-only,
+nobody was checking.
 
 **This is Amendment 26's bet being called, and it paid.** The Windows-only decision was
 recorded as a decision with a condition on it - "revisited if the need appears" - resting
@@ -2775,7 +2882,7 @@ Every view §16 requires:
 
 | View | State | What it needs beyond a window |
 | --- | --- | --- |
-| 3D viewport — geometry, potentials by colour, equipotentials, trajectory bundles | **Built** | Geometry, the field, and the bundle, on Helix Toolkit 3.1.2 / DirectX 11. **Every conductor is the zero level set of its own signed distance** (invariant 2), so one routine draws them all — and what differs between symmetries is what the solve claims about the third dimension: a cross-section extrudes (uncapped, because the electrode really does extend past what is drawn, with the depth named as a drawing convention per GRD-12), an axisymmetric half-plane revolves, a volume is extracted by surface nets. Checked against closed forms: a sphere's volume 0.99038 / 0.99760 / 0.99940 under refinement, every edge shared by exactly two triangles, normals exact to 1.000000, a revolved tube against Pappus to 0.99990. **Those revolve and extrude checks ran on profiles built by hand, and the outlines the viewport actually traces were drawn open until this was found**: `Contours` drops a closed run's repeated first point while `Revolve` and `Extrude` looked for it, so every closed 2-D conductor lost its closing segment (a traced tube: 96 open edges, now none, and the Pappus volume of its own polygon to 1e-12); and a face lying on a grounded domain edge was never traced at all, so the einzel lens's 7 mm tube walls drew as thin sleeves with flanges. Both renderers now trace a 2-D conductor as the solve holds it, clipped at every edge that is not a mirror, bit-identical for every conductor clear of such an edge; the lens's tubes enclose 0.99755 / 0.99847 / 0.99882 of the inscribed Pappus volume (`docs/shell.md`, "A face on the domain's edge was not drawn"). Equipotentials on the section plane rather than as surfaces, because a nest of closed surfaces hides the trajectories. Two colour scales, both anchored once across everything drawn — viridis for energy, and a **diverging ramp symmetric about zero** for potential, because earth is what every other potential is measured against and a ramp stretched over the observed range puts the neutral colour at 250 V for a lens holding 0 and 500. RND-8 withholds the paths and not the instrument. Helix's status is Amendment 26 |
+| 3D viewport — geometry, potentials by colour, equipotentials, trajectory bundles | **Built** | Geometry, the field, and the bundle, on Avalonia over an OpenGL control written here (the WPF shell drew it on Helix Toolkit 3.1.2 / DirectX 11, which went with that project). **Every conductor is the zero level set of its own signed distance** (invariant 2), so one routine draws them all — and what differs between symmetries is what the solve claims about the third dimension: a cross-section extrudes (uncapped, because the electrode really does extend past what is drawn, with the depth named as a drawing convention per GRD-12), an axisymmetric half-plane revolves, a volume is extracted by surface nets. Checked against closed forms: a sphere's volume 0.99038 / 0.99760 / 0.99940 under refinement, every edge shared by exactly two triangles, normals exact to 1.000000, a revolved tube against Pappus to 0.99990. **Those revolve and extrude checks ran on profiles built by hand, and the outlines the viewport actually traces were drawn open until this was found**: `Contours` drops a closed run's repeated first point while `Revolve` and `Extrude` looked for it, so every closed 2-D conductor lost its closing segment (a traced tube: 96 open edges, now none, and the Pappus volume of its own polygon to 1e-12); and a face lying on a grounded domain edge was never traced at all, so the einzel lens's 7 mm tube walls drew as thin sleeves with flanges. Both renderers now trace a 2-D conductor as the solve holds it, clipped at every edge that is not a mirror, bit-identical for every conductor clear of such an edge; the lens's tubes enclose 0.99755 / 0.99847 / 0.99882 of the inscribed Pappus volume (`docs/shell.md`, "A face on the domain's edge was not drawn"). Equipotentials on the section plane rather than as surfaces, because a nest of closed surfaces hides the trajectories. Two colour scales, both anchored once across everything drawn — viridis for energy, and a **diverging ramp symmetric about zero** for potential, because earth is what every other potential is measured against and a ramp stretched over the observed range puts the neutral colour at 250 V for a lens holding 0 and 500. RND-8 withholds the paths and not the instrument. Helix's status, and the bet that was called when it left with the WPF shell, is Amendment 26 |
 | Density clouds instead of trajectories for diffusive regions (TRN-2) | **Built** | The viewport draws the density as **nested shells at decades below its peak** - reusing the marching-squares contours the section already draws and the same extrude-or-revolve rule the conductors follow, so a cross-section repeats along z and an axisymmetric half-plane is a solid of revolution. RND-8 on its own is entirely negative: it forbids lines through a diffusive region and, alone, leaves an empty box for the whole pressure range the mode exists to cover - and an empty box is indistinguishable from a model that lost everything. **Drawn at an instant, and the end of the run is the wrong one**: the shipped drift tube collects 9,999.76 of 10,000 ions and leaves 1.8e-302 behind, so anchoring to the end draws nothing for exactly the models that work. The instant is chosen as the middle of those that still hold a packet, is reported rather than implied (GRD-12), and the caller may name its own - which is also the seam animation scrubbing needs. Measured on the corpus drift tube: three shells at 4.555e7 / 4.555e6 / 4.555e5 per m3, nesting outward at 208 / 260 / 292 vertices, the densest spanning **9.7 mm of a 42 mm tracked region centred at 35.2 mm** - a packet three-quarters of the way down the tube rather than a uniform gas |
 | Figure composer | **Seam built** | `RenderSpec` is already text in `figures/` that the CLI executes. A composer edits one of these and nothing else — which is UI-1's own test, and the reason it can be built last |
 | Animation timeline, per-phase playback rates, scrubbing, frame export | **Partial** | Per-phase playback rates and frame export are built: `einzel render animation` on a declared mapping, with the rate stamped on every frame and a `frames.json` schedule beside them. Scrubbing is a shell interaction and needs the window |
@@ -2784,7 +2891,7 @@ Every view §16 requires:
 | Results by accuracy class, uncertainty and warnings never behind a disclosure control | **Built** | §12's taxonomy was recorded nowhere in the code and is now on the figure registry - six Class T, four Class S, seven Class B, and two deliberately in none, since `flightTime` is the raw arrival quantity the Class T figures are computed *from* and `energyDrift` says in its own description that it is a diagnostic. Every part of the envelope is a line rather than a tooltip, which is the requirement. **Building it found the GRD-1 hole below**, and closing that took the figures carrying an envelope from 1 of 14 to 5 |
 | Regime inspector | **Built** | REG-2's numbers *along the path*, which is what §16's word "along" asks for and what a run does not give - a run reports the worst point anywhere in the gas, right for a warning and useless for deciding what to change. Violations are located as stretches in millimetres rather than counted. On a hundredfold density ramp the two ends differ by Kn **4.17 against 0.042** - free-molecular at one end, a continuum at the other, in the same instrument |
 | Project view with model-drift and engine-drift state | **Built** | `einzel project` - the models, studies, figures, tests and extensions, with each model in one of four states. The drift itself is `einzel verify`'s, which already separates what invalidates a result from what merely annotates it; **what verify cannot answer is what has never been run**, since it walks the manifests and a model with no result is reported by neither its success nor its failure. That is the state most models in a working project are in. Building it found a defect in verify - see Amendment 30. |
-| Extension manager | Not built | **Its engine half is done.** The manifest now carries `licence` beside trust level, versions and compatible range, and `einzel ext list` surfaces it - so what the view needs from below it exists, and building it is presentation. LIC-2's remaining half is the pane itself. An SPDX identifier by convention rather than by validation: a checker that recognised some spellings and not others would report an unrecognised licence as no licence, which is the failure the field exists to prevent |
+| Extension manager | **Built** | **LIC-2 is met** (its register row has the evidence). It needed nothing new below the shell: the manifest already carried `licence` beside trust level, versions and compatible range, and `einzel ext list` already surfaced it, so the pane is presentation over `ExtensionCommand.List`. What the sandbox does not enforce is printed on the pane rather than behind a control. An SPDX identifier by convention rather than by validation: a checker that recognised some spellings and not others would report an unrecognised licence as no licence, which is the failure the field exists to prevent |
 | Journal with agent and human attribution | **Built** | `SessionJournal` in `Einzel.Commands`, rendered by the window beside the model tree, with the same entries an MCP client writes. A person sees what an agent did to their model, by name, and can undo it - which is MCP-1 and GRD-9 arriving where they were always aimed. Beneath it the same actions as `einzel` command lines (Amendment 25) |
 | Update notice with UPD-3's deferral options | Not built | Needs the whole of §18 |
 
@@ -2883,7 +2990,7 @@ in a table.
 
 | Tag | Requirement (abridged from r06) | Status | Where it stands |
 | --- | --- | --- | --- |
-| `AGT-1` | The model is text Declarative, schema-validated, diffable JSON. A model file plus referenced artifacts fully determines a run. | **Met** | Schema-versioned JSON, currently 0.16. `einzel schema` generates the JSON Schema by reflection over the document records. An unrecognized property is **refused**, not ignored - see Amendment 14. An ion-list flight is determined by the model plus the list: per-row parameter overrides live in the list, are hashed with it, and change only the fields (Amendment 61). |
+| `AGT-1` | The model is text Declarative, schema-validated, diffable JSON. A model file plus referenced artifacts fully determines a run. | **Met** | Schema-versioned JSON, currently 0.15-esibd.2 (upstream 0.15 and the fork's two additions; Amendment 71). `einzel schema` generates the JSON Schema by reflection over the document records. An unrecognized property is **refused**, not ignored - see Amendment 14. An ion-list flight is determined by the model plus the list: per-row parameter overrides live in the list, are hashed with it, and change only the fields (Amendment 61). |
 | `AGT-2` | Nothing exists only in the shell Every capability reachable from the window is reachable from the CLI and from MCP, through the same command objects. This now explicitly includes rendering (§17). | Partial | **Both other surfaces now exist, and the invariant is asserted rather than argued.** Every MCP tool returns `CommandJson.Write` of the same outcome record the CLI serialises for `--json`, compared **byte for byte** by a test; every shell action is journalled as the `einzel` invocation that would reproduce it (Amendment 25), and twice a view could not be built until a command existed - `einzel outline` and `ViewportCommand` - which is that amendment running in the direction it was not designed for. **Partial for one precise reason**: the requirement names rendering explicitly and the MCP tool surface does not expose it. That surface is deliberately not a second CLI (`model_read \| model_edit \| model_undo \| session_journal \| model_validate \| model_preview`), so the question is whether rendering belongs in it or whether the requirement means reachable *through a command object* rather than *through a tool*. Until that is settled this cannot be called met. The earlier evidence here read "neither MCP nor the shell exists", which stopped being true when both were built. |
 | `AGT-3` | Errors are recovery instructions Machine-readable code, offending path, violated constraint, observed value, suggested correction. | **Met** | Code, JSON Pointer path, constraint, observed value, suggestion, severity. Validation collects every error rather than throwing on the first. **A mesh too large to solve was the exception**: an argument exception deep in the solver, which the CLI can only print as `INTERNAL_ERROR` - "a defect in einzel, not in your model" - on exit 6, after `validate` had passed the model. It is now `GRID_TOO_LARGE` from validation, located at `/fields/N/solve3d/cellSize` (or `/transport/spaceChargeGrid/nodes`), with the observed node count, the limit, and a suggestion naming the finest cell size that fits - printed with as many digits as it takes to stay on the same mesh step and **checked after the round trip through its own text and unit**, because three fixed figures crossed a second power-of-two boundary on the Astral (1.47 mm for 1.46484, half the nodes) and an exact decimal can land a rounding below one (2.75 mm over 22 mm is 8.000000000000002 intervals). `GridTooLargeSurfaceTests` pastes the suggestion back into the document and checks the mesh it names; `VolumeMeshTests` springs both traps. **And a command that validates on its way to something else reports every error, not the first**: twelve call sites - `estimate`, `export`, `preview`, `compare`, `render` and others - threw `Errors[0]`, so a refused mesh could hide behind an earlier mistake for a whole round trip; `EinzelException` now carries the list and the CLI prints it (`EstimateReportsEveryErrorNotOnlyTheFirst`). A derived cell size or bound that is NaN or infinite is refused as `VALUE_OUT_OF_BOUNDS` at its field, where NaN had crashed `validate` itself and infinity had solved on two intervals an axis. |
 | `AGT-4` | Results carry their own uncertainty See §4. No quantitative result is ever returned as a bare number. | **Met** | GRD-1 enforced by reflection over the public surface of `Measured`, verified by injecting a violation and watching it fail. |
@@ -3095,7 +3202,7 @@ in a table.
 
 | Tag | Requirement (abridged from r06) | Status | Where it stands |
 | --- | --- | --- | --- |
-| `UI-1` | The shell owns layout, input, the interactive viewport, and the update check. It owns no physics, no validation rules, no file format knowledge, and no ... | **Partial** | **The shell exists**, and the prohibition is now checked rather than honoured by construction: `ShellBoundaryTests` runs from the Linux-running test project over the assemblies actually present, with a `MustBePresent` guard so a scan that found nothing cannot pass. **Two different checks were needed**, and the difference cost a mutation - `GetReferencedAssemblies` reports what the compiler *emitted*, so declaring a ProjectReference to the transport engine left no trace and the test passed; UI-1 is about what the shell may reach **for**, so the project file is checked too. Every view is built on a command object, and twice a view could not be built until a command existed (`einzel outline`, `ViewportCommand`) - which is Amendment 25 running in the direction it was not designed for. **Partial rather than Met** because the shell does not own the update check: there is nothing to check. **And the prohibition has now been paid for rather than merely kept**: a second shell, `Einzel.Shell`, puts the same views on Avalonia for Linux and macOS, targets plain `net10.0`, and reaches the engine through `Einzel.Commands` alone - 2,167 lines with no change to any assembly below it, which is what UI-1 plus Amendment 25 were being banked for. Its tests target plain `net10.0` too, so a shell's own tests run on both runners for the first time. See Amendment 53. |
+| `UI-1` | The shell owns layout, input, the interactive viewport, and the update check. It owns no physics, no validation rules, no file format knowledge, and no ... | **Partial** | **The shell exists**, and the prohibition is now checked rather than honoured by construction: `ShellBoundaryTests` runs from the Linux-running test project over the assemblies actually present, with a `MustBePresent` guard so a scan that found nothing cannot pass. **Two different checks were needed**, and the difference cost a mutation - `GetReferencedAssemblies` reports what the compiler *emitted*, so declaring a ProjectReference to the transport engine left no trace and the test passed; UI-1 is about what the shell may reach **for**, so the project file is checked too. Every view is built on a command object, and twice a view could not be built until a command existed (`einzel outline`, `ViewportCommand`) - which is Amendment 25 running in the direction it was not designed for. **Partial rather than Met** because the shell does not own the update check: there is nothing to check. **And the prohibition has now been paid for rather than merely kept**: a second shell, `Einzel.Shell`, put the same views on Avalonia for Linux and macOS, targeting plain `net10.0` and reaching the engine through `Einzel.Commands` alone, with no change to any assembly below it - which is what UI-1 plus Amendment 25 were being banked for. **It is the only shell now.** Once every view was across, the WPF project was deleted (2026-11-09): 3,575 lines, and with them the last `net10.0-windows` target, the last skipped test project and an archived 3-D dependency. A boundary test that had become a `[Theory]` over two shells is one case again, and keeps the deleted assembly names, because a rule forbidding a reference to a UI assembly should keep forbidding one that was deliberately removed. See Amendment 53. |
 
 ### Update (§18)
 
@@ -3264,6 +3371,154 @@ report a person can read, and a documented way to extend the platform - since bo
 both compound. Then the device work, which is where the physics is. Distribution last, with its
 trigger stated rather than a date, because it is worth nothing until somebody other than this
 project's author needs to run it and more than any physics the moment one does.
+
+### The 2026-11-14 review, and what it reorders
+
+A whole-project review was run on 2026-11-14 against one question: what stands between this
+and a viable replacement for SIMION. Eight reviewers read the field solvers, transport, the
+Avalonia shell, the templates and model format, the docs, and the CLI and release workflow;
+one built and ran the suite (1,792 tests green, Release, Windows) and one gathered a sourced
+SIMION 8.2 baseline. **It changes the order of this list, and the reason is the goal rather
+than the findings**: the numbered list below is ordered for a project with one user, and puts
+distribution last with the trigger "somebody other than its author needing to run this".
+Replacing SIMION is that trigger. So the items here go **ahead of** the numbered list, and item
+12 is promoted into R1 rather than waiting.
+
+Status words: **confirmed** means the code fact was re-checked after the reviewer reported it;
+**reported** means one reviewer read the code path and nobody re-checked; **suspected** means
+inferred and unmeasured. None of these is a register status - nothing in the register moves on
+a review's say-so.
+
+**R0. Defects that can give a wrong number quietly.** Each is small; two may mean re-running
+published numbers.
+
+- **Per-ion collision streams are not independent** (seeding confirmed, correlation reported as
+  measured). Each ion's sampler is `new Random(Gas.Seed + index)` (`FiguresOfMerit.cs:907`,
+  `:1024`, `ModeComparison.cs:288`, `SequencedRun.cs:737`), and .NET's seeded generator is
+  linear in the seed: the k-th draw of seed s+1 minus that of seed s was one constant over 2,000
+  seeds. Every ensemble statistic in gas - equipartition, mobility, the bootstrap intervals -
+  assumes independent ions. Hash the seed or use a counter-based generator per ion, add a
+  cross-stream independence test, then re-measure the gas ensemble figures.
+- **`PacketIntegrator` has none of the single-ion path's time guards** (confirmed): no
+  RF-period step cap, no landing on sequencer switches, and a resolution cap computed once from
+  launch speed, so a packet launched at rest has none. No test flies a packet in a driven or
+  staged field. It also accepts a step at the minimum size with the error norm above one and
+  says nothing (reported), where the single-ion path reports `StepSizeUnderflow`.
+- **No run-time maximum-principle check** (confirmed). `einzel solve` prints the peak potential
+  and nothing compares it with what was applied, so the "486 V of 100, reported as converged"
+  class is caught by tests and the coarsening guard and never by a run. One pass over the
+  array, a warning on a source-free solve whose peak exceeds the applied range.
+- **An expression or derived parameter can be NaN or infinite and validate** (reported).
+  Literals are checked for finiteness; the expression branch and `ParameterSurface`'s derived
+  branch are not, and the validator's `<= 0` guards pass NaN. The 3-D cell-size fix closed one
+  instance of this; the general fix is one check in `TryQuantity` and one for derived values.
+- **The 2-D solve has no mesh limit and counts nodes in `int`** (reported; already recorded as
+  open when the 3-D refusal landed).
+- **A static-field run in gas reports an ACC-4 energy-drift violation** (reported), because
+  collisions change the energy and only a driven field returns the not-measured value.
+- **An ion at rest at zero potential has no resolution step cap** (reported; the consequence,
+  stepping through an electrode one cell thick, is suspected and untested).
+- **Mean-field space charge has no dielectric-relaxation step limit** (suspected). At the TIMS
+  capacity study's 10^8 row the relaxation time is of order 14 ns against a 56 ns step; halve
+  the step or refresh every step before leaning on that row or its unexplained 19 percent.
+- **PIC sizes its grid from the 3-D RMS radius whatever the packet's shape, and drops
+  `ChargeOutside` and the solve's `Converged`** (reported) - evidence about a computation's own
+  quality discarded at a seam, again.
+- **The interpolants never consult the cut links** (mechanism reported, magnitude suspected),
+  so within about two cells of a conductor the field is first order whatever the solve
+  achieved. No test measures field error against distance from a cut surface, and slots and
+  apertures are where ions pass that close.
+- **The CLI accepts any unknown `--flag`** (confirmed): `--vtuu` runs with defaults and exits
+  0. The model format refuses an unknown key for exactly this reason (Amendment 14).
+- **The viewport and stills sample a driven field at t = 0 with no warning** (confirmed,
+  `ViewportCommand.cs:1693`) - `render.field-at-instant` exists for sections only.
+- **The shell's journal breaks Amendment 25 as implemented** (confirmed): an edit is recorded
+  as `einzel validate <model>` and undo as `einzel undo`, which is not a verb. The spelling
+  that reproduces an edit, `einzel outline <model> --set name=value`, exists.
+- **Manifests and results are written non-atomically** (reported) where the progress
+  checkpoint is written and moved; **2-D coarse masks are rebuilt every V-cycle** (confirmed,
+  `GeometryBuilder.cs:964`, `:1042`) where the 3-D path memoises; **no test runs every template
+  end to end at its defaults** (reported), which is the gap `pnnl-ion-funnel` fell through.
+
+**R0, continued: what a newcomer and an index found.** Writing the first-lens tutorial meant
+following it, and compiling `docs/warning-codes.md` meant reading every construction site. Both
+are the "write the consumer" move that found the report's defects, and both found things no
+test had: all reported, none re-checked unless marked.
+
+- **The printed interval on a solved model covers the integrator alone.** The lens run reports
+  +/- 1.5e-8 us; doubling the mesh moves the flight time 1.07e-3 us, about 100,000 times that,
+  and nothing on the run says the mesh is not in the interval. GRD-1's envelope is carrying one
+  of two error sources and reading as both. This is the largest of the list.
+- **The shipped `einzel-lens` warns on its first solve** (`mesh.node-on-shared-face`, 148 nodes
+  - one of the seventeen recorded under item 11), so the namesake template's first run is a
+  caveat. The tutorial edits one bound to clear it; the template should not need that.
+- **No figure of merit says where a ray crosses the axis**, so a lens's focal length cannot be
+  scanned or optimised; the tutorial uses a second model whose detector plane is the axis.
+- **`outline --set`** rewrites the whole document, so `verify` reports results stale after a
+  value is set and set back; writes an out-of-bounds value while exiting 1; and its `--dry-run`
+  skips the bounds check.
+- **Help**: `einzel test --help` runs the tests; `einzel render --help` shows the section usage
+  only; the top-level help omits `render still`.
+- `einzel new` onto an existing file reports `SCHEMA_INVALID`; `estimate` said 8 s for a scan
+  that took 0.86 s; scan rows carry no interval; the report page prints an interval as
+  "6.771252 to 6.771252 (100 %)" and counts a study as a run; no example scan study ships.
+- **Warning text that describes an older build**: `regime.overlap-band` and
+  `regime.trajectory-above-validity` say the diffusive mode is not built, and
+  `regime.knudsen-continuum` says the gas is treated as stationary.
+- **Exit code 5 (`EnginePinMismatch`) is never returned**, and `COST_GATE_REFUSED` is raised
+  only for an extension timeout while the cost gate itself exits 3 with no code.
+- **Warning codes have no registry.** Eleven error codes live in `ErrorCodes`; about 120
+  warning codes are string literals at their construction sites, in two spellings
+  (`ENSEMBLE_SMALL` beside `ensemble.small-sample`). `docs/warning-codes.md` is hand-compiled
+  for that reason and will drift until a code table exists for a test to count.
+- **Results and regime cannot be stopped from the window**, because their command objects take
+  no token and call back at no point; the window's Stop is for a watch only.
+
+**R1. Somebody else can install it and get through a first hour.** In progress on
+`review/installable-and-usable`. The release workflow published `Einzel.Wpf` as the only shell
+and had no macOS asset (confirmed), so deleting WPF as item 5 plans would have shipped no
+window at all — **settled**: the workflow now carries the Avalonia shell in every archive,
+macOS included, and `Einzel.Wpf` is deleted (item 5.4); the Avalonia window now has a Stop for a
+watched run (`ShellSession.WatchAsync` takes the token), opens a model and starts one from a
+template - what it still cannot do is stop results or regime; README, `docs/README.md`,
+`docs/shell.md`, `docs/architecture.md` and `docs/model-format.md` say 19 templates, schema 0.9
+and a Windows shell against 23, 0.14 and Avalonia; and there is no first-lens tutorial, no
+page mapping SIMION's terms onto these, and no index of warning and error codes.
+
+**R2. Magnetic fields.** Three reviewers ranked this the largest gap independently: there is no
+B field and no velocity-dependent force anywhere. A uniform or imported B plus a v x B term in
+the integrator is the first step and opens sectors, Wien filters, Penning and ICR cells and
+electron optics; a solved magnetic potential is a later one. r06 does not ask for it, so this
+is an amendment when it is started, not before.
+
+**R3. Geometry that does not have to be typed.** STL or CAD import (RND-13/15 are Not built),
+union and subtraction of primitives, placing and rotating a solved element the way a SIMION
+workbench places an array, an ideal transparent grid as an electrode kind, and more than one
+detector - the last already a recorded LIB-1 signal from the dual-slot trap.
+
+**R4. Seeing and asking about a field.** No verb returns the potential or field at a point or
+along a line; the viewport draws twelve equipotentials on z = 0 and nothing else; no color
+map, cutting plane or potential-energy surface; an electrode cannot be picked for its name and
+potential; `export` writes basis channels and not the field an ion sees, and no E.
+
+**R5. Interactive speed.** Every edit re-validates, re-solves, re-extracts and re-flies, where
+basis superposition makes a voltage change a re-weighting; the smoother is single-threaded
+(the measured bandwidth ceiling was for concurrent solves, not a tiled red-black sweep); the
+independent-ion cloud loop is single-threaded.
+
+**R6. Space charge that knows about the electrodes.** PIC solves in an earthed box round the
+packet: no image charge on a conductor, no continuous-beam mode.
+
+**R7. Sources, recording, and control in flight.** One Gaussian cloud per model, no time of
+birth, no mixed masses in a trajectory run, no recording at declared planes, and no per-step
+hook - invariant 3 forbids one for extensions on purpose, so what feedback-controlled voltages
+would need is a design question rather than a missing feature.
+
+What the review found sound and said not to disturb: the cut-cell stencils (the cylindrical
+operator was re-derived by hand), Galerkin coarsening judged on the fine residual, ghost-node
+extrapolation and reflection in the interpolants, event landing on real Runge-Kutta steps, the
+Scharfetter-Gummel solver's conservative weights, UI-1 in the shell, and the handoff between
+the UI and render threads.
 
 ### Open, in priority order
 
@@ -3513,7 +3768,7 @@ project's author needs to run it and more than any physics the moment one does.
     The remainder is the front end: the entrance funnel and the gate the operating
     sequence opens and closes (see the TIMS front-end entry).
 
-5. **The shell (§16).** **Seven of the eleven views exist** — the table in
+5. **The shell (§16).** **Eight of the eleven views exist** — the table in
     [the shell section](#the-shell-and-the-rest-of-16) is the current one; this entry
     said three for a while after it stopped being true. The window opens on a model, and
     what remains divides into three kinds rather than one:
@@ -3607,6 +3862,36 @@ project's author needs to run it and more than any physics the moment one does.
     surface since the density is already computed and contoured; the figure composer, whose
     seam is already text the CLI executes; then the animation timeline's scrubbing. The
     update notice needs `Einzel.Update`, which does not exist.
+
+    **The port to Avalonia is finished and WPF is deleted (2026-11-09).** Every view written
+    for WPF from there would have been written twice. The four steps, all done:
+
+    1. ~~**Move the session and the view models to plain `net10.0`.**~~ Done. `ShellSession`
+       and six view models live in `src/Einzel.Shell/Presentation/`; they held no WPF type,
+       and the WPF project compiled them from there until it was deleted.
+    2. ~~**Make the Avalonia model tree editable, with the journal.**~~ Done, and checked in a
+       live window: an edit goes through the journal under the person's name and redraws,
+       out of bounds applies with the complaint under the tree and the last picture kept, and
+       undo has a button. The window had been calling the command objects around the session,
+       so nothing it did was journalled or recorded as a command. Doing it found the shell
+       process formatting numbers in the desktop's locale - see `docs/shell.md`.
+    3. ~~**Carry the other five panels across as tabs, and the mouse gestures.**~~ Done, and
+       checked in a live window. Results and regime run the model, so they run in the
+       background rather than freezing the window as the WPF ones did; the cheap three read
+       when their tab opens. Orbit keeps the scale and turns about the centre, zoom is about
+       the cursor, and named views fit exactly; the bookkeeping is in `ViewportCamera`, where
+       it is tested, and the live window caught the sideways orbit turning the wrong way.
+    4. ~~**Delete `Einzel.Wpf` and `Einzel.Wpf.Tests`**, Helix and SharpDX with them, the
+       Windows-targeting setting, and the `windowsOnly` arm of `ShellBoundaryTests`.~~ Done:
+       3,575 lines, 2,819 of them the window. **The question before deleting a project is not
+       whether its code is still wanted but whether anything it asserted is asserted nowhere
+       else** - and three of its tests were not. They were written against a *copy* of the
+       color ramp and are really about `Einzel.Commands.ColorRamp`, which the port had left
+       with no tests at all; they are `ColorRampTests` in `Einzel.Cli.Tests` now, against the
+       live type, and two mutations fail them. The boundary test keeps the deleted assembly
+       names, because a rule forbidding a reference to a UI assembly should keep forbidding
+       one that was deliberately removed. There is now no `net10.0-windows` target and no
+       skipped test project in the solution: 1,795 tests, all on both runners.
 
 6. **The Astral inverse problem: the mirror is reproduced, and one published number is
     not.** This item has now been rewritten four times, and the rewriting is the point rather
@@ -3956,6 +4241,14 @@ project's author needs to run it and more than any physics the moment one does.
      or graze on the last bit. Measure how common it is (the funnel's first and last rings have
      it; round-number geometry on round-number meshes will often), then decide whether it wants a
      warning, a fix in the cut links - treating an arm in a face's plane as meeting it - or both.
+     **A second measured instance, 2026-11-15, and it is a step rather than a last-bit coin**:
+     a bore on the axis of the Paul trap's endcap whose face crosses a radial node row moves
+     the axial potential by 0.215 V of 400 applied for a nanometre of bore at the 0.5 mm row
+     and 1.48 V at the 1.0 mm row, with the on-row value equal to the limit from below - so
+     the field is discontinuous in the geometry at every row, not only undetermined on it.
+     Nothing warns. `PaulTrapEndcapHoleStudy.ABoreFaceOnANodeRowIsAStepNothingWarnsOf`
+     asserts the step is there, so it fails the day this is fixed. A worked case to fix
+     against, and a reason to rank the fix above the warning.
 
 
 12. **Distribution, and the trigger is a person rather than a date.** Fourteen of the

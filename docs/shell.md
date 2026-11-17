@@ -1,7 +1,22 @@
 # The shell
 
-WPF on Windows, and §16's eleven views. Six exist: the model tree, the journal, the 3D
-viewport, results by accuracy class, the regime inspector, and the sequence editor.
+Avalonia, plain `net10.0` with an OpenGL viewport, and §16's eleven views. **Nine exist**:
+the model tree, the journal, the 3-D viewport, results by accuracy class, the regime
+inspector, the sequence editor, the project view, the extension manager, and the update
+notice, which arrived with `Einzel.Update`. It runs where the engine runs - the test CI
+builds and runs it on Windows and Linux; macOS is supported by the toolkit and not covered
+by those tests, so treat it as untested. Parameters are edited through the session journal
+and can be undone, the viewport orbits, pans and zooms with a ruler in the corner, and
+Journal, Results, Regime, Sequence, Project and Extensions are tabs beside it.
+
+**There was a second shell, on WPF, and it is gone.** The WPF one came first and was
+Windows-only; `Einzel.Shell` was written beside it on Avalonia, carried every view across,
+and the WPF project was deleted once nothing was left that only it had. Much of this page
+was written about that shell, because the decisions it records - the level-set extraction,
+the two colour ramps, RND-8 on the face of the viewport, the camera - are the ones the
+current shell inherited or deliberately reversed. Where a section is about the WPF window
+it says so. [How the shell came to be on Avalonia](#how-the-shell-came-to-be-on-avalonia)
+is the port itself.
 
 **UI-1 is the whole design.** The shell owns layout, input, the interactive viewport and
 the update check. It owns no physics, no validation rules, no file format knowledge and
@@ -28,7 +43,7 @@ been built. The one to watch is the in-process path
 acquiring an argument the command form has no spelling for; that is the moment the
 amendment is being broken, and it will look like a convenience at the time.
 
-## Windows-only is the shell, and nothing else
+## Invariant 1, and the bet it was keeping open
 
 Architecture invariant 1 says nothing below the shell may reference it and every assembly
 above it builds and runs on Linux. Two tests enforce it, both running on Linux:
@@ -40,21 +55,28 @@ uses — so adding a `ProjectReference` to the whole transport engine left no tr
 metadata and the test passed. UI-1 is about what the shell may reach *for*, not what it
 has reached for so far, so the project file is parsed too.
 
-**And the shell itself compiles on Linux**, which was an open bet and is now measured:
-`EnableWindowsTargeting` is enough, XAML markup compilation included. The whole solution
-builds on Ubuntu with the .NET 10 SDK, zero warnings, `einzel-shell.dll` among the
-outputs. It does not *run* there and is not meant to.
+**That invariant is what made the WPF shell cheap to replace**, and the replacement is
+what shows it was being kept rather than merely asserted: no capability was trapped in the
+old window, because every one of them was already a command. The shell is now the only
+project in the solution that references a UI toolkit, and it targets plain `net10.0`, so
+there is no longer a `-windows` target anywhere here.
 
-`Einzel.Wpf.Tests` is the one Windows-only test project here. On a non-Windows host it
-builds as an ordinary `net10.0` assembly with no sources and no test adapter, so a
-solution-wide `dotnet test` walks past it. Compiling a stub that asserted something would
-be asserting it about a shell that is not there.
+`Einzel.Shell.Tests` targets plain `net10.0` and runs on both CI runners. The WPF shell's
+tests targeted `net10.0-windows`, and a solution-wide `dotnet test` walked past them on
+Linux - so what they checked was checked on one platform, which for a cross-platform claim
+is nobody checking it. There is now no skipped test project in the solution.
 
 ## Globalization: the one build setting the shell reverses
 
-`Directory.Build.props` sets `InvariantGlobalization` for everything. **WPF cannot run
-under it**: the font cache constructs `new CultureInfo("en")` while measuring the first
-line of text, which throws, and the window dies before it is shown — a
+`Directory.Build.props` sets `InvariantGlobalization` for everything. The shell reverses
+it, because **text layout and number entry in a window are locale-facing**: the window has
+to lay out text in the user's own script and show them a number the way their desktop
+writes one.
+
+The WPF shell reversed the same setting for a blunter reason, and it is worth keeping
+because it is the kind that is found at run time rather than at build time: **WPF cannot
+run under it at all** - the font cache constructs `new CultureInfo("en")` while measuring
+the first line of text, which throws, and the window dies before it is shown, a
 `TypeInitializationException` out of `MS.Internal.FontCache.MajorLanguages`.
 
 What that setting was protecting is unaffected. Its stated purpose is that number and
@@ -102,7 +124,10 @@ and the electrodes are semi-transparent by default — the whole reason to look 
 an ion together is to see where the ion goes relative to the metal, and an opaque rod in
 front of the axis makes that the one thing the picture cannot show.
 
-### Helix Toolkit, and what taking it knowingly means
+### Helix Toolkit, and what taking it knowingly cost — the WPF shell
+
+**History: the current viewport is ours and has no third-party 3-D dependency at all.**
+This is kept because the bet was taken deliberately, written down, and then called in.
 
 r06 names Helix Toolkit on its DirectX 11 path, with the reason that plain WPF Media3D
 cannot render 10⁴ trajectories interactively. Two things r06 could not know, both found
@@ -120,6 +145,12 @@ dependency — so the archived library is confined to a window, and its failure 
 the window stops working, not that a figure cannot be produced. LIC-1 is verified rather
 than assumed: MIT from the embedded licence file, and the transitive closure is MIT
 throughout.
+
+**The failure mode it was being insured against never arrived, and the dependency left by
+another route.** Avalonia is a 2-D toolkit, so when the shell moved the viewport had to be
+written rather than configured - and what that bought, beyond running on Linux, is that the
+unmaintained library went out of the dependency graph entirely. It is recorded in SPEC.md
+as Amendment 26 and closed by Amendment 53.
 
 ### A conductor is the zero level set of its own signed distance
 
@@ -722,8 +753,9 @@ that knew where `models/` sits would grow its own idea of what a project is.
   data for the other two is already on each path.
 - **Scrubbing**, which is the animation timeline's shell half. Per-phase playback rates and
   frame export are built.
-- **Six more views**: figure composer, animation timeline, sequence editor, results by
-  accuracy class, regime inspector, project view, extension manager, update notice.
+- **Two more views**: the figure composer, and the animation timeline (per-phase rates and
+  frame export are built; scrubbing is not). The update notice is no longer among them -
+  `Einzel.Update` exists and the window carries its bar.
 
 The pattern is worth noticing: almost every remaining row is presentation over something
 that already works, which is what AGT-2 is supposed to produce and is weak evidence that it
@@ -828,11 +860,12 @@ something is missing. An earlier version of that test put the loose model at the
 root and reported the two states as identical - which they were, because the layout is found
 by walking up.
 
-## A second shell, on Avalonia, that runs where the engine runs
+## How the shell came to be on Avalonia
 
-The shell above is WPF, and WPF is Windows. A user asked for the platform to run
-elsewhere, so `Einzel.Shell` is the same §16 views on Avalonia with an OpenGL viewport:
-plain `net10.0`, no `-windows`, and a reference to **`Einzel.Commands` and nothing else**.
+The first shell was WPF, and WPF is Windows. A user asked for the platform to run
+elsewhere, so `Einzel.Shell` was written as the same §16 views on Avalonia with an OpenGL
+viewport: plain `net10.0`, no `-windows`, and a reference to **`Einzel.Commands` and
+nothing else**.
 
 **The swap cost nothing below the shell, and that is the whole point of having kept the
 two rules.** Invariant 1 kept every physics assembly free of UI types, and Amendment 25
@@ -840,29 +873,276 @@ made every shell action a CLI invocation - so there was no capability trapped in
 window that had to be excavated before a new one could have it. 2,167 lines, zero physics,
 and one file (the color ramp) ported with only its namespace changed.
 
-**The WPF shell is untouched and still builds.** Its assembly was renamed to
-`einzel-shell-wpf`: two projects emitting one assembly identity is a latent collision, and
-it had already made `ShellBoundaryTests` ambiguous about which shell it had found. That
-test is now a `[Theory]` over both, with a `windowsOnly` flag, so UI-1 is checked against
-each of them rather than against whichever the scan happened to pick up.
+**The two ran side by side for four changes, and then the WPF one was deleted.** While
+both existed its assembly was renamed to `einzel-shell-wpf`, because two projects emitting
+one assembly identity is a latent collision and it had already made `ShellBoundaryTests`
+ambiguous about which shell it had found - that test became a `[Theory]` over both, so
+UI-1 was checked against each rather than against whichever the scan happened to pick up.
+**Which shell survives was settled on 2026-11-09: this one**, and the table below is the
+record of what had to be carried across before the other could go.
 
 | §16 view | WPF | Avalonia |
 | --- | --- | --- |
 | 3-D viewport | yes | **yes** |
-| Model tree | yes | **yes** |
+| Model tree, shown | yes | **yes** |
+| Model tree, edited, validated as typed, undone | yes (no undo control) | **yes** |
 | Field over the geometry | yes | **yes** |
 | A run watched while it steps | yes | **yes** |
 | A scale in the viewport | not yet | **yes** |
-| Journal | yes | not yet |
-| Results by accuracy class | yes | not yet |
-| Regime inspector | yes | not yet |
-| Sequence editor | yes | not yet |
-| Project view | yes | not yet |
-| Extension manager | yes | not yet |
+| Journal, with the actions as commands | yes | **yes** |
+| Results by accuracy class | yes, on its UI thread | **yes, in the background** |
+| Regime inspector | yes, on its UI thread | **yes, in the background** |
+| Sequence editor | yes | **yes** |
+| Project view | yes | **yes** |
+| Extension manager | yes | **yes** |
+| Rotate, pan and zoom with the mouse | yes (Helix) | **yes** |
+| Stop a watched run, keeping what it drew | yes | **yes** |
+| A legend saying what the colours mean | yes | **yes** |
 
-Every row in the second column that says "not yet" is presentation over a command that
-already works - the same observation this page makes about the WPF shell's own remaining
-rows, and the reason a second window is a drawing exercise rather than a capability one.
+**Nothing was left that only the WPF shell had**, so it was deleted: 3,575 lines, 2,819 of
+them the window and 756 its tests, with one archived 3-D dependency going out of the graph
+with them and three of its tests ported onto the live types they were really about. The
+last three rows are not §16 views, and each was missing from this table until something
+went looking for it. Helix gave the WPF viewport orbit, pan and zoom for nothing, and the
+Avalonia viewport had the four named views and no gestures at all; **the Stop button and the
+colour legend were found by a review of the deletion itself**, after this page had already
+said nothing was left that only the WPF shell had. That claim was made by walking §16's
+views and the deleted project's *tests*, and both of these were in the toolbar and under the
+viewport - **a comparison drawn up from a requirements list does not cover what a window grew
+that no requirement asked for.**
+
+Every row in the second column was presentation over a command that already worked - the same
+observation this page makes about the WPF shell's own remaining rows, and the reason a second
+window was a drawing exercise rather than a capability one. Two rows needed something below
+the window all the same, and neither was a new capability: the results and regime panels
+needed background versions of their session calls, and the gestures needed the camera to hold
+a zoom and a pan.
+
+### Deleting it, and the three tests that were not about WPF at all
+
+Before deleting a project, the question is not whether its code is still wanted but whether
+anything it asserted is asserted nowhere else. Two of `Einzel.Wpf.Tests`' classes were
+`ViewportViewModelTests` and `WatchedViewportTests`, and most of what they checked had
+moved: the view models went to `Einzel.Shell/Presentation/` with their tests, and the
+watch is covered by `WatchedRunTests` on both runners.
+
+**Three were not covered, and one of them was the only test of a type that is still live.**
+They were written against `Einzel.Wpf.ColourRamp`, a copy, and what they were really about
+is `Einzel.Commands.ColorRamp` - which the port had left with **no tests of its own**:
+
+- `BothRampsAreLegibleAgainstTheViewportGround` - WCAG contrast above 3.0 for both ramps
+  against the viewport's background, which is what stops the ground being changed without
+  the ramps being rechecked.
+- `TheRampRisesInLightnessThroughout` - Rec. 709 luminance monotone over 65 samples, which
+  is what stops viridis being "improved" into a rainbow later.
+- `ABundleOfOneEnergyIsDrawnInAColour` - a degenerate range gives the middle of the ramp
+  rather than a division by zero, with a spread range as the control. A monoenergetic beam
+  in a field-free drift is the simplest model anyone writes.
+
+They are `ColorRampTests` in `Einzel.Cli.Tests` now, pointed at the live type, and two
+mutations of it fail them. **A test that was only ever run against a copy was testing the
+copy**, and deleting the copy is when that becomes visible.
+
+### Two things the deletion lost, and the comparison that missed them
+
+A review of the deletion found two capabilities the WPF window had and this one did not,
+after the table above had already said nothing was left that only the WPF shell had. Both
+are restored, and **how they were missed is the part worth keeping**: the comparison was
+drawn up by walking §16's eleven views and the deleted project's tests. Neither of these is
+a §16 view, and neither had a test - they were a button in the toolbar and a strip under
+the viewport. **A comparison drawn up from a requirements list does not cover what a window
+grew that no requirement asked for.**
+
+**Stop, on a watched run.** A watch is the one action here measured in minutes - a TIMS
+elution is twenty - so it is the one that needs a way out, and without it the choices were
+to wait or to close the application. It is cooperative, because a density step is not
+interruptible part way: what it does is decline to take the next one, so the run ends where
+it stands. **What it drew is kept**, because the packet on screen is where the run had got
+to and is the reason somebody pressed it; the status says the run is partial rather than the
+drawing being taken away to say so.
+
+**The token has to reach the listener, not only `Task.Run`.** `Task.Run`'s token decides
+whether the work ever starts and is never consulted again once it has, so a watch cancelled
+a second in would run to completion with a Stop button that did nothing visible for twenty
+minutes. The run offers to be interrupted at exactly one place - it asks the listener whether
+it wants a frame at every step - so `ShellSession.WatchAsync` wraps whatever listener it is
+given rather than asking each caller to remember, which is this project's recurring rule that
+the shortest spelling should be the safe one. `StoppingAWatchKeepsWhatItDrewAndTookFewerSteps`
+asserts the **step count** against the same run unstopped, because a token reaching only
+`Task.Run` passes any assertion about the exception alone.
+
+**The legend.** A trajectory bundle is coloured by energy and a field by potential, and a
+colour standing for a number is the one place a reader cannot recompute it - GRD-1's argument
+applied to a drawing. The rows come from `ViewportPicture.Scales`, in the command layer,
+because **the ends are not the observed range**: the potential ramp is symmetric about earth,
+so a lens holding 0 and 500 V is drawn on a ramp running -500 to +500, and a legend that
+worked that out for itself would be a second copy of a rule the picture already applies - the
+WPF window kept exactly that rule in a comment in its code-behind. The swatch is sampled at
+32 stops rather than interpolated between the ends, because viridis is not linear between its
+ends and that is the whole reason it is used.
+
+**One row per span actually drawn**, which is a wrinkle the legend exposed rather than
+created: the equipotentials anchor on the solved field's extremes and the metal on the peak
+each electrode reaches, and contour levels are chosen inside the domain so they generally do
+not reach the electrodes. Where the two agree to a rounding there is one row saying
+`potential`; where they differ there are two, `field` and `electrodes`, because one number
+for both would describe a ramp neither layer uses. **Whether the two layers should share a
+span is a separate question about the picture** - "anchored once across everything shown" is
+the rule this viewport states elsewhere - and changing it would move every still, so it is
+recorded here rather than done under a legend fix.
+
+### The five panels, and the two that run the model
+
+Results, regime, sequence, project and extensions are tabs beside the journal, each over the
+view model it had in WPF. **Results and regime run the model, so they run in the background.**
+The WPF shell ran both on its UI thread behind a wait cursor, which on a volume model is
+minutes of a window that does not answer. `ShellSession.ResultsAsync` and `RegimeAsync`
+reconcile the journal and record the command on the caller's thread, as `ViewportAsync` does,
+and run only the command in the background; the view models' `RefreshAsync` fill their lists
+on the caller's thread when it returns, so nothing is changed under the window from another.
+**The tree is closed while one runs**, as it is during a watch: what runs is the document on
+disk, and an edit part way through would give figures of one revision beside a tree of
+another. An edit made after one has finished marks what it shows as of the model before the
+edit, rather than leaving the figures of the previous model looking like those of the one in
+the tree beside them. A full run stores a result, so the project view is read again, and its
+state for this model goes from "not run" to "current" without anybody pressing Read.
+
+**A review found that the run itself could mix two revisions, below the window.** The results
+command read the model three times - the run, the figures, whether it declares a cloud - and a
+run read it three times more: to validate and hash it, to compile it, and at the end for the
+manifest's schema version. So an edit landing mid-run, from this window or from an agent on
+the same file, could give a manifest whose hash was of one document beside a run of another
+(PRJ-3), and an edit that left the model invalid failed a run that had finished. Each now
+reads once, and the results command checks the run's manifest hash against the text it read
+and refuses a mismatch. Tested by editing the model from inside the run's own "solving"
+announcement, which lands at a known moment after its read; a delay would be a race the test
+could lose on a fast machine and then pass measuring nothing.
+
+**The cheap three are read when their tab is first opened**, not when the window opens: each
+read is journalled as a command, and a journal that opens with five reads nobody asked for
+buries the ones they did. An edit forgets the timeline and the project, which it can change,
+and re-reads whichever is on screen.
+
+The tables became stacked rows where a column of a 400-pixel panel would truncate, as the WPF
+extension pane once did to its licences. The regime table keeps its columns and scrolls
+sideways, with its header scrolling with it so a column is never read under the wrong name.
+The results panel shows the evidence behind each figure on its own line, which the WPF one
+did not show at all; GRD-1 counts it as part of the envelope.
+
+### Orbit, pan and zoom
+
+Drag to turn, right-drag or Shift-drag to move, the wheel to zoom about the cursor, and a
+double-click or **Fit** to refit at the current angle. The named views fit exactly and leave
+nothing of the mouse behind, so pressing one is the same picture every time.
+
+**The bookkeeping is in `ViewportCamera`, where it is tested; the window only maps pixels.**
+Zoom and pan are a scale and a shift in clip space applied after the fitted frame, so an
+untouched camera draws exactly what a still of the same view draws, and the ruler over the
+viewport reads the zoomed matrix and stays true. **An orbit keeps the scale and the centre
+and turns about them.** Refitting at every angle, as a named view does, makes the picture
+swell and shrink under the cursor - a 100 mm rod turned end-on is 2 mm across and would fill
+the screen - and the test for it uses exactly that rod, against a refit as the control. An
+edit's new camera keeps the zoom and pan of the one it replaces, so somebody zoomed in on a
+slit to see what an edit does to it stays on the slit.
+
+**Two things the live window settled that a test could not.** Dragging right first turned the
+instrument the wrong way: measured on the near corner of a plate, a 25-pixel drag right moved
+it 53 pixels left. The point under the cursor now follows it both ways (the same drag moves the
+corner 56 pixels right, and Iso puts it back to the pixel). And the orbit's first version
+widened the depth to the scene's reach from the centre, so nothing would be clipped at a new
+angle; breaking that changed no test, and the reason is that it was redundant - the frame's
+depth is already twice its largest half-extent, and a box fits in a sphere of the square root
+of three times that. It was deleted rather than kept untested.
+
+### The session moved, and the window stopped going around it
+
+The first Avalonia window called `ViewportCommand` and `OutlineCommand` itself. That drew the
+right picture and left **nothing behind**: no journal, so nothing a person did could be undone
+or seen by an agent on the same model, and no record of the commands, so the window was the
+one surface whose actions could not be read back as something to type (Amendment 25). Its
+model tree was a list of labels.
+
+**The session and six view models now live in `src/Einzel.Shell/Presentation/`** -
+`ShellSession`, and the tree, results, regime, sequence, project and extension view models -
+moved out of `Einzel.Wpf`, where they held no WPF type at all: their only references were
+`Einzel.Commands` and `System.ComponentModel`. While both windows existed the WPF project
+compiled them from their new place rather than keeping a copy, so the two ran one source
+and could not drift apart meanwhile - an Avalonia type in one of those files would have
+failed the WPF build, which is what held the line until that project went. Only
+`ViewportViewModel` stayed behind, because it fed Helix where the Avalonia viewport draws
+from `ViewportPicture` instead, and it was deleted with the rest. Two of the WPF test
+classes went with the code they test, and now run on Linux too.
+
+**The tree edits now, through the journal, under the person's name**, which is the
+operating-system user - declared once when the window opens, never per action, for the reason
+the MCP server takes its author from the handshake. A free parameter is a box; a derived one
+says `derived` and shows its expression and what that came to on the line beneath, because
+that pair is what a reader needs in order to know which knob to turn. A value commits on Enter
+or on leaving the box, and the rules a person meets at the keyboard are in
+`ModelTreeViewModel.Commit` rather than in the window, so they are tested where the window
+cannot be:
+
+- **A box left as it was records nothing.** Committing on lost focus means tabbing through the
+  tree passes through every row; without this each one would write a journal entry.
+- **Numbers are parsed invariantly.** `4,5` is refused rather than read as forty-five, and the
+  refusal says to write the magnitude alone with a point.
+- **A derived parameter is refused by name**, naming the expression it is derived from.
+- **Out of bounds applies, and the tree stands with the complaint against it**: taint, never
+  block, applied to input. The line under the tree turns red and names the bound; the
+  viewport keeps the last picture it could draw and the status line says that is what it is
+  showing, since a model that does not compile has no field to draw and blanking the viewport
+  would hide the instrument a person is in the middle of changing.
+- **A refusal is a third colour**, amber, because it is about what was just typed rather than
+  about the document, and a person should not have to read the sentence to tell which.
+
+**One defect the window would have produced, found by looking for its cause.** An edit
+re-reads the tree, which replaces every row, and a box committed with Enter then loses focus on
+its way out of the list - carrying the value just applied, against a row that still shows the
+old one. The window ignores a row the tree no longer holds; checked live, one edit is one
+journal entry.
+
+**An edit redraws, and the viewport now takes a new scene.** `SceneView.Scene` could only be
+set before the control was realized - "a viewport that changed scene mid-flight would have to
+tear down its buffers on the render thread, which is the next piece of work". That is
+`SceneView.Replace`: the scene is handed over under the same lock a watched frame uses, and on
+the render thread every buffer is released and the new layers uploaded. A watched frame still
+waiting is dropped, since it belongs to the instrument before the edit. **The named view is
+kept and the frame is refitted to the new scene**: this camera has no free orbit, so where
+somebody is standing is the named view alone, and an edit that doubles a drift length would
+otherwise put half the instrument off screen.
+
+**One redraw at a time, and a watch only over a current picture.** A redraw is a field solve
+and a transport, and the first version started one per edit, numbering them so a stale one
+stood down only after it had paid for itself - three quick edits ran three solves side by side
+for two pictures nobody saw. `Coalescing` runs the redraw one at a time and folds every request
+made meanwhile into a single run after it, which reads the document as it stands by then; a
+superseded run's failure is not reported and the last run's is. Checked live on a quadrupole at
+96 cells per radius: three edits, two redraws, and the window answering in under a millisecond
+while each solved. **Watch run is enabled only while the viewport shows the document as it
+stands** - not during an edit's redraw, and not after one that could not be drawn - because a
+watch runs the file on disk and its frames would otherwise land on the geometry from before the
+edit. The tree and the undo button are closed while a watch runs, so no redraw can be asked for
+that would replace its frames. Both rules came from a review of this change.
+
+**Each box is named for the parameter it changes**, with its unit and bounds as help text, so a
+screen reader tabbing through the tree hears "inscribedRadius, in mm, 1 to 50 mm" rather than a
+list of numbers: the label beside a box is not associated with it.
+
+**Undo has a button**, which the WPF shell never had: its view model could undo and nothing in
+the window called it. The Journal tab lists what has happened, by whom, and every action as
+the command that would repeat it, selectable so it can be handed to an agent as it stands.
+
+**The shell process is now invariant in its numbers.** Turning globalization back on, which a
+window needs, also turned the desktop's locale on, and about 265 interpolated strings below
+the shell format numbers without naming a culture because in the CLI none is needed. On a
+German desktop each would print a decimal comma beside a box that refuses one. `Program.UseInvariantNumbers`
+makes the current culture invariant on every thread at startup and leaves the culture data in
+place, which is what the CLI's build setting was doing for it. Two sites were fixed directly as
+well, because they were found first: `OutlineCommand.BoundsText`, which printed `0,1 to 20 kV`
+under the tree, and the scan's out-of-bounds warning. The analyzer that exists for this, CA1305,
+is silent wherever globalization-invariant mode is on and does not look inside interpolated
+strings at all, which is why none of the 265 was ever reported - in this repository it found
+two, both of the `ToString("G6")` kind.
 
 ### A ruler in the corner of the viewport
 
@@ -904,14 +1184,15 @@ model-and-view pairs tried.
 
 ### Avalonia is 2-D, so the viewport is ours
 
-Helix Toolkit does the scene graph, the camera and the lighting for the WPF viewport.
+Helix Toolkit did the scene graph, the camera and the lighting for the WPF viewport.
 Avalonia has no equivalent: `OpenGlControlBase` hands over a context and a size, and
 everything above that - shader, camera, mesh upload, depth state - is written here.
 `Silk.NET.OpenGL` wraps the function pointers Avalonia's `GlInterface` supplies; it is a
 binding rather than an engine, and nothing below the shell sees it.
 
-That is more code and it removes the SharpDX problem this page records above: the WPF 3-D
-path rides on a library archived since December 2020, and this one rides on OpenGL.
+That is more code, and it is what removed the SharpDX problem this page records above:
+the WPF 3-D path rode on a library archived since December 2020, this one rides on OpenGL,
+and when that project was deleted the unmaintained dependency left the graph with it.
 
 ### ANGLE hands back an ES context, and the failure is silent
 
@@ -949,8 +1230,9 @@ that brought it in is.
 
 ### Watch run, and what it does not cover
 
-The viewport fills from a run that is still going, through the same
-`ViewportCommand.Watch` and `IViewportProgress` the WPF shell uses. Frames are
+The viewport fills from a run that is still going, through `ShellSession.WatchAsync` - the
+same `ViewportCommand.Watch` and `IViewportProgress` the WPF shell used, reached through the
+session so the watch is recorded as `einzel run <model> --progress 5`. Frames are
 **coalesced rather than queued** - a viewport wants the newest packet, not every packet,
 and a queue falls further behind the longer it is watched - and the queued flag is cleared
 *before* the frame is read, so the race can post twice and can never drop the last one.
@@ -976,19 +1258,43 @@ here.
 ### Tested without a window
 
 `Einzel.Shell.Tests` targets plain `net10.0` and runs on both runners - the first time a
-shell's own tests have. Eleven tests, none of which opens a window:
+shell's own tests have. None of its tests opens a window. It runs with globalization on, as
+the shell does, because a test of what a person types has to run where the desktop's locale
+can reach it:
 
-- **`FramingTests`** pins the camera as arithmetic. The projection is a `float[16]`, so
-  what it does to a point is checkable directly: the center of the scene lands at the
-  origin of clip space, a point at the framed radius lands inside the frustum, the
-  trajectories are included in the measured extent (the reflectron lesson - a page chosen
-  from the conductors alone puts the turning point off it), and an empty scene gives a
-  framing rather than a division by zero.
+- **`ModelTreeViewModelTests`** pins what typing does: an edit reaches the file through the
+  journal under the person's name and moves the derived parameter; a box left as it was
+  records nothing; under `de-DE` a comma is refused and a point is read; a derived parameter is
+  refused by name; out of bounds applies and undo puts it back; refreshing the history leaves
+  the rows alone, so a redraw finishing cannot take the keyboard out of a box. Each rule was
+  broken on purpose and fails its own test.
+- **`PanelTests`** runs results, preview and regime through the background path and checks
+  each reports what the foreground one did and is recorded as the same command; a refusal
+  comes back as a status line; and "not run" colours as neither a problem nor a success.
+- **`CoalescingTests`** pins the redraw's scheduling: requests during a run fold into one more
+  run, never two at once; an idle request runs; only the last run's failure is reported; and
+  the window is told both when it starts and when it is done. Each rule broken on purpose
+  fails, and a folded request is asserted to come back finished rather than awaited, so a
+  regression fails instead of waiting forever on a gate nobody opens - which is what the first
+  version of the test did.
+- **`ShellCultureTests`** checks that numbers are invariant on this thread and on new ones once
+  the shell starts, beside controls that print a comma first - so it cannot pass because the
+  machine happens to use a point.
+- **`ExtensionsViewModelTests`** and **`ProjectViewModelTests`** moved here from the WPF tests
+  with the code they test.
+- **`FramingTests`** pins the camera as arithmetic. It moved to `Einzel.Cli.Tests` when the
+  framing moved into the command layer, and still runs on both runners. The projection is a
+  `float[16]`, so what it does to a point is checkable directly: the center of the scene
+  lands at the origin of clip space, a point at the framed radius lands inside the frustum,
+  the trajectories are included in the measured extent (the reflectron lesson - a page
+  chosen from the conductors alone puts the turning point off it), and an empty scene gives
+  a framing rather than a division by zero.
 - **`WatcherTests`** pins the cadence, including the first frame and the last-with-a-packet
   rule.
 - **`WatchedRunTests`** drives a real diffusive run end to end and asserts the packet's
   leading edge **moves** across the frames. That frames arrive says the callback is wired;
-  that the packet moves says they are different frames.
+  that the packet moves says they are different frames. A second test watches through the
+  session and asserts the watch is recorded as the command that would repeat it.
 
 What is not tested without a window is the GL path itself - the shader, the uploads, the
 depth state. That needs a context, and the ANGLE defect above is exactly the class of
@@ -1015,8 +1321,9 @@ exact negatives — one basis channel, and the single most informative thing in 
 Taking its absolute value and recovering the sign from the DC works for a DC-biased
 electrode and fails completely for a purely driven one, where the DC is zero and the
 ternary substitutes `+1`. Every rod of `quadrupole-rf` came back at `+500 V` and the same
-saturated red. The WPF shell it was ported from computes `PotentialVolts +
-DriveAmplitudeVolts` and is correct.
+saturated red. The WPF shell it was ported from computed `PotentialVolts +
+DriveAmplitudeVolts`, which is correct, so the regression was introduced in carrying it
+across.
 
 **So this is the seventh appearance of that defect and the first to survive into a
 viewport** — and it survived because the decision lived inside an `OpenGlControlBase`, where

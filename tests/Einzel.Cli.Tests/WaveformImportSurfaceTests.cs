@@ -382,7 +382,7 @@ public sealed partial class WaveformImportSurfaceTests : IDisposable
 
     private static string Model(string waveform) => $$"""
         {
-          "schemaVersion": "0.16",
+          "schemaVersion": "0.15-esibd.2",
           "name": "imported rod",
           "ion": { "massToCharge": { "value": 100, "unit": "Da" }, "chargeNumber": 1 },
           "source": {

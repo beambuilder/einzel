@@ -1,6 +1,6 @@
 # Command line
 
-The primary surface. A peer of the future MCP server and shell, not a layer under
+The primary surface. A peer of the MCP server and the shell, not a layer under
 them — all three drive the same command objects, so a capability reachable from
 one is reachable from all.
 
@@ -67,7 +67,7 @@ to describe itself, which is what these three are for.
 
 | Command | Does |
 | --- | --- |
-| `einzel schema` | The model format as JSON Schema, **generated from the document types** |
+| `einzel schema [--study]` | The model format as JSON Schema, **generated from the document types**; `--study` gives the study-file format instead |
 | `einzel templates [name]` | List device templates, or print one |
 | `einzel examples [name]` | List the reference corpus, or print one |
 | `einzel doctor [dir]` | Check the installation, and a project if given |
@@ -89,8 +89,11 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel new <model.json> --from-template <name>` | Start from a shipped device |
 | `einzel new <model.json> --from-example <name>` | Start from a reference model, **and get its test** |
 | `einzel validate <model.json>` | Units, bounds, dimensions, regime validity. Instant |
+| `einzel outline <model.json> [--set <name>=<value>]` | The declared parameters with their units, bounds, descriptions and what each resolves to in SI; `--set` changes one, in its own declared unit |
+| `einzel project [dir]` | What the project holds (models, studies, figures, tests, extensions) and the state of each model (see below) |
 | `einzel estimate <model.json\|study.json>` | What a run or a whole study will cost, before starting it (GRD-8). A study's field cost counts what the project's field cache holds (`--project`) |
 | `einzel solve <model.json>` | Solve the fields only, and report how they went |
+| `einzel probe <model.json> --at-mm x,y,z` | The potential and electric field at a point, or along a line (`--line-mm ... --to-mm ... --samples N`), of the composite field a run flies through |
 | `einzel run <model.json>` | Run; writes a manifest and a result. Reports the ensemble too when the model declares a source cloud, and says where it has got to every 30 s (`--progress`). Loads solved channels from `.einzel/cache` and keeps the ones it solves (`--no-cache` to solve everything) |
 | `einzel fly <model.json> --ions <list>` | Fly an [ion list](ion-lists.md) through the model, one trajectory per row, rows at once on up to `maxParallelism` threads; writes a manifest, a per-ion result and CSV, and the expanded rows. `--ladder` runs the tolerance ladder per row, `--vtu` writes every path to `.einzel/` |
 | `einzel sweep <study.json>` | Tolerance Monte Carlo, and which parameter binds first |
@@ -101,14 +104,17 @@ without descriptions, and says so in its own `$comment`. `doctor` reports it too
 | `einzel test [dir]` | Run the project's tests |
 | `einzel verify [dir]` | Are the stored results still the answer? (GRD-10) |
 | `einzel report [dir]` | An account of what has been run, as one self-contained page (Amendment 43) |
-| `einzel export <model.json>` | Write the solved field as VTK ImageData for ParaView |
+| `einzel compare <model.json> [--ions N]` | Run both transport modes on the same model and report where they disagree (REG-3) |
+| `einzel export <model.json>` | Write the solved field as VTK ImageData for ParaView; `--composite` writes the summed field and E at one instant on a grid |
 | `einzel render section <model.json \| spec.json>` | Draw a plane through the instrument as line work |
 | `einzel render still <model.json>` | Draw the viewport's shaded 3D picture to a PNG, headlessly - the same composition and camera the window uses |
 | `einzel render animation <spec.json>` | Draw a flight as numbered vector frames on the spec's declared time mapping (RND-7) |
 | `einzel cache status\|clear\|prune [dir]` | What the field cache keeps; delete all of it, or only what no run of this build will load (other solver versions or compute paths, half-written and orphaned files). `--dry-run` names the files and deletes nothing |
 | `einzel waveform fit <csv> --orders N` | The harmonic series of orders 0 to N closest to one sampled period, printed as a model's `harmonic` waveform object with its residual; see [below](#einzel-waveform-fit) |
 | `einzel waveform import <trace.csv> (--frequency <Hz> \| --period <s>)` | A measured oscilloscope trace becomes a `tabulated` period file and the `waveform` object to paste, with what was measured: period, offset, amplitude, duty, edges, noise, harmonics; see [below](#einzel-waveform-import) |
+| `einzel ext list \| test \| register` | The extension authoring loop: list what is installed with each licence and what the sandbox does not enforce, run an extension's tests, or scaffold a new one that runs immediately |
 | `einzel agents-md [dir]` | Regenerate the platform layer of `AGENTS.md` (PRJ-6) |
+| `einzel agents tasks \| setup \| score` | Release tooling for the agent acceptance suite: list the tasks, prepare a project for an agent to attempt one, score what it left behind |
 | `einzel --version` | Engine version |
 
 | Option | Effect |
@@ -1206,6 +1212,86 @@ can be matched to the solve it came from.
 time it reports describe a solve made earlier, perhaps by another build, so `solve`
 never reads the cache; it writes each channel it solves there, so the `run` after it
 starts from the cache. `--no-cache` keeps nothing. `export` neither reads nor writes it.
+`probe` and `export --composite` assemble the field without the cache too, so on a volume
+model each call solves again.
+
+### `einzel probe`: what is the potential, what is E, here
+
+```
+einzel probe <model.json> --at-mm x,y,z [--at-us <t>] [--json]
+einzel probe <model.json> --line-mm x,y,z --to-mm x,y,z [--samples N] [--at-us <t>] [--csv <file>]
+```
+
+Axial potential profiles are what ion-optics designers live on, and until this verb there was no way to
+ask the engine for one. The probe reads **the field a run flies through**: it is built by
+`FieldAssembly.BuildReported`, the assembly every run uses, so superposed elements, regions, mirrors,
+tilts and the axisymmetric mapping are all honoured and the assembly's warnings (an unconverged solve,
+`mesh.node-on-shared-face`, a region's potential step) come out on the probe as they do on a run.
+
+- **Units are in the flag's name**, as `--width-mm` and `--at-us` already do it: `--at-mm`, `--line-mm`,
+  `--to-mm` are millimetres, `--at-us` is microseconds. A bare `--at` is refused by name rather than read
+  in some default unit. A line is `--samples` points (default 21, at least 2) with **both ends exactly the
+  points asked for**.
+- **Every number carries its unit in its name**: `potentialV`, `fieldVPerM`, `positionMm`. `--csv` writes
+  the same table with the unit in each column.
+- **A magnet is reported, not left out.** A `uniformMagnetic` element adds no potential and no electric
+  field, so a probe that printed only those would read 0 V and 0 V/m inside a 0.5 T sector with status `ok`.
+  Where the model declares a magnet every row also carries `fluxDensityT` (B in tesla, zero outside a
+  bounded magnet's box), the terminal table gains `Bx_T By_T Bz_T`, and the CSV gains `Bx_T,By_T,Bz_T`
+  after `Ez_V_per_m`. A model with no magnet produces exactly the output it always did: no key, no columns.
+- **A driven or sequenced field has no single value, so it has an instant.** The probe reads it through the
+  time-varying interface at `--at-us`, states the instant in the output (`instantUs`, and `field at
+  t = ... us` above the table), and when none was given it evaluates at t = 0 and says so with the
+  `probe.field-at-instant` warning. Reading such a field through the static interface instead would answer
+  at t = 0 without saying so, the defect `docs/lessons.md` records under "time-free interface".
+- **Each row says what kind of point it is.** `status` is `ok`; `inside-conductor` (with the conductor's
+  name and the signed distance in `conductorDistanceMm`: the potential there is the electrode's and the
+  field is the interpolant's, not a physical field); `outside-domain` (outside the domain of every element -
+  a solve's box together with its mirror image when it declares `reflectAboutX`, a tilted cross-section
+  checked in its own unrotated frame, a bounded analytic element's region - so the value is what the field
+  returns there, which is not a solved value and need not be zero; this wins over `inside-conductor`,
+  because an electrode's declared shape can run on past the solve); or `refused` (the field declines the
+  point, for example the quadro-logarithmic field's singular axis). A refused point is a row with a note,
+  never a failure of the profile; only that refusal is caught, so any other error in the field stack is
+  one error, not a column of refused rows. Warnings summarise the counts (`probe.inside-conductor`,
+  `probe.outside-domain`, `probe.refused`).
+- **A point on a domain face is in the domain.** A face node holds a solved value, so the declared faces
+  are inside, and the solved fields agree: a grid's last node is `min + (max - min)` in floating point and
+  can land an ulp short of the declared face, so a grid built over a box counts as reaching the declared
+  face. Millimetres are converted to metres exactly as the model's own lengths are (`mm` is multiplied by
+  1e-3), so `--at-mm 9,0,0` on a face declared as 9 mm is the same double as that face; a correctly
+  rounded division would land an ulp off it.
+- **`--at-us` is checked once, up front**: a non-finite or negative instant (a run's clock starts at 0) is
+  one `SCHEMA_INVALID` error naming the flag, exit 1.
+- **GRD-1, and why there is no interval.** A probed potential is an evaluation of a field already computed,
+  not a measurement with an ensemble of its own, so the outcome carries no uncertainty and says why
+  (`evidence`): an analytic element is exact to arithmetic, a solved element's error is its discretisation,
+  stated by each element's `cellMm` and by the warnings. An interval invented here would claim a precision
+  nothing measured.
+
+### `einzel export --composite`
+
+`export` writes each solved element's nodal potential, and for a driven geometry one *pattern* per channel -
+no instant, no field, one element at a time. `--composite [--box-mm x0,y0,z0,x1,y1,z1] [--step-mm s]
+[--at-us t]` samples the **summed** field with the probe and writes one `<model>.composite.vti` carrying
+`potential_V` and the vector `E_V_per_m`, with the instant, the grid, each element's cell size and every
+warning in the header. A model that declares a magnet also gets the vector `B_T` (tesla), and the header's
+units line says what it is; without one the file is exactly what it was. The default box is the union of what the model's bounded elements occupy - each
+solve's box, a reflected solve's mirror image, a tilted cross-section's rotated extent, a bounded analytic
+element's region (a model with none needs `--box-mm`) - taken in metres from the bounds themselves, so its
+last node is the domain's face and not a millimetre round trip of it. The default step is a 64th of the
+longest side, and the box's far faces are nodes exactly. **A box flat along an axis** (`--box-mm
+0,0,0,50,20,0`) is one layer of nodes on that axis with a nominal spacing of 1 m, the spacing the per-channel
+cross-section export writes for its flat axis, so ParaView opens it as a plane. It is a resampling: a step
+coarser than a solve's cell loses what the solve resolved.
+
+A node the field refused is never written as zero: its values are written as `nan` - lower case, the
+spelling VTK's own writers produce - and a `valid` array (UInt8, 1 where the field answered, 0 where it
+refused) marks it, so a reader never has to rely on parsing a non-finite number. The header says both.
+The model is read once, and the header's `model:` hash is of the very text the field was built from (PRJ-3).
+`--dry-run` samples nothing: it reports the grid it would write (`grid` in `--json`, a line on the terminal)
+and its node count. The file is streamed to a temporary file beside the target and moved into place, so a
+grid at the 8 M-node cap never exists as one string in memory.
 
 ### Why `export` writes ImageData
 
@@ -1822,8 +1908,8 @@ some restriction buffers, and nothing measured it.
 | solve | bytes a node at peak | measured, Release, live set sampled through the build |
 | --- | --- | --- |
 | volume, Galerkin hierarchy | 149.5 on a deep grid; 151.3 Astral at 1.12 M nodes, 150.4 at 8.68 M | 150.8 and 148.2 |
-| volume, rediscretized hierarchy | 51.2 | 48.7 and 48.0 segmented quadrupole at 0.55 M and 4.28 M; 47.8 C-trap at 1.08 M |
-| plane | 143.25 | 143.3 to 143.9 on four templates at 17 k to 1.05 M nodes |
+| volume, rediscretized hierarchy | 48.8 on a deep grid; the largest instant of a cycle over the real levels, every memoised coarse mask and the bottom solve's scratch included - 46.5 with no coarse level | with each geometry's real cut arms, a sphere 45.0 against 45.0 deep, 42.50 against 42.50 with no coarse level, 44.87 against 44.71 one level deep, 43.87 against 43.87 on a thin grid two levels deep; 45.3 to 47.1 on the C-trap and segmented quadrupole against 48.8 to 48.9 billed (51.2 stated, and 47.8 to 48.7 measured, while first-tier code kept the V-cycle residual) |
+| plane | 135.25 | 135.3 on the quadrupole at 1.05 M to 16.8 M nodes; 135.4 to 135.7 on four rods at 66 k and 263 k, first-tier and fully optimized alike (143.25 stated, and 143.3 to 143.9 measured, while first-tier code kept the V-cycle residual) |
 | each basis channel before the last | + 8 | 156.1 linear ion trap, two channels, against 158.4 |
 | diffusive run, per density node and per species | 263 | 248 and 259, drift tube at 66 k and 263 k nodes; each added species 248 |
 | mean-field self-field, once whatever the species count | 62, and 70 for a mixture | 61.3 to 61.4 on the drift tube at 66 k to 1.05 M nodes; 69.3 to 69.4 with two species |
@@ -1838,18 +1924,42 @@ size it is 241.8 on the Astral at 4 mm and 240.9 at 2 mm, against 241.3 and 240.
 build, by the descent the solver itself takes, rather than over eighths all the way down. Those
 figures are from before the cut links were stored over their cut arms; each is 90.5 lower now.
 
-**The plane figure was 153.3 and is 143.25, and the sampler that checked it hid the
-difference.** The plane's peak is the instant the first coarse level replaces its cut links
-with a zeroed copy and holds both: the fine level's 105, and a quarter of that level's mask,
-two copies of its cut links and two fields. The statement added every deeper level and that
-level's residual, which do not exist at that instant. The live set was sampled every couple of
-milliseconds - a timer tick of about 15 on Windows - and two builds' peaks were differenced,
-so a missed peak read either way; it passed on a sixteen-core workstation and failed on both
-four-core CI runners, where a Release build is fast enough to finish between samples. Sampled
-as densely as the collections allow, and the largest of three builds kept, the shipped plane
-templates read 143.3 to 143.9; a build whose samples all miss the copy reads about 135, and
-one whose samples see only the fine level - a loaded four-core CI runner did - about 126.6, which
-is why the plane test's lower edge is 0.85 where the volume tests' is 0.90.
+**The plane figure was 153.3, then 143.25, and is 135.25.** The plane's peak is the instant the
+first coarse level replaces its cut links with a zeroed copy and holds both: the fine level's
+mask, cut links and three fields, and a quarter of that level's mask, two copies of its cut
+links and two fields. The first statement added every deeper level and that level's residual,
+which do not exist at that instant. The live set was sampled every couple of milliseconds - a
+timer tick of about 15 on Windows - and two builds' peaks were differenced, so a missed peak
+read either way; it passed on a sixteen-core workstation and failed on both four-core CI
+runners, where a Release build is fast enough to finish between samples. Sampled as densely as
+the collections allow, a build whose samples see only the fine level - a loaded four-core CI
+runner did - reads about 126.6, which is why the plane test's lower edge is 0.85 where the
+volume tests' is 0.90.
+
+**The step from 143.25 to 135.25 was what first-tier code held, and the explanation recorded
+for it before was wrong.** The V-cycles kept each level's residual as a local of the frame that
+recursed. Optimized code ends a local at its last use; first-tier code, which every method runs
+as until it has been called often enough to be recompiled, keeps it to the end of the method.
+So the first plane build in a process read 143.6 bytes a node and every later one 135.6. *This
+section used to say* that the shipped templates read 143.3 to 143.9 and that "a build whose
+samples all miss the copy reads about 135" - **superseded**: with call counting off, so nothing
+is ever promoted, every build read 143.4, and fully optimized every build 135.4, so 135 was the
+optimized build holding what it should and 143 was the held residual. The self-field held the
+same array (130 KiB on its 129 by 129 grid) for as long as its Poisson solver had not been
+promoted, which is how `SelfFieldMemoryTests` read 67.3 against 62 on a Windows CI runner and
+61.4 everywhere else. The fine residual is now restricted in a frame of its own in both
+solvers, every tier reads the optimized figure, and `FirstTierMemoryTests` holds that by
+measuring a solve in a child process with promotion switched off.
+
+**The rediscretized volume is worked out instant by instant.** It said 51.2 - the deepest point
+of a cycle with every level's residual held, true of first-tier code only - and then 48.6, the
+fine restriction with one coarse mask. Derived from what is alive at each instant it is 48.8 on
+a deep grid: the coarsener memoises every coarse mask for the whole solve, so from the second
+cycle on all of them are live at the fine restriction (0.16 bytes a node on a deep grid, 0.30
+on an 8193 by 9 by 9 one, which measures 43.87 against 43.87 with them and would read 0.30 over
+without). And a solve that builds no coarse level relaxes the fine grid itself with a scratch
+residual over it, 46.5 bytes a node where 38.5 was billed - an under-bill of 17 percent on any
+rediscretized solve too small to coarsen.
 
 **A diffusive mixture is charged once per species.** Every species has its own walker - its
 density, next step and seed, its coefficients, its face operator and, cycle-averaged, its well
@@ -1976,10 +2086,11 @@ solves on top of the step, and over a flight long enough to refresh the self-fie
 summed charge, so it is charged once, plus that sum's own array: 69.3 to 69.4 with two species.
 It was not billed at all - the diffusive figure's own remarks said "a mean-field solve adds its
 own grids". `SelfFieldMemoryTests` measures it through a real run at 0.90 to 1.02 of the
-statement in an optimized build - 61.4 on a Cartesian tube, and 59.3 on a cylindrical bore whose
+statement - 59.3 to 61.4 on a Cartesian tube, the two readings a sampler alternates between, and 59.3 to 61.4 on a cylindrical bore whose
 earthed wall lies inside the density grid, so the self-field's mask fixes every absorbing node -
-asserting that the self-field was solved inside the loop at least once; **a Debug build holds one array more** (68.7 to 70.1), because it keeps a local alive
-to the end of its method where the optimizer ends it at its last use, and is allowed that much.
+asserting that the self-field was solved inside the loop at least once. **A Debug build is held to the same band**: it
+held one array more (68.7 to 70.1) and was allowed it, and that array was the V-cycle's residual -
+with the residual in a frame of its own, Debug reads 61.4 like Release.
 
 **What a run shows is higher, and depends on the machine.** The collector frees a large array
 lazily when memory is plentiful: the Astral at 4 mm reached 390 bytes a node of heap against a
@@ -1991,12 +2102,14 @@ if it is over.
 
 *How much higher, measured from outside the suite.* `tools/memory-harness` runs the same solve
 twice in fresh processes, once for each quantity, because sampling the live set forces the
-collections that keep the working set down. On main at `de73ec8`, unconstrained, the working set
-is **2.1 to 2.2x the live set on a plane** (143.3 live, 296 to 320 working at 1 to 17 M nodes),
-**2.3 to 4.5x on the shipped volumes**, the ratio growing with size on the rediscretized ones (the
-C-trap 2.8x at 0.14 M nodes and 4.5x at 1.08 M), and **1.03 to 1.12x for a diffusive step**, which
-is nearly all live data. The same runs agree with the estimate's live figures to within six
-percent. That is what a task manager shows on a machine with memory to spare, not what the run needs;
+collections that keep the working set down. Re-measured once the V-cycle's fine residual had a
+frame of its own, unconstrained, the working set is **2.2 to 2.3x the live set on a plane**
+(135.3 live, 295 to 309 working at 1 to 17 M nodes; it read 143.3 live before),
+**2.4 to 4.5x on the shipped volumes**, the ratio growing with size on the rediscretized ones (the
+C-trap 2.5x at 0.14 M nodes and 4.0x at 1.08 M, the segmented quadrupole 2.4x and 4.5x), and
+**1.03 to 1.13x for a diffusive step**, which is nearly all live data. The same runs agree with
+the estimate's live figures to a tenth of a byte a node on the plane and within eight percent
+over on the volumes, which is the cut-arm allowance those geometries do not use. That is what a task manager shows on a machine with memory to spare, not what the run needs;
 pooling the V-cycle's buffers would close most of the gap.
 
 **The 64,000,000-node limit, reconsidered once the true cost was known.** `main`'s

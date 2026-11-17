@@ -5561,3 +5561,170 @@ what the machine has installed.** CI was green on every run because the runner's
 under was the one the defect did not reach. EXT-6's vendored interpreter is the structural
 answer; until it exists, the thing to know is which Python the tests saw, and `einzel
 doctor` says.
+
+## A build setting that makes code correct makes it correct in that process only
+
+Every assembly here builds globalization-invariant, which makes the current culture invariant,
+so an interpolated `{value:G6}` prints a point wherever the CLI runs. About 265 of them name no
+culture, and in the CLI none needs to. **The shells turn the setting off**, because a window
+cannot run without culture data - and from then on the same strings, compiled into the same
+libraries, ran in a process where the desktop's locale reached them. Found when the
+cross-platform model tree became editable: on a German desktop the bounds under a parameter read
+`0,1 to 20 kV`, beside a box that parses `0.1` and refuses `0,1` because the document is
+invariant.
+
+**The analyzer that exists for this could not have said so, for two reasons.** CA1305 is not
+reported when globalization-invariant mode is on - true of every assembly here, including the
+ones whose code the shell runs - and it does not look inside interpolated strings at all.
+Turning the mode off in the shell's test project flagged one `ToString("G6")` in a test at once;
+building the libraries with it off found two more, in a scan warning. The interpolations stayed
+invisible either way.
+
+**The fix belongs at the level of the setting, not at the 265 sites.** What the build flag was
+doing for the CLI was making the current culture invariant, and the shell can do exactly that at
+startup without giving up the culture data a window needs (`Program.UseInvariantNumbers`).
+Editing each site would be done once, and the next string written without a culture would undo
+it. The rule that generalises: **when a property holds because of a process-wide setting, find
+every process that loads the code, and ask which of them has the setting.** A library tested
+only under the setting is tested only where it already holds.
+
+## A requirements list is not an inventory of a surface
+
+Deleting the WPF shell took a comparison: what does it have that the Avalonia one does not?
+The table was drawn up by walking **§16's eleven required views** and the deleted project's
+**tests**. Both are good lists and both missed the same two things, because neither contains
+them: a **Stop** button on a watched run, and a **colour legend** under the viewport. Neither
+is a §16 view. Neither had a test. Both were in the window, one in the toolbar and one in a
+strip below it, and both had been there long enough that the page documenting the shell
+described them in prose without the comparison table carrying a row for either.
+
+So the deletion shipped with a Stop control that did not exist and colours with no numbers
+beside them, under a claim in four files that nothing was left that only the WPF shell had.
+A review of the pull request found both.
+
+**A requirements document is a list of what somebody asked for, and a window accumulates
+things nobody asked for** — a convenience that turned out to be necessary, a control added
+because a run took twenty minutes. When removing a surface, walk the surface: its toolbar,
+its menus, every control it declares. The markup is the inventory, and for the WPF shell it
+was 629 lines of XAML that could have been read in a few minutes.
+
+**Two sharper versions of the same point.** A list of tests is an inventory of what somebody
+thought worth pinning, which is a strict subset again — and both lost features were untested,
+which is unlikely to be a coincidence: a thing nobody wrote a test for is a thing nobody
+wrote a requirement for either, so the two lists fail *together* rather than covering each
+other. And the project's own rule for this, already written down one change earlier — "the
+question before deleting a project is not whether its code is still wanted but whether
+anything it asserted is asserted nowhere else" — was applied to its **tests** and not to its
+**markup**, which is the half that describes what a person could do.
+
+**And the restored features had to be looked at, not only tested.** Both went in with tests
+that pass, and opening the window found two things no assertion had been written for. A
+legend number formatted at three significant figures writes a one-kilovolt beam's energy as
+`1E+03` — correct, and nothing a person reads a scale by; the shipped einzel lens is exactly
+that case. And the potential legend came out as **two rows reading −500 V and −502 V**,
+because the metal and the field anchor on separately computed spans and the interpolant
+overshoots a conductor's step by a couple of volts by construction. Both numbers are right.
+Four parts in a thousand is not a difference an eleven-pixel swatch can show, so what the
+window offered was two rows nobody could tell apart, inviting a reader to go looking for the
+difference between them.
+
+The rule: **a correct value is not the same as a legible one, and only looking tells them
+apart.** Both defects are now pinned by tests — written after the window showed them, which
+is the usual order for this class and the reason a GUI change is not finished when its tests
+are green.
+
+## A bisection over a ragged edge turns one flight's last bit into a platform difference
+
+The Paul trap with holes in its endcaps ejected at 759 V on Windows and 762.5 V on Linux. The
+first explanation was the loss criterion, the second was "the last digits belong to the
+platform's arithmetic", and both were written down before the edge had been looked at. Scanned
+in 0.25 V steps it is not an edge: at 200 cycles, amplitudes are held above the first one lost
+across more than two volts. A bisection assumes one crossing. Given several it lands on whichever
+its midpoints meet, and one of its midpoints sat on the last held island - so the verdict of one
+marginal flight, which does turn on the last bit, moved the answer 3.5 V. Every step of a
+bisection is consistent with a single crossing by construction, so the result looked as
+confident as the ideal trap's, which really is one step.
+
+Two rules, and a correction to the first.
+
+**Check that an edge is a step by scanning it, not by bisecting it.** A bisection cannot see
+the thing that invalidates it. `einzel boundary` walks outward from its bracket for this reason;
+a test that calls its own bisection has to do the same, or print the scan beside the bracket.
+
+**Hold long enough that the edge is a step - and if no hold makes it one, publish the strip.**
+The first fix held 800 cycles and reported the edge as "one place". It is not: for two holes the
+strip narrows from 2.25 V to 0.75 V and stays there at 2000 cycles, and inside it the bisected
+bracket moves 1.4 V across integrator tolerances of 1e-8, 1e-9 and 1e-10 while the ideal trap's
+does not move a bit. The number that belongs to the trap is the strip, q_eff 0.917 to 0.920; a
+bracket 0.2 V wide inside it belongs to the tolerance.
+
+**And when two geometries differ by the width of the strip, stop asking one ion.** Whether the
+stretch brings the holed edge back was written down as "not resolved": 0.914-0.916 against
+0.917-0.920, two overlapping strips. The answer was there to be had - 0.0030 of q, separated
+under every control - from a seeded cloud of 200 ions and the amplitude at which half are lost.
+With holes 73 of 1024 flights change sides between tolerances of 1e-8 and 1e-9, and the cloud's
+edge moves under 0.0002: the coin that decided a bisection is one vote. The general form: **a
+quantity decided by a chaotic trajectory is a distribution, and "not resolved" about one sample
+of it is a statement about the method.** Two things the cloud did not make go away, both found
+by its controls: the holed edges fall 0.0006 between 800 and 2000 cycles, so an edge is still an
+edge at a hold; and the bootstrap interval over one cloud was half again narrower than the spread
+between eight clouds, which this project had already found once (a bootstrap over one
+realization is not an error bar in a chaotic ensemble) and met again.
+
+**And that tolerance check had been run and reported clean - through a parameter the function
+ignored.** The flight helper took `relativeTolerance` and handed the integrator a constant, so
+"1e-8 or 1e-10 moves no edge" compared each run with itself. A sensitivity check needs its own
+control: show the knob does something somewhere (here, a looser tolerance takes fewer steps over
+the same flight) before reporting that it does nothing where it matters.
+## A reading that falls as a process warms up is the JIT tiering up, and a median of it is a vote
+
+`SelfFieldMemoryTests` failed on a Windows CI runner reading 5140, 5139, 5125, 5029 and 4996
+KiB for five identical runs, against 4996 to 5029 everywhere else: three runs held one more
+array than the other two, and the fourth of five readings fell back. The difference was one
+double a node on the self-field's 129 by 129 grid (130 KiB), and the record had a story ready
+for the first reading being high - one-time allocation on the first solve - which a descent
+across solves 1 to 4 does not fit.
+
+**It was the V-cycle, and the JIT decided it.** The multigrid V-cycle (`PoissonSolver2D`,
+and `PoissonSolver3D`'s rediscretized cycle) allocated each level's residual as a local of
+the frame that then recursed into every coarser level. Optimized code ends a local at its last
+use; first-tier code - what every method runs as until it has been called often enough to be
+recompiled - keeps it to the end of the method, as Debug does. So the deepest instant of a
+cycle held one array more for exactly as long as the solver had not been promoted, which on a
+fast workstation is the first run and on a loaded four-core runner can be most of the test.
+Established by controls rather than by a heap dump: `DOTNET_TC_CallCounting=0` (nothing ever
+promoted) reproduced it every time, 68.5 bytes a node against 62; `DOTNET_TieredCompilation=0`
+(everything optimized from the first call) read 61.4 every time; and giving the residual a frame
+of its own made both read 61.4. `[MethodImpl(AggressiveOptimization)]` on `VCycle` alone also
+removed it, which pinned the method; the frame is the fix, because it holds in Debug and in every
+tier rather than in one. The coarse level was given a frame too, and that one is not
+load-bearing: inlined back, with the residual's frame kept, a first-tier plane reads 135.57 bytes
+a node as before, because the recursion works on the coarse arrays and they are live through it
+either way.
+
+**The same hold had been written into two statements.** The plane solve's 143.25 bytes a node
+charged "a V-cycle residual" and the rediscretized volume's 51.2 charged every level's: true of
+first-tier code only. The first plane build in a process read 143.6 and every later one 135.6,
+and the record had put that down to the sampler catching or missing a transient; with call
+counting off every build read 143.4, fully optimized every build 135.4. They are 135.25 and
+the largest instant over the real levels now (48.8 on a deep grid). Re-deriving the second
+from what is alive at each instant found two things the first correction left out as well: the
+coarsener keeps every coarse mask for the whole solve, so from the second cycle on all of them
+are live at the fine restriction, and a solve with no coarse level at all allocates a scratch
+residual over the whole fine grid for its bottom solve - 46.5 bytes a node, billed 38.5. A
+statement corrected by taking a term out is worth re-deriving from the arrays rather than
+from the term.
+
+**The rule.** A measurement whose readings drift within one process - first high, then
+settling - is measuring the runtime warming up as much as the property, and the lifetime of a
+local is one of the things that changes when a method is recompiled. When a loop or a
+recursion allocates something large that must not outlive its part of the work, give that
+part a frame of its own; `[AggressiveOptimization]` fixes one tier and leaves Debug. **And a
+test cannot see a first-tier hold by reading more carefully in its own process**, because
+whether the code is still first-tier when it is read is the machine's choice: a median of five
+outvoted the first-tier readings on every machine that promoted quickly, and the warm-up runs
+that replaced it are, by construction, the runs in which first-tier code executes. The guard is
+`FirstTierMemoryTests`, which runs a plane and a volume solve in a child process with
+`DOTNET_TC_CallCounting=0`, so nothing is promoted and the hold shows on every machine: putting
+the residual back inline reads 1.06 of the statement there (143.57 and 47.94 bytes a node)
+while every in-process memory test still passes.

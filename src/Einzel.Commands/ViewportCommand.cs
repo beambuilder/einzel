@@ -288,7 +288,7 @@ public static class ViewportCommand
 
             return new ViewportOutcome(
                 absolute, [], false, null, null,
-                conductors, Levels(model, field, low, high), low, high,
+                conductors, Levels(model, field, warnings, low, high), low, high,
                 shells, peak, at, Ends(model, []), warnings);
         }
 
@@ -347,7 +347,7 @@ public static class ViewportCommand
 
         return new ViewportOutcome(
             absolute, paths, true, lowest, highest,
-            surfaces, Levels(model, field, floor, ceiling, paths), floor, ceiling,
+            surfaces, Levels(model, field, warnings, floor, ceiling, paths), floor, ceiling,
             [], null, null, Ends(model, paths), warnings);
     }
 
@@ -466,7 +466,7 @@ public static class ViewportCommand
         // ONCE, AND SHARED BY EVERY FRAME. A stage may change what an electrode holds and
         // not where it is, so the meshes are the same at every instant of the run.
         var (conductors, low, high) = Geometry(model, field, warnings);
-        var levels = Levels(model, field, low, high);
+        var levels = Levels(model, field, warnings, low, high);
         var ends = Ends(model, []);
 
         var relay = new ViewportRelay(
@@ -1606,6 +1606,7 @@ public static class ViewportCommand
     private static List<Equipotential> Levels(
         CompiledModel model,
         IElectrostaticField field,
+        List<ValidityWarning> warnings,
         double? low,
         double? high,
         IReadOnlyList<TrajectoryPath>? paths = null)
@@ -1614,6 +1615,22 @@ public static class ViewportCommand
             || Extent(model, paths ?? []) is not { } box)
         {
             return [];
+        }
+
+        // The contours are sampled at one instant, and for a driven or sequenced field that is
+        // t = 0 - the top of the RF cycle, or the first phase - which no instrument holds for any
+        // length of time. `render section` says so on its figure (render.field-at-instant); a
+        // viewport and a still are the same kind of picture and said nothing. Said once, here,
+        // where the instant is chosen, so a still and the window cannot disagree about it.
+        if (field is ITimeVaryingField)
+        {
+            warnings.Add(new ValidityWarning(
+                "render.field-at-instant",
+                "this field varies with time, so the equipotential contours are the field at "
+                + "t = 0 us and not a field the instrument holds. A picture of a driven structure "
+                + "is a frame of a film whether or not it is drawn as one; `einzel probe --at-us` "
+                + "reads the field at any other instant",
+                WarningSeverity.Provenance));
         }
 
         var values = Plane(field, box, PlaneColumns);

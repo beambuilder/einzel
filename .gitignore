@@ -47,3 +47,6 @@ papers/
 bench/results/raw/
 *.ions.csv
 !tests/**/*.ions.csv
+
+# Agent worktrees: separate checkouts of this repository, never part of it.
+.claude/worktrees/

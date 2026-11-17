@@ -86,6 +86,10 @@ quadrupole, a solved 2D or 3D drive, an analytic element a sequence phase
 re-compiles), each distinct value once; a drive declared at zero amplitude still
 counts.
 
+**A magnet is not shifted.** A uniform magnetic field has no clock, so a row born
+late in a model with a drive and a magnet sees the drive as it stands at its birth
+and the magnet as it always is.
+
 **A birth far beyond the model's clock is refused.** The birth time is added to
 the flight's own time, so a row born at 10^300 s would have its flight time
 resolved to a unit in the last place of 10^300. A row born more than 1000 of the

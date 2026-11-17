@@ -158,6 +158,10 @@ public static class PacketIntegrator
             throw new ArgumentException("a packet needs at least one macroparticle", nameof(launch));
         }
 
+        // B is applied by single-ion trajectory integration alone; dropping it here would
+        // fly the model as though the magnet were absent, with nothing to say so.
+        Einzel.Fields.Magnetic.MagneticRefusal.ThrowIfMagnetic(field, "the space-charge packet integrator");
+
         if (collisions is not null && collisions.Count != launch.Count)
         {
             throw new ArgumentException(

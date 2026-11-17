@@ -13,23 +13,33 @@ namespace Einzel.Cli.Tests;
 /// <para>
 /// <b>These run on the Linux CI runner</b>, which is the point: an invariant only ever
 /// checked on a developer's Windows box is one that has already been broken by the time
-/// anyone notices. This test project does not reference <c>Einzel.Wpf</c> and must never
+/// anyone notices. This test project does not reference <c>Einzel.Shell</c> and must never
 /// do so — what it checks is that nothing else does either.
 /// </para>
 /// <para>
-/// There are two shells now - WPF for Windows and Avalonia for everywhere - so the rule
-/// is checked against each of them rather than against whichever the scan happened to
-/// pick up. The misreading to guard against is still the same: "the WPF shell is
-/// Windows-only" and "the project is Windows-only" are a few words apart, and the second
-/// would undo the Linux CI that made the cross-platform shell cheap to build.
+/// There was a second shell, on WPF, and while both existed this was a theory over each of
+/// them rather than over whichever the scan happened to pick up. It is one shell again, and
+/// the names of the deleted one are still forbidden - see <see cref="ShellNames"/>. The
+/// misreading to guard against is the same as it was: "the WPF shell was Windows-only" and
+/// "the project is Windows-only" are a few words apart, and the second would undo the Linux
+/// CI that made the cross-platform shell cheap to build.
 /// </para>
 /// </remarks>
 public sealed class ShellBoundaryTests(ITestOutputHelper output)
 {
-    /// <summary>Every name a shell assembly or project goes under.</summary>
+    /// <summary>Every name the shell assembly or project goes under.</summary>
     /// <remarks>
+    /// <para>
     /// Project name and assembly name both, because a <c>ProjectReference</c> is declared
     /// under the first and recorded under the second, and here they differ on purpose.
+    /// </para>
+    /// <para>
+    /// <b>The WPF shell's two names are kept after its deletion</b>, and that is deliberate
+    /// rather than tidying left undone: the invariant is that nothing below a shell may
+    /// reference one, and a reference to the assembly that used to exist would be exactly as
+    /// much of a violation as a reference to the one that does. Removing the names would make
+    /// this test quietly narrower than the rule it enforces.
+    /// </para>
     /// </remarks>
     private static readonly HashSet<string> ShellNames = new(StringComparer.Ordinal)
     {
@@ -58,10 +68,11 @@ public sealed class ShellBoundaryTests(ITestOutputHelper output)
     /// <summary>Nothing below the shell may reference it (invariant 1).</summary>
     /// <remarks>
     /// <para>
-    /// The invariant that pays for itself. Every assembly above <c>Einzel.Wpf</c> builds
-    /// and runs on Linux, which is what makes a later cross-platform shell a replacement
-    /// of a presentation layer rather than a rewrite - and what lets <c>Einzel.Render</c>
-    /// produce a publication figure headlessly in CI with no display attached.
+    /// The invariant that paid for itself. Every assembly below the shell builds and runs
+    /// on Linux, which is what made the cross-platform shell a replacement of a presentation
+    /// layer rather than a rewrite - 2,167 lines, no assembly below it changed - and what
+    /// lets <c>Einzel.Render</c> produce a publication figure headlessly in CI with no
+    /// display attached. The WPF shell it replaced has since been deleted.
     /// </para>
     /// <para>
     /// Checked against what each assembly actually references rather than against project
@@ -97,11 +108,11 @@ public sealed class ShellBoundaryTests(ITestOutputHelper output)
 
             scanned.Add(name);
 
-            // Both shells, by every name they go under. A reference is recorded by
-            // ASSEMBLY name rather than by project name, and both shells rename theirs -
-            // so checking only "Einzel.Wpf" was checking for a string that can never
-            // appear in metadata, and the declared-reference test below was carrying the
-            // whole invariant on its own.
+            // The shell by every name it goes under, and the deleted one by its names too.
+            // A reference is recorded by ASSEMBLY name rather than by project name, and the
+            // shell renames its own - so checking only the project name was checking for a
+            // string that can never appear in metadata, and the declared-reference test
+            // below was carrying the whole invariant on its own.
             var offending = references
                 .Where(r => r.Name is not null && ShellNames.Contains(r.Name))
                 .Select(r => r.Name!)
@@ -138,31 +149,33 @@ public sealed class ShellBoundaryTests(ITestOutputHelper output)
     /// the CLI, the MCP server and the shell are peers driving the same command objects.
     /// </para>
     /// </remarks>
-    [Theory]
-    [InlineData("Einzel.Wpf", "einzel-shell-wpf", true)]
-    [InlineData("Einzel.Shell", "einzel-shell", false)]
-    public void TheShellReachesThePlatformThroughTheCommandLayer(
-        string project, string assembly, bool windowsOnly)
+    /// <remarks>
+    /// <para>
+    /// <b>The Avalonia shell may declare one more reference, deliberately: <c>Einzel.Update</c>.</b>
+    /// UI-1 gives the shell "the update check" and section 6 names that assembly for it; it holds
+    /// no physics, no validation and no format knowledge, so reaching it does not give the window
+    /// an idea of what a model means. The allow-list below is exact, so a third reference fails
+    /// here rather than slipping in beside the second.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheShellReachesThePlatformThroughTheCommandLayer()
     {
+        const string project = "Einzel.Shell";
+        const string assembly = "einzel-shell";
+        const string allowed = "Einzel.Commands,Einzel.Update";
+
         // Found by path rather than by name: this test project deliberately does not
-        // reference either shell - that is the invariant above - so there is no assembly
-        // identity to resolve and nothing copies them here.
+        // reference the shell - that is the invariant above - so there is no assembly
+        // identity to resolve and nothing copies it here.
         var path = Shell(project, assembly);
 
-        if (windowsOnly && !OperatingSystem.IsWindows())
-        {
-            // The WPF shell is Windows-only, so on the Linux runner there is nothing to
-            // check and saying so is the honest outcome. The cross-platform one has no
-            // such excuse and is checked on both, which is the whole reason it exists.
-            output.WriteLine($"not Windows; {project} cannot be built here");
-
-            return;
-        }
-
-        // On Windows it must be there. A skip because the file was not found would be a
-        // test that passes by not looking - the same vacuous truth the check above
-        // guards against, and it would hide exactly the case where the shell had grown
-        // a reference it should not have.
+        // It must be there, on both runners. While the WPF shell existed this arm was
+        // skipped off Windows, which meant UI-1 was checked on one platform; the shell
+        // that replaced it targets plain net10.0 and has no such excuse. A skip because
+        // the file was not found would be a test that passes by not looking - the same
+        // vacuous truth the check above guards against, and it would hide exactly the
+        // case where the shell had grown a reference it should not have.
         Assert.True(
             path is not null,
             $"{project} was not found beside the tests or in its own build output, so "
@@ -195,6 +208,9 @@ public sealed class ShellBoundaryTests(ITestOutputHelper output)
 
         Assert.Contains("Einzel.Commands", declared);
 
+        // Exactly the allowed references and nothing else, so a new one is a decision made here.
+        Assert.Equal(allowed.Split(',').Order(StringComparer.Ordinal), declared);
+
         // Not the solvers, not the integrator, not the renderer. Those are reached
         // through the command layer or not at all.
         foreach (var forbidden in new[]
@@ -206,6 +222,124 @@ public sealed class ShellBoundaryTests(ITestOutputHelper output)
             Assert.DoesNotContain(forbidden, declared);
             Assert.DoesNotContain(forbidden, used);
         }
+    }
+
+    /// <summary>
+    /// Only the shell reaches the updater, so nothing else can touch the network (UPD-1, UPD-2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>UPD-2 says the CLI never contacts the network, and AGT-8 rests on it</b>: an agent
+    /// issuing hundreds of <c>einzel</c> commands must see one version throughout. The strongest
+    /// form of that is structural - the CLI and the MCP server cannot call an updater they
+    /// cannot reach. So <c>Einzel.Update</c> is referenced by the Avalonia shell alone, and
+    /// Velopack by <c>Einzel.Update</c> and the shell alone (the shell for the single
+    /// <c>VelopackApp.Build().Run()</c> that <c>vpk pack</c> requires in the main executable).
+    /// </para>
+    /// <para>
+    /// Checked twice, as UI-1 is: what every project <b>declares</b>, read from its csproj, which
+    /// catches a reference nothing has used yet; and what every assembly beside these tests
+    /// <b>emits</b>, which catches a transitive path no csproj shows. <c>Einzel.Update</c> must
+    /// itself reference no other Einzel project, so it stays a leaf with no engine or UI behind it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void OnlyTheShellReachesTheUpdater()
+    {
+        var src = SourceDirectory();
+
+        Assert.True(src is not null, "src/ was not found above the test assembly, so UPD-2 went unchecked");
+
+        var projects = Directory.EnumerateFiles(src!, "*.csproj", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            .ToArray();
+
+        // A scan that found none of these would pass vacuously.
+        foreach (var required in new[] { "Einzel.Cli", "Einzel.Mcp", "Einzel.Shell", "Einzel.Update" })
+        {
+            Assert.Contains(projects, p => Path.GetFileNameWithoutExtension(p) == required);
+        }
+
+        foreach (var file in projects)
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            var text = File.ReadAllText(file);
+
+            var reachesUpdate = System.Text.RegularExpressions.Regex.IsMatch(
+                text, @"ProjectReference\s+Include=""[^""]*Einzel\.Update\.csproj""");
+            var reachesVelopack = System.Text.RegularExpressions.Regex.IsMatch(
+                text, @"PackageReference\s+Include=""Velopack""");
+
+            Assert.False(
+                reachesUpdate && name != "Einzel.Shell",
+                $"{name} references Einzel.Update; only the shell may check for updates (UPD-1, UPD-2)");
+            Assert.False(
+                reachesVelopack && name is not ("Einzel.Shell" or "Einzel.Update"),
+                $"{name} references Velopack; only Einzel.Update and the shell may (UPD-2)");
+
+            if (name == "Einzel.Update")
+            {
+                Assert.DoesNotMatch(@"ProjectReference\s+Include=", text);
+            }
+        }
+
+        var scanned = 0;
+
+        foreach (var path in Directory.EnumerateFiles(AppContext.BaseDirectory, "*.dll"))
+        {
+            var name = Path.GetFileNameWithoutExtension(path);
+
+            if (!(name.StartsWith("Einzel", StringComparison.Ordinal) || name.StartsWith("einzel", StringComparison.Ordinal))
+                || name.EndsWith(".Tests", StringComparison.Ordinal)
+                || name is "Einzel.Update" or "einzel-shell")
+            {
+                continue;
+            }
+
+            AssemblyName[] references;
+
+            try
+            {
+                references = Assembly.LoadFrom(path).GetReferencedAssemblies();
+            }
+            catch (BadImageFormatException)
+            {
+                continue;
+            }
+
+            scanned++;
+
+            var offending = references
+                .Select(r => r.Name)
+                .Where(n => n is "Einzel.Update" or "Velopack")
+                .ToArray();
+
+            Assert.True(
+                offending.Length == 0,
+                $"{name} references {string.Join(", ", offending)}; only the shell may reach the updater (UPD-2)");
+        }
+
+        // The CLI itself is beside these tests; a scan that loaded nothing checked nothing.
+        Assert.True(scanned > 5, $"only {scanned} assemblies were scanned for an updater reference");
+    }
+
+    /// <summary>The repository's <c>src</c> directory, found above the test assembly.</summary>
+    private static string? SourceDirectory()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            directory is not null;
+            directory = directory.Parent)
+        {
+            var candidate = Path.Combine(directory.FullName, "src");
+
+            if (Directory.Exists(Path.Combine(candidate, "Einzel.Cli")))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>What the shell's project declares a reference to.</summary>

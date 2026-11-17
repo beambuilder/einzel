@@ -3,6 +3,12 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!--
+      An executable, so FirstTierMemoryTests can run this assembly as a child process with the
+      JIT's tiering pinned; its entry point does nothing unless asked. See that class.
+    -->
+    <OutputType>Exe</OutputType>
+    <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
 
   <ItemGroup>

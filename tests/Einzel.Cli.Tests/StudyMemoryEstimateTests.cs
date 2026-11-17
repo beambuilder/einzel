@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Reflection;
 using System.Text.Json.Nodes;
 using Einzel.Commands;
 using Einzel.Core.Model;
@@ -551,21 +550,36 @@ public sealed class StudyInFlightTests(ITestOutputHelper output) : IDisposable
 /// of 25 and say nothing about the peak.
 /// </para>
 /// <para>
-/// <b>Release holds what the estimate states; Debug holds one array more.</b> Measured in fresh
-/// processes on the same run: 61.4 to 61.6 bytes a node optimized, 68.7 to 70.1 in Debug, which
-/// keeps a local alive to the end of its method where the optimizer ends it at its last use. The
-/// estimate is for a released build, and CI tests Release, so the band is main's 0.90 to 1.02
-/// there; a Debug run is allowed the eight bytes it was measured to hold and no more.
+/// <b>Debug holds what Release holds, and is held to the same band.</b> It used to hold one array
+/// more - 68.7 to 70.1 bytes a node against 61.4 to 61.6 optimized - and was allowed it, as a
+/// local Debug keeps to the end of its method. That local was the V-cycle's residual; with the
+/// residual in a frame of its own a Debug build reads 61.4 on the Cartesian tube, the same as
+/// Release, so the allowance would only have let one array through unseen.
 /// </para>
 /// <para>
-/// <b>The middle of five, where that one keeps the middle of three</b>, because the first reading
-/// is already an outlier. The first mean-field run in a process reads about 300 KiB - 18 bytes a
-/// node here - above the four after it (5,326 against 5,029), which is one-time allocation on the
-/// first self-field solve; the middle of three then rests on a single further outlier either way,
-/// and this test reads a difference of two peaks, so it meets one twice. It read 61.4 in every
-/// one of some thirty runs, idle and with every core loaded, except one that failed inside a
-/// mutation run and could not be reproduced, and one that read 59.3 while sixteen processes were
-/// starting. Every reading is printed, so the next one can be read rather than guessed at.
+/// <b>Warmed up, then five readings that must agree.</b> This kept the middle of five, and it
+/// failed on a Windows CI runner reading 5140, 5139, 5125, 5029 and 4996 KiB: three runs held
+/// one array of the grid more than the other two. That was the V-cycle's residual, which
+/// first-tier code kept alive across the recursion until the solver was promoted - reproduced
+/// every time with <c>DOTNET_TC_CallCounting=0</c>, absent with <c>DOTNET_TieredCompilation=0</c>,
+/// and gone in every tier once the descent had frames of its own (<c>docs/lessons.md</c>, "A
+/// reading that falls as a process warms up"). A median outvoted it on every machine that
+/// promoted quickly. So two runs are sampled first and not counted - the first charged run of a
+/// process holds about 290 KiB more, and with dynamic PGO on it is the second sampled run in
+/// nineteen fresh processes of twenty - and the five after them must not read above their middle
+/// one by more than a tenth of the self-field's stated size, under the eighth one extra array
+/// would add.
+/// </para>
+/// <para>
+/// <b>What this test cannot see, and what does.</b> The warm-up runs are the runs in which
+/// first-tier code executes, so a hold that only first-tier code makes - the V-cycle's residual
+/// was one - is discarded with them on any machine that promotes quickly. That is
+/// <c>FirstTierMemoryTests</c>' job, in a child process where nothing is promoted. A hold present
+/// in three or more of the five readings moves the median and is this test's size assertion's
+/// job, not the agreement's. What the agreement is for is a hold that differs between
+/// repetitions of an optimised run - something kept from one run into the next, a pool or cache
+/// that grows - which reads above the middle reading in some repetitions and would otherwise be
+/// outvoted.
 /// </para>
 /// </remarks>
 [Collection(nameof(RunsAlone))]
@@ -598,8 +612,8 @@ public sealed class SelfFieldMemoryTests(ITestOutputHelper output)
             var stated = (EstimateCommand.Execute(charged, calibrate: false).MemoryMiB
                 - EstimateCommand.Execute(plain, calibrate: false).MemoryMiB) * 1024.0 * 1024.0;
 
-            var (withField, solves, nodes) = Peak(charged, output);
-            var (without, _, _) = Peak(plain, output);
+            var (withField, chargedReadings, solves, nodes) = Peak(charged, output);
+            var (without, plainReadings, _, _) = Peak(plain, output);
 
             var measured = withField - without;
 
@@ -607,13 +621,18 @@ public sealed class SelfFieldMemoryTests(ITestOutputHelper output)
                 $"{geometry} self-field: {measured / nodes:F1} bytes a node measured over {solves} solves, "
                 + $"{stated / nodes:F1} stated; the run alone {without / nodes:F1}");
 
-            var optimized = typeof(Transport.Diffusion.DensitySelfField).Assembly
-                .GetCustomAttribute<DebuggableAttribute>()?.IsJITOptimizerDisabled != true;
-
-            output.WriteLine(optimized ? "optimized build" : "Debug build: one more array is held");
 
             Assert.True(solves >= 2, $"the self-field was solved {solves} time(s), so no refresh happened inside the loop");
-            Assert.InRange(measured / stated, 0.90, optimized ? 1.02 : 1.15);
+
+            // Every run of one model holds the same arrays, so its readings must agree to well
+            // under one array of the grid: a tenth of what the self-field is stated to add,
+            // against the eighth that one extra double a node is. A run that holds an array in
+            // some repetitions and not others - which is what a first-tier frame keeping a dead
+            // local did - fails here rather than being outvoted by the median.
+            AssertAgree(chargedReadings, 0.1 * stated, "charged");
+            AssertAgree(plainReadings, 0.1 * stated, "plain");
+
+            Assert.InRange(measured / stated, 0.90, 1.02);
         }
         finally
         {
@@ -621,8 +640,33 @@ public sealed class SelfFieldMemoryTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>A diffusive run's live peak above its baseline, its self-field solves, and its grid's nodes.</summary>
-    private static (double Bytes, int Solves, long Nodes) Peak(string path, ITestOutputHelper output)
+    /// <summary>
+    /// The readings agree from above: the largest is within the tolerance of the middle one.
+    /// </summary>
+    /// <remarks>
+    /// One-sided, because the two ways a reading can be wrong are not symmetric. A reading is
+    /// the largest live set a sampler thread SAW while the run was going, so a sampler that is
+    /// descheduled across the peak reads low - on an ubuntu-latest runner one of five read
+    /// 1821.7 KiB beside four at 5061 to 5094, and a two-sided spread failed a run that held
+    /// exactly what it should. Nothing makes a reading high except memory that was really
+    /// live. So a run that holds an extra array in some repetitions and not others shows as
+    /// readings ABOVE the middle one, which is what this refuses; a missed peak shows below
+    /// it and is the sampler's, not the run's. The middle of five tolerates two misses, and a
+    /// third would put the miss in the middle and fail the size assertion that follows.
+    /// </remarks>
+    private static void AssertAgree(double[] readings, double tolerance, string which)
+    {
+        var sorted = readings.Order().ToArray();
+        var above = sorted[^1] - sorted[sorted.Length / 2];
+
+        Assert.True(
+            above <= tolerance,
+            $"the {which} run's largest reading is {above / 1024.0:F1} KiB above its middle one, more than the "
+            + $"{tolerance / 1024.0:F1} allowed: repetitions of one run held different arrays");
+    }
+
+    /// <summary>A diffusive run's live peak above its baseline, its readings, its self-field solves, and its grid's nodes.</summary>
+    private static (double Bytes, double[] Readings, int Solves, long Nodes) Peak(string path, ITestOutputHelper output)
     {
         var validation = ModelValidator.Validate(
             ModelJson.Parse(File.ReadAllText(path)), null, Path.GetDirectoryName(path));
@@ -633,7 +677,7 @@ public sealed class SelfFieldMemoryTests(ITestOutputHelper output)
         var (field, warnings) = FieldAssembly.BuildReported(model);
         var solves = 0;
 
-        var (bytes, readings) = PeakLive(() =>
+        var (bytes, readings, warmUp) = PeakLive(() =>
         {
             var outcome = DiffusionRun.Execute(model, field, warnings);
             solves = outcome.Result.SelfFieldSolves;
@@ -643,12 +687,14 @@ public sealed class SelfFieldMemoryTests(ITestOutputHelper output)
         output.WriteLine(
             $"{Path.GetFileNameWithoutExtension(path)}: "
             + string.Join(", ", readings.Select(r => (r / 1024.0).ToString("F1", CultureInfo.InvariantCulture)))
-            + " KiB above baseline");
+            + " KiB above baseline (warm-up, not counted: "
+            + string.Join(", ", warmUp.Select(r => (r / 1024.0).ToString("F1", CultureInfo.InvariantCulture)))
+            + ")");
 
-        return (bytes, solves, DiffusionRun.GridFor(model).NodeCount);
+        return (bytes, readings, solves, DiffusionRun.GridFor(model).NodeCount);
     }
 
-    private static (double Middle, double[] Readings) PeakLive(Func<object> build)
+    private static (double Middle, double[] Readings, double[] WarmUp) PeakLive(Func<object> build)
     {
         static long Live()
         {
@@ -721,9 +767,24 @@ public sealed class SelfFieldMemoryTests(ITestOutputHelper output)
             return peak - baseline;
         }
 
+        // Two runs first, sampled exactly as the others and not counted, so that what happens
+        // once per process is not read as what a run holds: the first charged run of a process
+        // holds about 290 KiB more than every later one. TWO, because where that run falls
+        // depends on the JIT: with dynamic PGO on, the default, it was the SECOND sampled run in
+        // 19 of 20 fresh processes and the first in the twentieth (5287, 5287, 5296 KiB against
+        // 4996 counted), and with DOTNET_TieredPGO=0 or DOTNET_TC_CallCounting=0 it is the first.
+        // It happens once, not once per first-tier run: with call counting off, every method
+        // first-tier throughout, the five counted runs read 5029 KiB, as optimised code does. One
+        // warm-up would count it in nineteen processes of twenty, and fail the agreement below. They are a warm-up of
+        // the measurement, not a choice among readings: taken before any reading is, printed,
+        // and every reading after them is kept and must agree (asserted by the caller). What
+        // they hide - first-tier code, which is exactly what runs in them - FirstTierMemoryTests
+        // measures in a process where nothing is ever promoted.
+        double[] warmUp = [Once(build), Once(build)];
+
         double[] readings = [Once(build), Once(build), Once(build), Once(build), Once(build)];
         var sorted = readings.Order().ToArray();
 
-        return (sorted[2], readings);
+        return (sorted[2], readings, warmUp);
     }
 }

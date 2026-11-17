@@ -1,10 +1,13 @@
 name: CI
 
-# Linux is not an afterthought here. Architecture invariant 1 says nothing may
-# reference Einzel.Wpf and every assembly above it must build and run on Linux,
-# and Einzel.Render must produce a publication figure headlessly with no display
-# attached. An invariant that is only checked on a developer's Windows box is an
-# invariant that has already been broken.
+# Linux is not an afterthought here. Architecture invariant 1 says no assembly may
+# reference the shell, and every assembly other than the shell must build and run
+# on Linux, with Einzel.Render producing a publication figure headlessly and with
+# no display attached. An invariant that is only checked on a developer's Windows
+# box is an invariant that has already been broken.
+#
+# That invariant is what made the shell portable: when the Windows-only WPF shell
+# was replaced, no assembly below it changed, and it has since been deleted.
 #
 # Einzel.Render.Tests is that check, no longer "eventually": it draws real device
 # templates as SVG and PDF on the Linux runner, where there is no display, no

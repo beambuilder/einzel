@@ -6,6 +6,7 @@ using Einzel.Fields;
 using Einzel.Transport;
 using Einzel.Transport.Integration;
 using Xunit.Abstractions;
+using static Einzel.Library.Tests.PaulTrapHoles;
 
 namespace Einzel.Library.Tests;
 
@@ -55,32 +56,6 @@ public sealed class PaulTrapResonanceStudy(ITestOutputHelper output)
     /// ion here, and this is the amplitude the tests below go and look at.
     /// </remarks>
     private const double FormerBandCenter = 610.0;
-
-    private static ModelDocument Trap(params (string Name, double Value)[] overrides)
-    {
-        var document = Io.ModelJson.Parse(DeviceTemplates.Read("paul-trap"));
-
-        var parameters = new Dictionary<string, ParameterDocument>(
-            document.Parameters!, StringComparer.Ordinal);
-
-        foreach (var (name, value) in overrides)
-        {
-            parameters[name] = parameters[name] with { Value = value };
-        }
-
-        return document with { Parameters = parameters };
-    }
-
-    private static CompiledModel Compile(ModelDocument document)
-    {
-        var validation = ModelValidator.Validate(document);
-
-        Assert.True(
-            validation.Model is not null,
-            string.Join("; ", validation.Errors.Select(e => e.Constraint)));
-
-        return validation.Model!;
-    }
 
     /// <summary>Flies one ion in the trap and records its path.</summary>
     private static (IReadOnlyList<TrajectorySample> Samples, TrajectoryOutcome Outcome, double DriveHz)
@@ -194,43 +169,6 @@ public sealed class PaulTrapResonanceStudy(ITestOutputHelper output)
 
         Assert.True(betas[0] > betas[1], "the axial motion should be the faster one");
         Assert.InRange(betas[0] / betas[1], 1.5, 3.0);
-    }
-
-    /// <summary>
-    /// The Mathieu characteristic exponent, from its continued fraction.
-    /// </summary>
-    /// <remarks>
-    /// The closed form the measurement is checked against, written here rather than
-    /// shipped in the engine: a test comparing the engine's beta to the engine's
-    /// spectrum would be testing self-consistency. Same routine as the one in
-    /// SecularSpectrumTests, and deliberately duplicated for the same reason.
-    /// </remarks>
-    private static double Beta(double a, double q, int depth = 40)
-    {
-        var beta = Math.Sqrt(Math.Max(a + (q * q / 2.0), 1e-6));
-
-        for (var iteration = 0; iteration < 500; iteration++)
-        {
-            var up = 0.0;
-            var down = 0.0;
-
-            for (var n = depth; n >= 1; n--)
-            {
-                up = q * q / (((beta + (2 * n)) * (beta + (2 * n))) - a - up);
-                down = q * q / (((beta - (2 * n)) * (beta - (2 * n))) - a - down);
-            }
-
-            var next = Math.Sqrt(Math.Max(a + up + down, 1e-12));
-
-            if (Math.Abs(next - beta) < 1e-14)
-            {
-                return next;
-            }
-
-            beta = 0.5 * (beta + next);
-        }
-
-        return beta;
     }
 
     /// <summary>The effective radius read off the field's curvature at the trap center.</summary>

@@ -1,23 +1,45 @@
 name: Release
 
-# DST-5: releases are built by CI on a version tag, and nothing distributed is ever
-# built locally. Tagging is the human decision; everything after it happens here, on
-# a clean checkout, so an asset can always be traced to a commit.
+# Einzel's release follows the same strategy as skyline-prism's dotnet-release.yml:
 #
-# The release is created as a DRAFT. The tag says "build this"; publishing the
-# binaries to the world is a second, separate act by a person who has looked at what
-# came out. A workflow_dispatch run builds and checksums the same assets and creates
-# no release and no tag, so the whole path can be exercised without publishing.
+#   - triggered by pushing a version tag (here vYY.feature.patch, e.g. v26.2.0);
+#   - the tag must EQUAL the version in the tree (<VersionPrefix> in Directory.Build.props).
+#     The version is bumped in the release PR; this workflow verifies it and never injects
+#     a version from the tag, so the binary, `einzel --version`, run manifests and the tag
+#     cannot disagree;
+#   - the full test suite is the gate, before anything is packaged;
+#   - FRAMEWORK-DEPENDENT per-platform archives (`--self-contained false`, not single-file):
+#     the user installs the .NET 10 runtime once, and each archive carries that platform's
+#     native apphosts and native libraries. Windows zips are built on windows-latest;
+#     Linux and macOS tar.gz are cross-published from ubuntu-latest, with chmod +x before
+#     tar so the executable bit survives;
+#   - one final job gathers every artifact and publishes the GitHub Release ONCE, published
+#     (not draft), with release-notes/RELEASE_NOTES_<tag>.md as the body, verbatim.
+#
+# Assets (six archives, one per platform, each holding everything for that platform):
+#   einzel-<rid>.zip | .tar.gz   `einzel` (CLI), `einzel-mcp` (live-session server) and
+#                                `einzel-shell` (the Avalonia window, src/Einzel.Shell)
+#   MacCossLab.Einzel-stable-Setup.exe
+#                                the Windows x64 installer (Velopack, per-user, self-contained,
+#                                unsigned for now; puts `einzel` on the user PATH) - the
+#                                `installer` job, the strategy LabOps uses
+#   MacCossLab.Einzel-<ver>-stable-full.nupkg (+ -delta.nupkg from the second release),
+#   releases.stable.json, RELEASES-stable
+#                                the feed an installed copy's launch-time update check reads
+#   SHA256SUMS.txt               one checksum file, computed over the assets as published (DST-4)
+#
+# The WPF shell is gone (deleted in favour of the Avalonia one), and the two checks below keep
+# refusing an archive that carries it: a rule against shipping something deliberately removed
+# should go on holding after the removal, or nothing stops it coming back.
+#
+# A manual workflow_dispatch run builds and checks every archive and packs the installer exactly
+# as a tag does (against the draft notes) and publishes nothing, so the whole path can be proved
+# before the first tag.
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to build, without the leading v. Builds assets only; creates no release.'
-        required: true
-        default: '0.0.0-dev'
 
 permissions:
   contents: write
@@ -28,55 +50,55 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Decided once and passed down, so a tag build and a dispatch build differ in
-  # exactly one place rather than in every job.
+  # The version the tree carries, and (for a tag) proof that the tag says the same.
   version:
-    name: version
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.pick.outputs.version }}
+      version: ${{ steps.check.outputs.version }}
     steps:
-      - id: pick
+      - uses: actions/checkout@v7
+
+      - id: check
+        shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            v="${GITHUB_REF_NAME#v}"
-          else
-            v="${{ inputs.version }}"
+          VER=$(sed -n 's:.*<VersionPrefix>\(.*\)</VersionPrefix>.*:\1:p' Directory.Build.props | tr -d '[:space:]')
+          echo "tree version=$VER"
+          if [ -z "$VER" ]; then
+            echo "::error::could not read <VersionPrefix> from Directory.Build.props"
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+          # A dispatch run is a dry run of the build and has no tag to compare.
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "dispatch run: no tag to verify against; publishes nothing"
+            exit 0
           fi
 
-          # YY.feature.patch, checked rather than assumed: a malformed tag would otherwise
-          # produce assets stamped with a version nobody can order against the others, and
-          # the place that is noticed is a download rather than a build. A dispatch run may
-          # carry a suffix (0.0.0-dev) because it publishes nothing; a tag may not.
-          if [ "${{ github.event_name }}" = "push" ]; then
-            # Two guards, because one glob cannot say both things. The first fixes the
-            # shape; the second rejects anything that is not a digit or a dot, which is
-            # what stops `v26.1.0-rc1` passing - `[0-9]*` matches `0-rc1` happily, and a
-            # first version of this comment claimed a rejection the pattern did not make.
-            case "$v" in
-              [0-9][0-9].[0-9]*.[0-9]*) ;;
-              *) echo "::error::tag '${GITHUB_REF_NAME}' is not vYY.feature.patch - see release-notes/README.md"; exit 1 ;;
-            esac
-            case "$v" in
-              *[!0-9.]*) echo "::error::tag '${GITHUB_REF_NAME}' carries a suffix; a released version is digits and dots only"; exit 1 ;;
-            esac
-            case "$v" in
-              *.*.*.*) echo "::error::tag '${GITHUB_REF_NAME}' has four components; the scheme is YY.feature.patch"; exit 1 ;;
-            esac
+          # Einzel's own refusal of a malformed tag: YY.feature.patch, digits and dots only.
+          TAG="${GITHUB_REF_NAME#v}"
+          case "$TAG" in
+            [0-9][0-9].[0-9]*.[0-9]*) ;;
+            *) echo "::error::tag '${GITHUB_REF_NAME}' is not vYY.feature.patch - see release-notes/README.md"; exit 1 ;;
+          esac
+          case "$TAG" in
+            *[!0-9.]*) echo "::error::tag '${GITHUB_REF_NAME}' carries a suffix; a released version is digits and dots only"; exit 1 ;;
+            *.*.*.*) echo "::error::tag '${GITHUB_REF_NAME}' has four components; the scheme is YY.feature.patch"; exit 1 ;;
+          esac
+
+          # The guard: the tag must equal the version in the tree.
+          if [ "$TAG" != "$VER" ]; then
+            echo "::error::tag ($TAG) does not match <VersionPrefix> in Directory.Build.props ($VER). Bump the version in the release PR before tagging - see release-notes/README.md."
+            exit 1
           fi
+          echo "tag and tree agree: $TAG"
 
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "building $v"
-
-  # ---------------------------------------------------------------------------
-  # The suite is the release gate, and it runs once per platform rather than once
-  # per asset: three matrix entries would run it three times, tripling both the
-  # wall clock and the chance that one flaky run blocks a release. The CI workflow
-  # does not trigger on tags, so without this a release could be cut from a commit
-  # whose tests were never run.
+  # The suite is the gate and it runs once per platform, before anything is packaged. The CI
+  # workflow does not trigger on tags, so without this a release could be cut from a commit
+  # whose tests were never run. (Prism runs it on one OS; Einzel's CI covers two, so the gate
+  # does too.)
   test:
-    name: test (${{ matrix.os }})
+    needs: version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -89,194 +111,469 @@ jobs:
           global-json-file: global.json
       - run: dotnet test --configuration Release --verbosity minimal
 
-  build:
-    name: ${{ matrix.name }}
+  # Framework-dependent archives, one per platform. `-r <rid>` still gives each archive a native
+  # apphost and the right native libraries (Skia, HarfBuzz); nothing of the runtime is bundled.
+  # win-arm64 / linux-arm64 / osx-* cross-publish fine, because the apphost for a target RID is
+  # emitted by the SDK whatever the build OS. The macOS archives are built on Linux for that reason.
+  package:
     needs: [version, test]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # DST-3: Linux is a tarball, engine and CLI only. No installer, no updater.
-          - name: linux-x64 CLI
-            os: ubuntu-latest
-            rid: linux-x64
-            asset: einzel-cli-linux-x64
-            withShell: false
-            archive: tar
-
-          # DST-2: a portable zip, for a machine where installing is not permitted.
-          - name: win-x64 CLI
-            os: windows-latest
-            rid: win-x64
-            asset: einzel-cli-win-x64
-            withShell: false
-            archive: zip
-
-          # The Windows shell, separately: it carries the WPF desktop runtime and is
-          # two and a half times the download. Somebody running an agent loop on a
-          # build server should not pay for a window they will never open.
-          - name: win-x64 shell
-            os: windows-latest
-            rid: win-x64
-            asset: einzel-shell-win-x64
-            withShell: true
-            archive: zip
-
+          - { os: windows-latest, rid: win-x64,     archive: zip, exe: '.exe', run: true }
+          - { os: windows-latest, rid: win-arm64,   archive: zip, exe: '.exe', run: false }
+          - { os: ubuntu-latest,  rid: linux-x64,   archive: tar, exe: '',     run: true }
+          - { os: ubuntu-latest,  rid: linux-arm64, archive: tar, exe: '',     run: false }
+          - { os: ubuntu-latest,  rid: osx-x64,     archive: tar, exe: '',     run: false }
+          - { os: ubuntu-latest,  rid: osx-arm64,   archive: tar, exe: '',     run: false }
+    env:
+      ASSET: einzel-${{ matrix.rid }}
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
-      # Self-contained, and deliberately NOT trimmed.
+      # Three apps, one directory per platform. Each keeps its own .deps.json and
+      # .runtimeconfig.json, named after its assembly. One archive rather than a CLI one and a
+      # shell one: framework-dependent, the window adds only the Avalonia and Skia files, so a
+      # second download buys little, and one archive means nobody has to work out which of two to
+      # fetch.
       #
-      # Self-contained so that nothing has to be installed before the asset runs: somebody
-      # who wants to model an ion optic should not first have to install a .NET SDK. r06's
-      # DST-1 gives a different reason - a per-user installer for a locked-down instrument
-      # PC - and that use case is speculative; this one is not. It costs cold start
-      # - measured at 220-250 ms against PERF-8's 500 ms budget, where a
-      # framework-dependent build is 73-147 - and about 75 MB of download.
+      # Each app is published to its OWN directory and then merged, never published on top of
+      # another: a dependency two apps resolved at different versions would otherwise be
+      # overwritten by the last publish while an earlier app's .deps.json still named the other
+      # version. tools/publish/merge-publish.ps1 fails, naming the file and the apps, if two
+      # publishes produced a same-named file with different content.
       #
-      # Not trimmed because `einzel schema` is generated by reflection over the model
-      # document records (AGT-7), with descriptions from the XML doc comments the
-      # build already requires. A trimmer cannot see either use, and the failure mode
-      # is not a build error: it is a schema quietly less complete than the format it
-      # describes, which is the precise drift AGT-7 exists to prevent.
-      #
-      # Everything is staged into a directory named after the asset, so unpacking
-      # gives one folder rather than two hundred files in the download directory.
-      #
-      # `Version`, not `VersionPrefix`: the value here is the whole version, including
-      # any prerelease label a tag carries, and `Version` means exactly that string
-      # while `VersionPrefix` means the part before a suffix. Both publish a
-      # prerelease correctly today - checked, `0.0.0-dev` builds and reports
-      # `0.0.0-dev+<sha>` either way - but a `VersionSuffix` appearing in
-      # Directory.Build.props later would silently append to the prefix and not to
-      # the version.
-      - name: Publish CLI and MCP server
+      # No -p:Version: the version is whatever the tree carries, and the `version` job has
+      # already proved the tag equals it.
+      - name: Publish einzel, einzel-mcp and einzel-shell (${{ matrix.rid }})
+        shell: bash
         run: |
-          dotnet publish src/Einzel.Cli -c Release -r ${{ matrix.rid }} --self-contained true -p:Version=${{ needs.version.outputs.version }} -o ${{ matrix.asset }}
-          dotnet publish src/Einzel.Mcp -c Release -r ${{ matrix.rid }} --self-contained true -p:Version=${{ needs.version.outputs.version }} -o ${{ matrix.asset }}
+          for app in einzel:Einzel.Cli einzel-mcp:Einzel.Mcp einzel-shell:Einzel.Shell; do
+            dotnet publish "src/${app#*:}" -c Release -r ${{ matrix.rid }} \
+              --self-contained false -p:PublishSingleFile=false \
+              -o "dist/pub/${app%%:*}"
+          done
 
-      - name: Publish the shell
-        if: matrix.withShell
-        run: dotnet publish src/Einzel.Wpf -c Release -r ${{ matrix.rid }} --self-contained true -p:Version=${{ needs.version.outputs.version }} -o ${{ matrix.asset }}
+      - name: Merge the three publishes, refusing any file they disagree about
+        shell: pwsh
+        run: |
+          ./tools/publish/merge-publish.ps1 -Destination "dist/$env:ASSET" `
+            einzel=dist/pub/einzel einzel-mcp=dist/pub/einzel-mcp einzel-shell=dist/pub/einzel-shell
 
-      # What a reader of the archive needs before running anything: what it is, what
-      # licence it is under, and that nothing installed it.
       - name: Add the documents
         shell: bash
         run: |
-          cp LICENSE README.md ${{ matrix.asset }}/
-          cat > ${{ matrix.asset }}/PORTABLE.txt <<EOF
+          cp LICENSE README.md "dist/$ASSET/"
+          cat > "dist/$ASSET/PORTABLE.txt" <<EOF
           Einzel ${{ needs.version.outputs.version }} (${{ matrix.rid }}, portable)
 
           Nothing was installed. Unpack this directory anywhere and run the executables
           in it; add the directory to your PATH to call them by name.
 
-            einzel --help        the command line
-            einzel doctor        what this copy can and cannot do
-            einzel init myproj   a project with a model that runs
+          This build needs the .NET 10 runtime, which is NOT included. Check with:
 
-          This build carries its own .NET runtime, so no separate install is needed.
-          It never checks for updates and never contacts the network (UPD-9, UPD-2):
+            dotnet --list-runtimes     (look for Microsoft.NETCore.App 10.x)
+
+          and install it from https://dotnet.microsoft.com/download/dotnet/10.0 if absent.
+
+            einzel --help         the command line
+            einzel doctor         what this copy can and cannot do
+            einzel init myproj    a project with a model that runs
+            einzel-mcp            the live-session server for agents (stdio)
+            einzel-shell          the window; optionally name a model file:
+                                  einzel-shell models/reflectron.json
+
+          The window needs a desktop session with OpenGL; over SSH or on a server use the
+          command line. On Linux it also needs the usual desktop libraries (X11, fontconfig
+          and ICU), which a desktop distribution already has.
+
+          Einzel never checks for updates and never contacts the network (UPD-9, UPD-2):
           to move to a later version, download it and unpack it beside this one.
 
           Source, documentation and the living specification:
           https://github.com/maccoss/einzel
           EOF
 
-      # The published binary is run before it is shipped. Not a test of the physics -
-      # the suite above is that - but of the thing actually being distributed: a
-      # self-contained publish that is missing a runtime asset, or trimmed by an
-      # inherited property, fails here and not on somebody's instrument PC.
-      - name: Smoke test the published build
+      # Platform note, because it is the first thing a non-developer hits on a Mac and the
+      # archive is the place they are certain to look. Stated as what is true: nothing is signed.
+      - name: Add the macOS note
+        if: startsWith(matrix.rid, 'osx')
         shell: bash
         run: |
-          cd ${{ matrix.asset }}
-          if [ -f ./einzel.exe ]; then exe=./einzel.exe; else exe=./einzel; fi
+          cat >> "dist/$ASSET/PORTABLE.txt" <<EOF
+
+          macOS: these binaries are NOT code-signed or notarized (no Apple Developer
+          certificate is used), so Gatekeeper may refuse the first launch of a copy that
+          came through a browser. Either right-click the file and choose Open, or run:
+
+            xattr -dr com.apple.quarantine <this directory>
+
+          Unpacking with 'tar -xzf' in a terminal does not set the quarantine flag at all.
+          EOF
+          # CODE SIGNING WOULD GO HERE: codesign --options runtime --timestamp every Mach-O file in
+          # the directory, then xcrun notarytool submit + stapler staple on the archive. It needs
+          # an Apple Developer ID certificate and notarization credentials stored as repository
+          # secrets; neither exists, and signing is deliberately not faked.
+
+      # Prism's pattern: assert the CONTENTS of what is about to ship, because the absences that
+      # matter here are silent - a publish that drops the shell's Skia native library still
+      # builds, archives and uploads, and fails on a user's first launch.
+      - name: Check the archive contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "dist/$ASSET"
+          fail=0
+          need() { if [ ! -e "$1" ]; then echo "::error::$1 missing from $ASSET"; fail=1; fi; }
+
+          for app in einzel einzel-mcp einzel-shell; do
+            need "$app${{ matrix.exe }}"
+            need "$app.dll"
+            need "$app.runtimeconfig.json"
+            need "$app.deps.json"
+          done
+          need Einzel.Core.dll
+          need Einzel.Commands.dll
+          need Avalonia.Base.dll
+          need Avalonia.Skia.dll
+          need SkiaSharp.dll
+          need HarfBuzzSharp.dll
+          need Silk.NET.OpenGL.dll
+          need LICENSE
+          need PORTABLE.txt
+
+          # Framework-dependent means no runtime in the archive.
+          if [ -e System.Private.CoreLib.dll ]; then
+            echo "::error::$ASSET carries the .NET runtime; it must be framework-dependent"; fail=1
+          fi
+          # ...and nothing from the retired WPF shell.
+          if ls einzel-shell-wpf* >/dev/null 2>&1; then
+            echo "::error::$ASSET carries the WPF shell, which is not shipped"; fail=1
+          fi
+
+          # The shell's native libraries for THIS platform: Skia and HarfBuzz, with the file name
+          # each OS uses, found wherever the publish put them (flat, or under runtimes/<rid>/native).
+          case "${{ matrix.rid }}" in
+            win-*)   skia="libSkiaSharp.dll";    harf="libHarfBuzzSharp.dll" ;;
+            linux-*) skia="libSkiaSharp.so";     harf="libHarfBuzzSharp.so" ;;
+            osx-*)   skia="libSkiaSharp.dylib";  harf="libHarfBuzzSharp.dylib" ;;
+          esac
+          for lib in "$skia" "$harf"; do
+            if [ -z "$(find . -name "$lib" -print -quit)" ]; then
+              echo "::error::native library $lib missing from $ASSET; the window would not start"; fail=1
+            fi
+          done
+
+          echo "contents of $ASSET:"; find . -type f | sort | head -300
+          exit $fail
+
+      # The window cannot be started here (no headless mode, and four legs cannot execute their
+      # RID at all), so the next best thing: every assembly and native library each app's
+      # .deps.json names must be in the directory, where the host will look for it.
+      - name: Check every dependency manifest resolves
+        shell: pwsh
+        run: ./tools/publish/check-deps.ps1 -Directory "dist/$env:ASSET" einzel einzel-mcp einzel-shell
+
+      # THE ONE DELIBERATE ADDITION to the prism pattern, which asserts contents and never runs
+      # what it built. Einzel promises a cold start under 500 ms and a model that runs straight
+      # from `init`, and a missing runtime asset in the CLI shows only when it is executed. A
+      # runner can execute only its own platform, so this runs on the two legs where the runner
+      # can execute the RID it built (win-x64 on windows-latest, linux-x64 on ubuntu-latest); the
+      # other four rely on the contents check above. The window is never started: it has no
+      # headless mode.
+      - name: Smoke test the published CLI
+        if: matrix.run
+        shell: bash
+        run: |
+          cd "dist/$ASSET"
+          exe=./einzel${{ matrix.exe }}
           "$exe" --version
           "$exe" doctor
           "$exe" init smoke
           "$exe" run smoke/models/reflectron.json
           "$exe" test smoke
-          # Redirected rather than piped to head: GitHub's bash runs with pipefail, so
-          # head closing the pipe early would SIGPIPE the writer and fail a release on
-          # a schema that had merely grown.
           "$exe" schema > /dev/null
-          rm -rf smoke
-
-      - name: Archive (tar.gz)
-        if: matrix.archive == 'tar'
-        run: tar -czf ${{ matrix.asset }}.tar.gz ${{ matrix.asset }}
+          # The live-session server: started on the model just made, it serves stdio and must
+          # exit cleanly when its input closes, which is what a client hanging up looks like.
+          ./einzel-mcp${{ matrix.exe }} --help
+          timeout 120 ./einzel-mcp${{ matrix.exe }} smoke/models/reflectron.json < /dev/null > mcp.out
+          if [ -s mcp.out ]; then echo "::error::einzel-mcp wrote to stdout with no client"; exit 1; fi
+          rm -rf smoke mcp.out
 
       - name: Archive (zip)
         if: matrix.archive == 'zip'
         shell: pwsh
-        run: Compress-Archive -Path ${{ matrix.asset }} -DestinationPath ${{ matrix.asset }}.zip -CompressionLevel Optimal
+        run: Compress-Archive -Path "dist/$env:ASSET" -DestinationPath "$env:ASSET.zip" -CompressionLevel Optimal
 
-      # Pinned to majors that run on node24, checked by runs.using rather than by the
-      # version number: upload-artifact v5 and download-artifact v6 read like current
-      # majors and are both still node20, which warns on every job. The CI workflow
-      # carries the same note and the command to check.
+      # chmod +x first, so the executable bit survives the archive.
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar'
+        shell: bash
+        run: |
+          chmod +x "dist/$ASSET/einzel" "dist/$ASSET/einzel-mcp" "dist/$ASSET/einzel-shell"
+          tar -czf "$ASSET.tar.gz" -C dist "$ASSET"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.asset }}
-          path: |
-            ${{ matrix.asset }}.tar.gz
-            ${{ matrix.asset }}.zip
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}.*
           if-no-files-found: error
 
-  # ---------------------------------------------------------------------------
-  # DST-4: one SHA256SUMS.txt per release, computed in one place over the assets as
-  # they will actually be published. Sums generated per job and concatenated would
-  # be sums of files nobody can prove are these files.
-  publish:
-    name: checksum and draft
-    needs: [version, build]
+  # The Windows installer (DST-1), the strategy LabOps installs with: Velopack, per-user under
+  # %LocalAppData%\MacCossLab.Einzel, no administrator rights, a Start-menu shortcut to the window,
+  # and `einzel` added to the user PATH by the shell's install hook (src/Einzel.Update). x64 only.
+  #
+  # SELF-CONTAINED, unlike the archives: an installer exists for somebody who should not have to
+  # install a .NET runtime first, and a Velopack update replaces the whole directory, runtime
+  # included, so there is no shared runtime to keep in step.
+  #
+  # Its files are uploaded as an ordinary artifact and published by the `release` job below,
+  # alongside the archives, in the same single softprops call. Not `vpk upload github --merge`:
+  # that would be a second writer to the Release, racing the first for who creates it and which
+  # notes it carries. One job publishes everything, so there is one Release, one body and one
+  # SHA256SUMS over all of it.
+  installer:
+    needs: [version, test]
+    runs-on: windows-latest
+    env:
+      # The same version as the Velopack library in Directory.Packages.props, so the packer and
+      # the app agree about the feed format. Pinned, never `latest`.
+      VPK_VERSION: '1.2.161'
+      # Stable forever: it names the install directory and the feed every installed copy reads.
+      # Must equal UpdateFeedInfo.PackageId (a test in Einzel.Update.Tests checks this file).
+      PACK_ID: MacCossLab.Einzel
+      # The only channel. LabOps chooses beta for a tag containing "beta"; Einzel's `version` job
+      # refuses any tag that is not digits and dots, so a beta tag can never get here and that
+      # branch would be dead. Change the tag guard first if prereleases are ever wanted.
+      CHANNEL: stable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # Three apps into ONE directory, which Velopack packs as the install. Each keeps its own
+      # <app>.deps.json and <app>.runtimeconfig.json, named after its assembly; LabOps shipped two
+      # releases whose app carried another program's dependency manifest and did not start, so
+      # the next step asserts it rather than trusting it. Published separately and merged, as the
+      # archives are, so a dependency the apps resolved differently fails here instead of being
+      # overwritten by whichever publish ran last.
+      - name: Publish einzel, einzel-mcp and einzel-shell (win-x64, self-contained)
+        shell: bash
+        run: |
+          for app in einzel:Einzel.Cli einzel-mcp:Einzel.Mcp einzel-shell:Einzel.Shell; do
+            dotnet publish "src/${app#*:}" -c Release -r win-x64 \
+              --self-contained true -p:PublishSingleFile=false \
+              -o "dist/installer-pub/${app%%:*}"
+          done
+
+      - name: Merge the three publishes, refusing any file they disagree about
+        shell: pwsh
+        run: |
+          ./tools/publish/merge-publish.ps1 -Destination dist/installer `
+            einzel=dist/installer-pub/einzel einzel-mcp=dist/installer-pub/einzel-mcp einzel-shell=dist/installer-pub/einzel-shell
+          Copy-Item LICENSE, README.md dist/installer/
+          ./tools/publish/check-deps.ps1 -Directory dist/installer einzel einzel-mcp einzel-shell
+
+      - name: Check the installed directory
+        shell: pwsh
+        run: |
+          $dir = 'dist/installer'
+          $fail = $false
+          function Fail($m) { Write-Host "::error::$m"; $script:fail = $true }
+          foreach ($app in 'einzel', 'einzel-mcp', 'einzel-shell') {
+            foreach ($f in "$app.exe", "$app.dll", "$app.deps.json", "$app.runtimeconfig.json") {
+              if (-not (Test-Path "$dir/$f")) { Fail "$f missing" }
+            }
+            # Each manifest must be the app's own: it names its own assembly as the root.
+            $deps = Get-Content "$dir/$app.deps.json" -Raw
+            if ($deps -notmatch [regex]::Escape("`"$app/")) { Fail "$app.deps.json is not $app's own manifest" }
+          }
+          # UPD-2 as shipped: the CLI and the MCP server must not even depend on the updater.
+          foreach ($app in 'einzel', 'einzel-mcp') {
+            $deps = Get-Content "$dir/$app.deps.json" -Raw
+            if ($deps -match '"Velopack/' -or $deps -match '"Einzel\.Update/') { Fail "$app depends on the updater (UPD-2)" }
+          }
+          $shell = Get-Content "$dir/einzel-shell.deps.json" -Raw
+          if ($shell -notmatch '"Velopack/' -or $shell -notmatch '"Einzel\.Update/') { Fail "einzel-shell.deps.json does not carry Velopack and Einzel.Update" }
+          # Self-contained means the runtime is here.
+          if (-not (Test-Path "$dir/System.Private.CoreLib.dll")) { Fail "the .NET runtime is missing; the installer must be self-contained" }
+          foreach ($f in 'Velopack.dll', 'Einzel.Update.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll', 'LICENSE') {
+            if (-not (Test-Path "$dir/$f")) { Fail "$f missing" }
+          }
+          if (Test-Path "$dir/einzel-shell-wpf.exe") { Fail "the retired WPF shell is not shipped" }
+          if ($fail) { exit 1 }
+
+      # The CLI and the MCP server as they will be installed, run before they are packed. The
+      # window is not started: it has no headless mode; its manifest was checked above.
+      - name: Smoke test the installed CLI
+        shell: bash
+        run: |
+          cd dist/installer
+          ./einzel.exe --version
+          ./einzel.exe doctor
+          ./einzel.exe init smoke
+          ./einzel.exe run smoke/models/reflectron.json
+          ./einzel-mcp.exe --help
+          timeout 120 ./einzel-mcp.exe smoke/models/reflectron.json < /dev/null > mcp.out
+          if [ -s mcp.out ]; then echo "::error::einzel-mcp wrote to stdout with no client"; exit 1; fi
+          rm -rf smoke mcp.out
+
+      # A tag uses its own notes, exactly as the `release` job does. A dispatch run is a dry run
+      # and packs against the draft, so the whole path is exercised before the first tag.
+      - name: Locate the release notes
+        id: notes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            NOTES="release-notes/RELEASE_NOTES_${GITHUB_REF_NAME}.md"
+          else
+            NOTES="release-notes/RELEASE_NOTES_next.md"
+          fi
+          if [ ! -f "$NOTES" ]; then
+            echo "::error::Expected release notes at $NOTES - see release-notes/README.md."
+            exit 1
+          fi
+          echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
+
+      - name: Install vpk
+        shell: bash
+        run: dotnet tool install vpk --version "$VPK_VERSION" --tool-path "$RUNNER_TEMP/vpk"
+
+      # vpk builds a delta against the previous full package, which a fresh runner does not have.
+      # No previous release on the channel (the first one) is expected and fine; a delta is an
+      # optimisation, and an installed copy falls back to the full package without one.
+      - name: Download the previous release as a delta base
+        continue-on-error: true
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/vpk/vpk" download github \
+            --repoUrl "https://github.com/${{ github.repository }}" \
+            --token "${{ secrets.GITHUB_TOKEN }}" \
+            --channel "$CHANNEL" --outputDir releases \
+            || echo "No previous release on $CHANNEL; packing without a delta."
+
+      # UNSIGNED FOR NOW, by decision: Windows SmartScreen warns on first run ("More info > Run
+      # anyway"), and the README says so plainly. Signing later is a repository secret, not a
+      # workflow change: set SIGNING_CERT_BASE64 (a base64 .pfx) and SIGNING_CERT_PASSWORD and
+      # this step signs every file and the installer.
+      - name: Pack the installer
+        shell: pwsh
+        env:
+          SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          $sign = @()
+          if ($env:SIGNING_CERT_BASE64) {
+            [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:SIGNING_CERT_BASE64))
+            $sign = @('--signParams', "/f $env:RUNNER_TEMP\cert.pfx /p $env:SIGNING_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256")
+          } else {
+            Write-Warning "No signing certificate configured; this build is unsigned and will trigger SmartScreen."
+          }
+          # No --icon: the repository has no .ico, and one is not invented here. Velopack uses
+          # its default until one is added.
+          # --noPortable: the framework-dependent archives are the portable form (DST-2), and a
+          # Velopack portable copy would be a second, self-updating one (UPD-9 says portable
+          # copies never self-update).
+          & "$env:RUNNER_TEMP/vpk/vpk" pack `
+            --packId $env:PACK_ID `
+            --packVersion '${{ needs.version.outputs.version }}' `
+            --packDir dist/installer `
+            --mainExe einzel-shell.exe `
+            --packTitle 'Einzel' `
+            --packAuthors 'MacCoss Lab, University of Washington' `
+            --releaseNotes '${{ steps.notes.outputs.notes }}' `
+            --channel $env:CHANNEL `
+            --runtime win-x64 `
+            --noPortable `
+            --outputDir releases `
+            @sign
+          if ($LASTEXITCODE -ne 0) { throw "vpk pack failed" }
+
+      # Exactly what `vpk upload` would publish: the files assets.<channel>.json lists (the setup,
+      # this version's full package, its delta when there is one) plus the channel's feed files.
+      # The previous release's full package, downloaded above only as a delta base, is NOT
+      # republished.
+      - name: Select the installer's release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force installer-assets | Out-Null
+          $listed = (Get-Content "releases/assets.$env:CHANNEL.json" -Raw | ConvertFrom-Json).RelativeFileName
+          $files = @($listed) + @("releases.$env:CHANNEL.json", "RELEASES-$env:CHANNEL")
+          foreach ($f in $files) {
+            if (-not (Test-Path "releases/$f")) { throw "releases/$f missing" }
+            Copy-Item "releases/$f" installer-assets/
+          }
+          $version = '${{ needs.version.outputs.version }}'
+          if (-not (Test-Path "installer-assets/$env:PACK_ID-$env:CHANNEL-Setup.exe")) { throw "no Setup.exe" }
+          if (-not (Test-Path "installer-assets/$env:PACK_ID-$version-$env:CHANNEL-full.nupkg")) { throw "no full package for $version" }
+          Get-ChildItem installer-assets | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: einzel-installer
+          path: installer-assets/*
+          if-no-files-found: error
+
+  # Gather every artifact and publish the GitHub Release once. Skipped on a dispatch run.
+  release:
+    needs: [version, package, installer]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
+      # For the release notes below.
+      - uses: actions/checkout@v7
+
       - uses: actions/download-artifact@v8
         with:
-          path: downloaded
+          path: artifacts
 
-      - name: Collect and checksum
+      # DST-4: one SHA256SUMS.txt, computed here over the files exactly as they will be
+      # published; per-job sums concatenated would be sums of files nobody can prove are these.
+      - name: Checksum
         run: |
-          mkdir -p assets
-          find downloaded -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} assets/ \;
-          cd assets
-          sha256sum * > SHA256SUMS.txt
-          ls -lh
+          cd artifacts
+          archives=$(find . -type f \( -name '*.zip' -o -name '*.tar.gz' \) | wc -l)
+          [ "$archives" -eq 6 ] || { echo "::error::expected 6 archives, found $archives"; exit 1; }
+          # Setup.exe, the full package, releases.stable.json, RELEASES-stable; a delta from the
+          # second release on.
+          installer=$(find einzel-installer -type f | wc -l)
+          [ "$installer" -ge 4 ] || { echo "::error::expected at least 4 installer files, found $installer"; exit 1; }
+          { find . -type f \( -name '*.zip' -o -name '*.tar.gz' \) -print0
+            find einzel-installer -type f -print0
+          } | xargs -0 sha256sum | sed -E 's#^([0-9a-f]+ [ *])(\./[^/]+/|einzel-installer/)#\1#' > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-assets
-          path: assets/*
-          if-no-files-found: error
-
-      # Only a tag drafts a release. A dispatch run has produced and checksummed the
-      # same assets and stops here, so the path can be exercised without creating a
-      # tag or a release nobody asked for.
-      - name: Draft the release
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # The tag is v<version> and the notes are RELEASE_NOTES_v<version>.md, so the path follows
+      # from the tag. Fail here with a clear message rather than publishing an empty release.
+      - name: Locate the release notes
+        id: notes
         run: |
-          gh release create "v${{ needs.version.outputs.version }}" assets/* \
-            --repo "${{ github.repository }}" \
-            --draft \
-            --title "Einzel ${{ needs.version.outputs.version }}" \
-            --notes "Portable builds, self-contained: no .NET install needed, nothing installed, no updater.
+          NOTES="release-notes/RELEASE_NOTES_${GITHUB_REF_NAME}.md"
+          if [ ! -f "$NOTES" ]; then
+            echo "::error::Expected release notes at $NOTES. Rename the draft (release-notes/RELEASE_NOTES_next.md) to match the tag before tagging - see release-notes/README.md."
+            exit 1
+          fi
+          echo "Using release notes: $NOTES ($(wc -l < "$NOTES") lines)"
+          echo "notes=$NOTES" >> "$GITHUB_OUTPUT"
 
-          | asset | what it holds |
-          | --- | --- |
-          | \`einzel-cli-linux-x64.tar.gz\` | the command line and the MCP server |
-          | \`einzel-cli-win-x64.zip\` | the same, for Windows |
-          | \`einzel-shell-win-x64.zip\` | those plus the Windows shell |
-
-          Unpack anywhere and run \`einzel --help\`. Verify with \`sha256sum -c SHA256SUMS.txt\`, or \`Get-FileHash\` on Windows.
-
-          Release notes: \`release-notes/RELEASE_NOTES_v${{ needs.version.outputs.version }}.md\`. \`SPEC.md\` records every requirement's status and the measurement behind it."
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          # The installer's files beside the archives, in this one call, so there is one Release.
+          # releases.stable.json is the feed an installed copy reads; the Setup.exe is what a
+          # person downloads.
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.tar.gz
+            artifacts/einzel-installer/*
+            artifacts/SHA256SUMS.txt
+          body_path: ${{ steps.notes.outputs.notes }}
+          # Prerelease tags are not supported: the `version` job refuses any tag that is not
+          # digits and dots, so an alpha/beta/rc tag never reaches this job.
+          prerelease: false

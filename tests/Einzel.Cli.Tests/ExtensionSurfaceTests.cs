@@ -62,6 +62,8 @@ public sealed class ExtensionSurfaceTests : IDisposable
         Assert.Equal(0, exitCode);
         Assert.Contains("extension.json", stdout, StringComparison.Ordinal);
 
+        ExtensionRoom.Give(_root, "shortest");
+
         var payload = Path.Combine(_root, "payload.json");
 
         File.WriteAllText(payload, """
@@ -91,6 +93,7 @@ public sealed class ExtensionSurfaceTests : IDisposable
         // travels.
         Project();
         Assert.Equal(0, Run("ext", "register", "attributed", "--project", _root).ExitCode);
+        ExtensionRoom.Give(_root, "attributed");
 
         var payload = Path.Combine(_root, "payload.json");
         File.WriteAllText(payload, """{ "figures": { "resolvingPower": 1000.0 } }""");
@@ -199,6 +202,7 @@ public sealed class ExtensionSurfaceTests : IDisposable
         // ext:name, an optimiser that does not know the difference, and a result.
         Project();
         Assert.Equal(0, Run("ext", "register", "shortest", "--project", _root).ExitCode);
+        ExtensionRoom.Give(_root, "shortest");
 
         var model = Path.Combine(_root, "models", "quad.json");
         Assert.Equal(0, Run("new", model, "--from-template", "quadrupole").ExitCode);

@@ -124,12 +124,12 @@ public sealed class WaveformSurfaceTests : IDisposable
             ["sinusoid", "rectangular", "analytic", "tabulated", "harmonic"],
             properties["type"]!["enum"]!.AsArray().Select(v => (string)v!));
         Assert.Equal(["linear", "cubic"], properties["interpolation"]!["enum"]!.AsArray().Select(v => (string)v!));
-        Assert.Equal("0.16", (string)schema["x-schemaVersion"]!);
+        Assert.Equal("0.15-esibd.2", (string)schema["x-schemaVersion"]!);
     }
 
     /// <summary>
     /// Every shipped example and template validates to the same compiled drives when its
-    /// version is moved to 0.15 or 0.16 and each short-form waveform is rewritten as the
+    /// version is moved to 0.15, 0.16 or 0.15-esibd.2 and each short-form waveform is rewritten as the
     /// object form (a rectangular wave's duty cycle moved inside). What may differ is exactly
     /// that: the <c>schemaVersion</c> string and the spelling of the waveform; the validity,
     /// the error list, every compiled drive and the edge rule (<c>land</c>, the default, since
@@ -139,6 +139,7 @@ public sealed class WaveformSurfaceTests : IDisposable
     [Theory]
     [InlineData("0.15")]
     [InlineData("0.16")]
+    [InlineData("0.15-esibd.2")]
     public void EveryShippedDocumentMeansTheSameInEitherSpelling(string version)
     {
         var documents = ExampleModels.Names.Select(n => ("example " + n, ExampleModels.Read(n), (string?)n))

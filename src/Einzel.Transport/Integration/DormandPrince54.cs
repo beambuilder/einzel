@@ -124,21 +124,41 @@ internal static class DormandPrince54
         var h = stepSize;
         var landing = !double.IsNaN(endSampleSeconds);
 
-        var k2 = Derivative(Offset(state, h, (A21, k1)), field, chargeToMass, timeSeconds + (C2 * h));
-        var k3 = Derivative(Offset(state, h, (A31, k1), (A32, k2)), field, chargeToMass, timeSeconds + (C3 * h));
+        // Every stage takes B from the side of each magnet face the step STARTED on (see
+        // IMagneticField.MagneticFieldAt(position, side)), so a step straddling a hard edge
+        // integrates one smooth field and the integrator lands on the face as a declared
+        // discontinuity. Without a magnet the side is never read.
+        var side = SideOf(in state, field);
+
+        var k2 = Derivative(Offset(state, h, (A21, k1)), field, chargeToMass, timeSeconds + (C2 * h), in side);
+        var k3 = Derivative(
+            Offset(state, h, (A31, k1), (A32, k2)), field, chargeToMass, timeSeconds + (C3 * h), in side);
         var k4 = Derivative(
-            Offset(state, h, (A41, k1), (A42, k2), (A43, k3)), field, chargeToMass, timeSeconds + (C4 * h));
+            Offset(state, h, (A41, k1), (A42, k2), (A43, k3)), field, chargeToMass, timeSeconds + (C4 * h), in side);
         var k5 = Derivative(
             Offset(state, h, (A51, k1), (A52, k2), (A53, k3), (A54, k4)),
-            field, chargeToMass, timeSeconds + (C5 * h));
+            field, chargeToMass, timeSeconds + (C5 * h), in side);
         var k6 = Derivative(
             Offset(state, h, (A61, k1), (A62, k2), (A63, k3), (A64, k4), (A65, k5)),
-            field, chargeToMass, landing ? endSampleSeconds : timeSeconds + (C6 * h));
+            field, chargeToMass, landing ? endSampleSeconds : timeSeconds + (C6 * h), in side);
 
         result = Offset(state, h, (B1, k1), (B3, k3), (B4, k4), (B5, k5), (B6, k6));
 
-        var k7 = Derivative(result, field, chargeToMass, landing ? endSampleSeconds : timeSeconds + (C7 * h));
-        derivativeAtResult = k7;
+        // The two stages at c = 1 take their time from the landing rule (one ulp before the
+        // instant, the near side of the jump) and their B from the start's side: the two
+        // rules are independent, one about when the drive is read and one about which side
+        // of a magnet face B is read from.
+        var endSeconds = landing ? endSampleSeconds : timeSeconds + (C7 * h);
+        var k7 = Derivative(result, field, chargeToMass, endSeconds, in side);
+
+        // The error estimate uses the start's side, but the next step starts at the result
+        // and must see the field there: identical unless the step ended across a magnet face,
+        // which the integrator lands on and recomputes anyway - or unless two faces were
+        // crossed at once, which the sign product cannot see. On a landing it is still the
+        // near side of the jump in time; the integrator evaluates the far side itself.
+        derivativeAtResult = field is Einzel.Fields.Magnetic.IMagneticField
+            ? Derivative(in result, field, chargeToMass, endSeconds)
+            : k7;
 
         var fourth = Offset(state, h, (E1, k1), (E3, k3), (E4, k4), (E5, k5), (E6, k6), (E7, k7));
 
@@ -155,6 +175,58 @@ internal static class DormandPrince54
     public static PhaseDerivative Derivative(
         in PhaseState state, IElectrostaticField field, double chargeToMass, double timeSeconds = 0.0)
     {
+        var side = SideOf(in state, field);
+        return Derivative(in state, field, chargeToMass, timeSeconds, in side);
+    }
+
+    /// <summary>
+    /// The point whose side of each magnet face a step from <paramref name="state"/> takes its
+    /// B from: a hair ahead of the ion along its velocity.
+    /// </summary>
+    /// <remarks>
+    /// Ahead rather than at the ion because the ion is ON a face exactly when the integrator
+    /// has just landed there, and a point on a face belongs to the box (a box contains its
+    /// boundary) whichever way the ion is going: leaving a magnet, the next step would carry
+    /// the magnet's B out into the field-free space beyond - measured as a 2 mm magnet kicking
+    /// an ion 44 per cent too hard. A millionth of a millionth of the position's scale ahead
+    /// resolves which side the ion is moving into, and is far too small to put an ion that is
+    /// anywhere else on the wrong side of anything. Without a magnet nothing reads it.
+    /// </remarks>
+    private static Vec3 SideOf(in PhaseState state, IElectrostaticField field)
+    {
+        var position = state.Position;
+
+        if (field is not Einzel.Fields.Magnetic.IMagneticField)
+        {
+            return position;
+        }
+
+        var speed = state.Speed;
+
+        if (!(speed > 0.0))
+        {
+            return position;
+        }
+
+        var scale = Math.Max(
+            Math.Max(Math.Abs(position.X), Math.Abs(position.Y)), Math.Max(Math.Abs(position.Z), 1e-6));
+
+        return position + (state.Velocity * (1e-12 * scale / speed));
+    }
+
+    /// <summary>
+    /// The equation of motion, with B taken from the side of each magnet face that
+    /// <paramref name="magneticSide"/> is on.
+    /// </summary>
+    /// <param name="state">The state to evaluate at.</param>
+    /// <param name="field">The field.</param>
+    /// <param name="chargeToMass">Charge divided by mass, in coulombs per kilogram.</param>
+    /// <param name="timeSeconds">The instant to sample a driven field at.</param>
+    /// <param name="magneticSide">The point whose side of each magnetic jump applies.</param>
+    /// <returns>The derivative.</returns>
+    public static PhaseDerivative Derivative(
+        in PhaseState state, IElectrostaticField field, double chargeToMass, double timeSeconds, in Vec3 magneticSide)
+    {
         var position = state.Position;
 
         // One branch, predictable, and outside nothing: a static field is by far
@@ -162,6 +234,17 @@ internal static class DormandPrince54
         var acceleration = field is ITimeVaryingField driven
             ? driven.ElectricFieldAt(in position, timeSeconds)
             : field.ElectricFieldAt(in position);
+
+        // The velocity-dependent half of the Lorentz force, F = q (E + v x B). A second
+        // type test, failed the same way by every model without a magnet, and nothing else
+        // on that path: the arithmetic below is untouched for them, which is what keeps
+        // every validated number bit-identical. v x B has the dimension of an electric field
+        // (m/s times tesla is V/m), so it is added before the one multiplication by q/m.
+        // Non-relativistic, as the rest of transport is: no gamma, here or anywhere.
+        if (field is Einzel.Fields.Magnetic.IMagneticField magnetic)
+        {
+            acceleration += Vec3.Cross(state.Velocity, magnetic.MagneticFieldAt(in position, in magneticSide));
+        }
 
         return new PhaseDerivative(state.Velocity, acceleration * chargeToMass);
     }

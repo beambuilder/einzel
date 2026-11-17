@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Einzel.Core.Errors;
 using Einzel.Core.Model;
 using Einzel.Core.Results;
@@ -346,11 +348,17 @@ public static class ParameterScan
                 continue;
             }
 
+            // Invariant at the site: the CLI runs globalization-invariant and the shell does
+            // not, so the same warning would otherwise read differently in the window.
+            var low = parameter.Minimum?.SiValue.ToString("G6", CultureInfo.InvariantCulture) ?? "-inf";
+            var high = parameter.Maximum?.SiValue.ToString("G6", CultureInfo.InvariantCulture) ?? "+inf";
+
             warnings.Add(new ValidityWarning(
                 "scan.outside-declared-bounds",
-                $"the scan's '{name}' end puts {axis.Parameter} at {end.SiValue:G6} SI, outside the "
-                + $"[{parameter.Minimum?.SiValue.ToString("G6") ?? "-inf"}, "
-                + $"{parameter.Maximum?.SiValue.ToString("G6") ?? "+inf"}] the model declares. Points "
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"the scan's '{name}' end puts {axis.Parameter} at {end.SiValue:G6} SI, outside the ")
+                + $"[{low}, {high}] the model declares. Points "
                 + "beyond the bound are refused by validation and appear as rows with no figure, "
                 + "which is the model saying the geometry is not buildable rather than the solver "
                 + "failing to evaluate it",

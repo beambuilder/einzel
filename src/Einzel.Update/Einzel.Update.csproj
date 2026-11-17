@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Einzel.Update</RootNamespace>
+    <Description>
+      Release check, download, staging and the Windows installer's hooks (spec section 18).
+      Plain net10.0 with no UI type, so what decides whether to check, what to offer and how
+      the user PATH is edited is testable on Linux. Referenced by the shell and by nothing
+      else: UPD-1 makes the shell the only component that checks for updates, and UPD-2
+      says the CLI never contacts the network - so the CLI and the MCP server must not even
+      be able to reach this assembly, and ShellBoundaryTests asserts that they cannot.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Velopack's feed, download and hooks are reached through here. The shell references the
+      package too, for the single VelopackApp.Build().Run() that `vpk pack` insists the main
+      executable's own assembly makes; no other assembly may reference it (ShellBoundaryTests).
+    -->
+    <PackageReference Include="Velopack" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Einzel.Update.Tests" />
+  </ItemGroup>
+
+</Project>

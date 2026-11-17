@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "0.1",
+  "name": "wien-filter",
+  "description": "Closed form: the root of v_d t + ((v0 - v_d)/w) sin(w t) = L for an ion 20% faster than E/B in crossed 50 kV/m and 0.5 T (declared as 5000 G). B ignored gives L/v0 = 0.4166667 us, 0.11% early.",
+  "model": "../models/wien-filter.json",
+  "expect": [
+    {
+      "figureOfMerit": "flightTime",
+      "value": 0.41713495186764454,
+      "unit": "us",
+      "tolerance": 1e-06
+    }
+  ]
+}

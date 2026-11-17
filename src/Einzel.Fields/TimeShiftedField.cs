@@ -41,6 +41,12 @@ public sealed class TimeShiftedField : ITimeVaryingField, IConductorBounded
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentOutOfRangeException.ThrowIfNegative(offsetSeconds);
 
+        // Answers ITimeVaryingField only, so a magnetic field wrapped here would lose its B
+        // on the way to the integrator. A sequenced leg of a magnetic model never reaches
+        // here (the validator refuses the diffusive phase that makes legs), and if one did
+        // it must refuse rather than fly straight through the magnet.
+        Magnetic.MagneticRefusal.ThrowIfMagnetic(inner, "a time-shifted sequence leg");
+
         if (!double.IsFinite(offsetSeconds))
         {
             throw new ArgumentOutOfRangeException(
@@ -50,6 +56,29 @@ public sealed class TimeShiftedField : ITimeVaryingField, IConductorBounded
         _inner = inner;
         _offsetSeconds = offsetSeconds;
     }
+
+    /// <summary>
+    /// Shifts a field's clock and keeps its magnet: the electric part is shifted, and a
+    /// magnetic part is put back around it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Magnetic.IMagneticField"/> has no time argument, so B at a point is the same
+    /// at every instant and shifting the clock leaves it as it is. What the constructor
+    /// refuses is a different thing: a magnetic field wrapped whole, whose B this class
+    /// would not hand on. An ion born late in a driven field beside a magnet
+    /// (<c>einzel fly</c>, a row with a birth time) therefore flies the drive as it stands
+    /// at its birth and the magnet as it always is. A magnetic field that is not a
+    /// <see cref="Magnetic.DrivenMagnetizedField"/> has no electric part to take out and is
+    /// refused by the constructor.
+    /// </remarks>
+    /// <param name="field">The field as the instrument declares it.</param>
+    /// <param name="offsetSeconds">The instant on the instrument's timeline that becomes t = 0.</param>
+    /// <returns>The shifted field, magnetic when <paramref name="field"/> is.</returns>
+    public static ITimeVaryingField Shift(ITimeVaryingField field, double offsetSeconds) =>
+        field is Magnetic.DrivenMagnetizedField magnetized
+            ? (ITimeVaryingField)Magnetic.MagnetizedField.Around(
+                new TimeShiftedField(magnetized.Driven, offsetSeconds), magnetized.Magnetic)
+            : new TimeShiftedField(field, offsetSeconds);
 
     /// <summary>Where this leg starts on the instrument's timeline, in seconds.</summary>
     public double OffsetSeconds => _offsetSeconds;

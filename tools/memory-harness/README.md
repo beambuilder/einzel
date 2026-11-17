@@ -39,34 +39,46 @@ few percent is what a run needs, and the working set is what it will take if not
 
 ## Measured
 
-Release, commit `de73ec8` (main after #55 and #57), an Intel Core i9-9900K (8 cores, 16 threads)
-with 63.8 GB, idle; bytes a node; `est` is what `einzel estimate` states. The rows are what
-`sweep.py plane`, `volume` and `diffuse` run - the volumes at their 1 and 0.5 mm cells and the
-drift tube at 512 and 1024 intervals - once without `--live` and once with it.
+Release, branch `fix/vcycle-residual-frame` at `cfcc49a` (the V-cycle's fine residual in a frame of
+its own, the rediscretized statement worked out instant by instant), an Intel Core i9-9900K
+(8 cores, 16 threads) with 63.8 GB; bytes a node; `est` is what `einzel estimate` states. The rows
+are what `sweep.py plane`, `volume` and `diffuse` run - the volumes at their 1 and 0.5 mm cells
+and the drift tube at 512 and 1024 intervals - once without `--live` and once with it. The linear
+ion trap with its excitation on is three channels now, where it was two when these rows were
+first taken; the rest are the same models.
 
 | case | nodes | live | working set | working set / live | est | kept |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| plane, quadrupole | 1,050,625 | 143.3 | 295.9 | 2.06 | 143.2 | 8.0 |
-| plane, quadrupole | 4,198,401 | 143.3 | 320.1 | 2.23 | 143.2 | 8.0 |
-| plane, quadrupole | 16,785,409 | 143.3 | 304.6 | 2.13 | 143.2 | 8.0 |
-| volume, segmented quadrupole | 140,481 | 49.7 | 116.2 | 2.34 | 51.5 | 8.0 |
-| volume, segmented quadrupole | 1,085,825 | 48.6 | 204.9 | 4.22 | 51.4 | 8.0 |
-| volume, c-trap | 139,425 | 47.8 | 132.9 | 2.78 | 50.9 | 8.0 |
-| volume, c-trap | 1,081,665 | 47.8 | 215.0 | 4.50 | 51.3 | 8.0 |
-| volume, linear ion trap, two channels | 140,481 | 158.6 | 528.9 | 3.33 | 159.4 | 16.1 |
-| volume, linear ion trap, two channels | 1,085,825 | 156.1 | 492.5 | 3.15 | 158.4 | 16.0 |
-| diffusive step, drift tube | 263,169 | 248.1 | 278.9 | 1.12 | 263.0 | 8.1 |
-| diffusive step, drift tube | 1,050,625 | 248.0 | 255.8 | 1.03 | 263.0 | 8.0 |
+| plane, quadrupole | 1,050,625 | 135.3 | 298.1 | 2.20 | 135.2 | 8.0 |
+| plane, quadrupole | 4,198,401 | 135.3 | 309.4 | 2.29 | 135.2 | 8.0 |
+| plane, quadrupole | 16,785,409 | 135.3 | 295.0 | 2.18 | 135.2 | 8.0 |
+| volume, segmented quadrupole | 140,481 | 47.1 | 110.7 | 2.35 | 48.9 | 8.0 |
+| volume, segmented quadrupole | 1,085,825 | 46.0 | 206.7 | 4.49 | 48.9 | 8.0 |
+| volume, c-trap | 139,425 | 45.7 | 116.1 | 2.54 | 48.8 | 8.0 |
+| volume, c-trap | 1,081,665 | 45.3 | 181.5 | 4.01 | 48.8 | 8.0 |
+| volume, linear ion trap, three channels | 140,481 | 166.6 | 671.4 | 4.03 | 167.4 | 24.1 |
+| volume, linear ion trap, three channels | 1,085,825 | 164.1 | 501.2 | 3.05 | 166.4 | 24.0 |
+| diffusive step, drift tube | 263,169 | 248.1 | 280.1 | 1.13 | 263.0 | 8.2 |
+| diffusive step, drift tube | 1,050,625 | 248.0 | 256.2 | 1.03 | 263.0 | 8.0 |
 
+The plane read 143.3 live against an estimate of 143.2, and the two rediscretized volumes 47.8 to
+49.7 against 50.9 to 51.5, at `de73ec8`: one array of the fine grid more, which the V-cycle held in
+a local of the frame that recursed while the solver ran as first-tier code, and which the
+statements then charged (`docs/lessons.md`, "A reading that falls as a process warms up").
 Mean-field space charge, live, over a 5 us flight so the self-field refreshes inside the stepping
 loop (`sweep.py meanfield --live`), same machine and commit:
 
 | case | 66,049 | 263,169 | 1,050,625 |
 | --- | ---: | ---: | ---: |
-| drift tube | 248.4 | 248.1 | 248.0 |
-| drift tube, mean field | 309.8 | 309.4 | 309.3 |
-| two species | 496.5 | 496.1 | - |
-| two species, mean field | 565.8 | 565.5 | - |
+| drift tube | 248.5 | 248.1 | 248.0 |
+| drift tube, mean field | 309.9 | 309.4 | 309.3 |
+| two species | 496.6 | 496.2 | - |
+| two species, mean field | 565.9 | 565.4 | - |
+
+Within a tenth of a byte of what they read at `de73ec8`, before the V-cycle's fix: these runs did
+not show the residual it held while first-tier, which reached `SelfFieldMemoryTests` on a slow
+runner. A measurement that happened not to see a hold is not evidence there was none, which is
+why `FirstTierMemoryTests` pins the tier.
 
 ## What the tables say
 

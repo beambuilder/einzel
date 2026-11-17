@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "0.1",
+  "name": "cyclotron",
+  "description": "Closed form: t = (7/6) pi m / (|q| B) = 7.597406 us for m/z 100 in 0.5 T, independent of the 1 kV the ion was accelerated through. The detector at x = -r/2 is placed from r = m v / (|q| B) = 91.0572 mm.",
+  "model": "../models/cyclotron.json",
+  "expect": [
+    {
+      "figureOfMerit": "flightTime",
+      "value": 7.59740647077438,
+      "unit": "us",
+      "tolerance": 1e-06
+    }
+  ]
+}

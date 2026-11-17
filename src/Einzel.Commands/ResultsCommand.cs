@@ -103,6 +103,10 @@ public static class ResultsCommand
     /// permanently marked (GRD-5).
     /// </param>
     /// <param name="timestampUtc">When the run happened, for its manifest.</param>
+    /// <param name="progress">
+    /// Told what a full run is doing as it does it - that it is solving, then stepping - or
+    /// null. Not used by a preview, which is quick by definition.
+    /// </param>
     /// <returns>The figures, grouped.</returns>
     /// <exception cref="ArgumentException"><paramref name="modelPath"/> is blank.</exception>
     /// <exception cref="EinzelException">The model does not validate, or cannot run.</exception>
@@ -114,18 +118,27 @@ public static class ResultsCommand
     /// record behind would be a capability the command line does not have.
     /// </remarks>
     public static ResultsOutcome Execute(
-        string modelPath, bool preview = false, DateTimeOffset? timestampUtc = null)
+        string modelPath,
+        bool preview = false,
+        DateTimeOffset? timestampUtc = null,
+        RunProgress? progress = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
 
         var absolute = Path.GetFullPath(modelPath);
 
+        // Read once, and everything below is of this text. The file was read three times -
+        // by the run, then again for the figures, then again here - so an edit landing
+        // while a run solved gave a flight time of one document beside figures of another,
+        // and an edit that left the model invalid failed after the run had finished.
+        var text = File.ReadAllText(absolute);
+
         var (figures, warnings) = preview
             ? FromPreview(absolute)
-            : FromRun(absolute, timestampUtc ?? DateTimeOffset.UtcNow);
+            : FromRun(absolute, text, timestampUtc ?? DateTimeOffset.UtcNow, progress);
 
         var cloud = ModelValidator.Validate(
-            Io.ModelJson.Parse(File.ReadAllText(absolute)),
+            Io.ModelJson.Parse(text),
             null,
             Path.GetDirectoryName(absolute)).Model?.Cloud.IsCloud ?? false;
 
@@ -246,7 +259,7 @@ public static class ResultsCommand
 
     /// <summary>What a full run produced, by figure name.</summary>
     private static (IReadOnlyDictionary<string, MeasuredJson>, IReadOnlyList<ValidityWarning>)
-        FromRun(string modelPath, DateTimeOffset timestampUtc)
+        FromRun(string modelPath, string text, DateTimeOffset timestampUtc, RunProgress? progress)
     {
         // The project the model sits in, or the directory it sits in. Never the working
         // directory: a study kept outside any project once wrote its results into
@@ -259,11 +272,28 @@ public static class ResultsCommand
         var cache = new FieldCache(project);
 
         var (run, validation) = RunCommand.Execute(
-            modelPath, project, exportVtu: false, timestampUtc, fieldCache: cache);
+            modelPath, project, exportVtu: false, timestampUtc, progress, fieldCache: cache);
 
         if (run is null)
         {
             throw new EinzelException(validation.Errors);
+        }
+
+        // The run reads the file for itself, so it is asked which text it ran: its manifest
+        // carries that text's hash (PRJ-3). A different hash means the document changed
+        // between this read and the run's, and the flight time below would be of one
+        // revision and every other figure of another - refused rather than reported as one
+        // model's results.
+        if (!string.Equals(run.Manifest.ModelHash, ContentHash.OfText(text), StringComparison.Ordinal))
+        {
+            throw new EinzelException(new EinzelError
+            {
+                Code = ErrorCodes.SchemaInvalid,
+                Path = modelPath,
+                Constraint = "the model changed while it was being run, so its flight time and its "
+                    + "other figures would be of two different documents",
+                Suggestion = "run it again once nothing is editing it",
+            });
         }
 
         var figures = new Dictionary<string, MeasuredJson>(StringComparer.Ordinal);
@@ -273,7 +303,7 @@ public static class ResultsCommand
         // envelope for comes back null and is named below rather than printed bare, which
         // is the failure GRD-1 exists to prevent.
         var model = ModelValidator.Validate(
-            Io.ModelJson.Parse(File.ReadAllText(modelPath)),
+            Io.ModelJson.Parse(text),
             null,
             Path.GetDirectoryName(modelPath)).Model!;
 
